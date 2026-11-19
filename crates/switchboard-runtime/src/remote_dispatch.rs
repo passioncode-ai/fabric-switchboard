@@ -6,6 +6,7 @@
 //! running them with `sh` against a temporary home.
 
 use crate::account_send::{data, quoted, remote, Program, Run};
+use crate::launch::Permissions;
 use serde_json::{json, Value};
 use switchboard_core::Provider;
 
@@ -123,12 +124,30 @@ the session."
 pub const LAUNCH_PROMPT: &str = "Read the file named by the environment variable \
 FABRIC_DISPATCH_PROMPT_FILE first and do what it says: it holds this session's instructions.";
 
+/// SB-515: the agent's arguments before its prompt in a run there, in each agent's own
+/// non-interactive form (as a dispatch here, `launch::headless_args`): `claude -p` and `codex
+/// exec` (Codex reads `-p` as `--profile`). The run's `--permissions` travels as the agent's own
+/// mode, which the target's `launch` keeps instead of adding its own: `all` skips every prompt,
+/// `ask` names the agent's asking mode (Claude Code `--permission-mode manual`, Codex
+/// `approval_policy="on-request"`), so the target's person's choice cannot widen it.
+pub fn agent_args(provider: Provider, permissions: Permissions) -> &'static [&'static str] {
+    match (provider, permissions) {
+        (Provider::Claude, Permissions::All) => &["--dangerously-skip-permissions", "-p"],
+        (Provider::Claude, Permissions::Ask) => &["--permission-mode", "manual", "-p"],
+        (Provider::Codex, Permissions::All) => {
+            &["exec", "--dangerously-bypass-approvals-and-sandbox"]
+        }
+        (Provider::Codex, Permissions::Ask) => &["exec", "-c", "approval_policy=\"on-request\""],
+    }
+}
+
 /// The session's script there: the Fabric values in its environment, then the target's
 /// Switchboard runs it headless in the worktree; its exit status is written when it ends.
 #[allow(clippy::too_many_arguments)]
 pub fn run_script(
     program: &Program<'_>,
     provider: Provider,
+    permissions: Permissions,
     workflow: &str,
     handoff: &str,
     request: &str,
@@ -154,12 +173,18 @@ pub fn run_script(
 cd \"$1\" || {{ echo 97 >\"$2/exit.tmp\"; mv \"$2/exit.tmp\" \"$2/exit\"; exit 97; }}\n\
 ( sleep {timeout_seconds}; [ -f \"$2/exit\" ] || {{ touch \"$2/timed_out\"; kill -TERM -- \"-$$\" 2>/dev/null; sleep 5; kill -KILL -- \"-$$\" 2>/dev/null; }} ) &\n\
 timer=$!\n\
-{launch} --provider {provider} --working-directory \"$1\" --headless --by fabric-dispatch -- -p {prompt} >\"$2/log\" 2>&1\n\
+{launch} --provider {provider} --working-directory \"$1\" --headless --by fabric-dispatch -- {agent} {prompt} >\"$2/log\" 2>&1\n\
 echo $? >\"$2/exit.tmp\"\n\
 mv \"$2/exit.tmp\" \"$2/exit\"\n\
 kill \"$timer\" 2>/dev/null\n",
         launch = remote(program, &["launch"]),
         provider = provider.as_str(),
+        agent = agent_args(provider, permissions)
+            .iter()
+            .copied()
+            .map(quoted)
+            .collect::<Vec<_>>()
+            .join(" "),
         prompt = quoted(LAUNCH_PROMPT),
     )
 }
@@ -168,6 +193,8 @@ kill \"$timer\" 2>/dev/null\n",
 pub struct Start<'a> {
     pub launch_id: &'a str,
     pub provider: Provider,
+    /// SB-515: the run's `--permissions`, sent with it.
+    pub permissions: Permissions,
     /// The repository's identity here (`roots::Checkout::remote`).
     pub identity: &'a str,
     /// The hand-over's checkpoint body: the request.
@@ -256,6 +283,7 @@ git -C \"$repo\" worktree add -q --detach {wt} \"$base\"; echo made",
             run_script(
                 program,
                 s.provider,
+                s.permissions,
                 s.workflow,
                 s.handoff,
                 s.request,
@@ -513,6 +541,7 @@ exit 3\n",
                 data_dir: None,
             },
             Provider::Claude,
+            Permissions::All,
             WF,
             H,
             REQ,
@@ -532,6 +561,65 @@ exit 3\n",
             "never written in place: {script}"
         );
     }
+    /// SB-515: a run there carries its `--permissions` as the agent's own mode, which the target's
+    /// `launch` keeps (it adds no bypass of its own over a mode the caller named), and Codex runs
+    /// as `codex exec`, never with `-p` (its `--profile`).
+    #[test]
+    fn a_run_there_sends_its_permissions_and_codex_runs_as_exec() {
+        let program = Program {
+            path: "/x/switchboard",
+            data_dir: None,
+        };
+        let agent = |provider, permissions| {
+            let script = run_script(&program, provider, permissions, WF, H, REQ, "L-1", None, 60);
+            let line = script
+                .lines()
+                .find(|l| l.contains("--headless"))
+                .unwrap()
+                .to_owned();
+            let after = line.split(" -- ").nth(1).unwrap().to_owned();
+            after
+                .split(&format!(" {}", quoted(LAUNCH_PROMPT)))
+                .next()
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(
+            agent(Provider::Claude, Permissions::All),
+            "'--dangerously-skip-permissions' '-p'"
+        );
+        assert_eq!(
+            agent(Provider::Claude, Permissions::Ask),
+            "'--permission-mode' 'manual' '-p'"
+        );
+        assert_eq!(
+            agent(Provider::Codex, Permissions::All),
+            "'exec' '--dangerously-bypass-approvals-and-sandbox'"
+        );
+        assert_eq!(
+            agent(Provider::Codex, Permissions::Ask),
+            "'exec' '-c' 'approval_policy=\"on-request\"'"
+        );
+        // The target's own launch adds nothing over the mode the run names.
+        let root = tempfile::tempdir().unwrap();
+        for (provider, agent) in [
+            (Provider::Claude, "claude-code"),
+            (Provider::Codex, "codex"),
+        ] {
+            for permissions in [Permissions::All, Permissions::Ask] {
+                let sent: Vec<String> = agent_args(provider, permissions)
+                    .iter()
+                    .map(|a| a.to_string())
+                    .collect();
+                assert!(
+                    crate::launch::full_access(root.path(), agent, &sent).is_none(),
+                    "{agent} {permissions:?}"
+                );
+                assert!(!sent.contains(&"-p".to_string()) || provider == Provider::Claude);
+            }
+        }
+    }
+
     #[test]
     fn a_run_there_starts_in_a_fresh_worktree_and_its_result_comes_back() {
         let (home, path) = fixture();
@@ -545,6 +633,7 @@ exit 3\n",
         let s = Start {
             launch_id: &launch,
             provider: Provider::Claude,
+            permissions: Permissions::All,
             identity: "github.com/acme/app",
             request_body: &body,
             workflow: WF,
@@ -588,6 +677,13 @@ exit 3\n",
         // It was started with the short pointer (`launch` refuses an argument over 1024
         // characters), and the instructions it points to were there for it.
         assert!(args.contains(&format!("-p\n{LAUNCH_PROMPT}\n")), "{args}");
+        // SB-515: with its permissions, which the run sent.
+        assert!(
+            args.contains(&format!(
+                "--dangerously-skip-permissions\n-p\n{LAUNCH_PROMPT}\n"
+            )),
+            "{args}"
+        );
         assert!(args.contains(&result_header(WF, H, REQ, &launch)), "{args}");
         // It ran in the checkout from origin: the seed's README was there.
         assert!(args.contains("\napp\n"), "{args}");
@@ -622,6 +718,7 @@ exit 3\n",
         let s = Start {
             launch_id: &launch,
             provider: Provider::Codex,
+            permissions: Permissions::All,
             identity: "github.com/acme/app",
             request_body: &body,
             workflow: WF,
@@ -670,6 +767,7 @@ exit 3\n",
         let mut s = Start {
             launch_id: &launch,
             provider: Provider::Claude,
+            permissions: Permissions::All,
             identity: "github.com/acme/other",
             request_body: &body,
             workflow: WF,

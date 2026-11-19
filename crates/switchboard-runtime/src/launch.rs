@@ -2147,6 +2147,8 @@ fn launch_agent_with(
         }
         args.extend(["--model".into(), model.to_owned()]);
     }
+    // SB-515: the agent runs with its own full access unless the person chose `ask`.
+    with_full_access(root, &profile.id, &mut args, &mut env);
     // SB-212: the session's own launch id, for the record and for what it launches.
     let launch_id = crate::launches::new_id();
     env.insert(crate::launches::ENV.into(), launch_id.clone());
@@ -2272,14 +2274,19 @@ pub fn launch_agent_anthropic(
     let own = home.join("agent-home");
     private_dir(&own)?;
     let launch_id = crate::launches::new_id();
-    let env = BTreeMap::from([
+    let mut env = BTreeMap::from([
         (
             "HERMES_HOME".to_string(),
             own.to_string_lossy().into_owned(),
         ),
         (crate::launches::ENV.to_string(), launch_id.clone()),
     ]);
-    let args = ["--provider", "anthropic", "-m", model.as_str()];
+    let mut args: Vec<String> = ["--provider", "anthropic", "-m", model.as_str()]
+        .map(str::to_owned)
+        .to_vec();
+    // SB-515: Hermes runs with its own full access unless the person chose `ask`.
+    with_full_access(root, id, &mut args, &mut env);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let key_command = vec![
         "--data-dir".to_string(),
         root.to_string_lossy().into_owned(),
@@ -2455,6 +2462,8 @@ fn hermes_continuation_session(
                 .iter()
                 .map(|a| a.replace("{model}", &model)),
         );
+        // SB-515: nobody may be there to answer Hermes's approval prompts.
+        with_full_access(root, "hermes", &mut args, &mut env);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let content = script_with(
             &session,
@@ -2599,7 +2608,12 @@ pub(crate) fn opencode_continuation_session(
         let launch_id = crate::launches::new_id();
         env.insert(crate::launches::ENV.into(), launch_id.clone());
         let model_arg = format!("openrouter/{model}");
-        let args = ["--prompt", first.as_str(), "-m", model_arg.as_str()];
+        let mut args: Vec<String> = ["--prompt", first.as_str(), "-m", model_arg.as_str()]
+            .map(str::to_owned)
+            .to_vec();
+        // SB-515: nobody may be there to answer OpenCode's permission prompts.
+        with_full_access(root, "opencode", &mut args, &mut env);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let content = script_with(
             &session,
             program,
@@ -2820,6 +2834,8 @@ fn openrouter_session(
                 .map(|a| a.replace("{model}", model)),
         );
     }
+    // SB-515: the agent runs with its own full access unless the person chose `ask`.
+    with_full_access(root, &recipe.id, &mut args, &mut env);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     // SB-144, SB-213: the key of the project the agent starts in, by the slot its spend gate read,
     // never by its folder when the script runs.
@@ -3453,48 +3469,53 @@ pub const DISPATCH_HANDOFF_ENV: &str = "FABRIC_DISPATCH_HANDOFF";
 pub const DISPATCH_REQUEST_ENV: &str = "FABRIC_DISPATCH_REQUEST";
 /// SB-247: Fabric's id for the dispatch (`--dispatch-id`), absent without the flag.
 pub const DISPATCH_ID_ENV: &str = "FABRIC_DISPATCH_ID";
-/// SB-298: the arguments that bypass an interactive session's permission prompts, unless the
-/// person chose `ask` or the caller's own arguments already name a permission mode. Codex takes
-/// them as `-c` overrides, which hold before a subcommand such as `resume` (a caller's console
-/// passes one); Claude Code takes its flag.
-pub(crate) fn bypass_args(root: &Path, provider: Provider, extra: &[String]) -> Vec<&'static str> {
-    let (args, own): (&[&'static str], &[&str]) = match provider {
-        Provider::Claude => (
-            &["--dangerously-skip-permissions"],
-            &[
-                "--dangerously-skip-permissions",
-                "--permission-mode",
-                "--allow-dangerously-skip-permissions",
-            ],
-        ),
-        Provider::Codex => (
-            &[
-                "-c",
-                "approval_policy=\"never\"",
-                "-c",
-                "sandbox_mode=\"danger-full-access\"",
-            ],
-            &[
-                "--dangerously-bypass-approvals-and-sandbox",
-                "--yolo",
-                "--full-auto",
-                "-a",
-                "--ask-for-approval",
-                "-s",
-                "--sandbox",
-                "approval_policy",
-                "sandbox_mode",
-            ],
-        ),
-    };
+/// SB-515: an agent's own full-access arguments and environment (its catalog entry's
+/// `full_access`), unless the person chose `ask` (`agents permissions ask`) or the caller's own
+/// arguments already name a mode, which then wins. The one rule for every agent Switchboard
+/// starts: Claude Code and Codex sessions (SB-298), Kimi Code, Hermes, OpenCode and the catalog
+/// agents on a key.
+pub(crate) fn full_access(
+    root: &Path,
+    agent: &str,
+    extra: &[String],
+) -> Option<&'static crate::agent_catalog::FullAccess> {
+    let access = crate::agent_catalog::full_access(agent)?;
     let named = extra.iter().any(|a| {
-        own.iter()
+        access
+            .named
+            .iter()
             .any(|o| a == o || a.starts_with(&format!("{o}=")))
     });
     if named || !crate::agent_settings::bypass(root) {
-        return Vec::new();
+        return None;
     }
-    args.to_vec()
+    Some(access)
+}
+/// SB-515: `args` and `env` of a launch of `agent` with its full-access arguments after the
+/// launch's own and its full-access environment, unless `full_access` gives none.
+pub(crate) fn with_full_access(
+    root: &Path,
+    agent: &str,
+    args: &mut Vec<String>,
+    env: &mut BTreeMap<String, String>,
+) {
+    if let Some(access) = full_access(root, agent, &[]) {
+        args.extend(access.args.iter().cloned());
+        env.extend(access.env.clone());
+    }
+}
+/// SB-298: the arguments that bypass an interactive session's permission prompts, unless the
+/// person chose `ask` or the caller's own arguments already name a permission mode. Codex takes
+/// them as `-c` overrides, which hold before a subcommand such as `resume` (a caller's console
+/// passes one); Claude Code takes its flag. SB-515: read from the catalog's `full_access`.
+pub(crate) fn bypass_args(root: &Path, provider: Provider, extra: &[String]) -> Vec<&'static str> {
+    let agent = match provider {
+        Provider::Claude => "claude-code",
+        Provider::Codex => "codex",
+    };
+    full_access(root, agent, extra)
+        .map(|a| a.args.iter().map(String::as_str).collect())
+        .unwrap_or_default()
 }
 /// SB-405: a hand-over taken with `--ask` continues only on Claude Code or Codex.
 pub const ASK_AGENT: &str = "Only a Claude Code or Codex hand-over can start with permission prompts on, and this one continues on another agent. It is still waiting: take it without --ask, or leave it for Terminal.";
@@ -7000,6 +7021,126 @@ mod tests {
             crate::agent_settings::set_permissions(root.path(), "never").unwrap_err(),
             crate::agent_settings::PERMISSIONS_INVALID
         );
+    }
+    /// SB-515: whether a launch script gives `agent` its full access (its catalog arguments and
+    /// environment), or none of it.
+    #[cfg(not(windows))]
+    fn carries_full_access(text: &str, agent: &str) -> bool {
+        let access = crate::agent_catalog::full_access(agent).unwrap();
+        let exec = text.lines().find(|l| l.starts_with("exec ")).unwrap_or("");
+        let args = access
+            .args
+            .iter()
+            .all(|a| exec.contains(&format!(" {}", quote(a))));
+        let env = access
+            .env
+            .iter()
+            .all(|(k, v)| text.contains(&format!("export {k}={}\n", quote(v))));
+        let none = access.args.iter().all(|a| !text.contains(&quote(a)))
+            && access
+                .env
+                .keys()
+                .all(|k| !text.contains(&format!("export {k}=")));
+        assert!(args && env || none, "{agent}: partly given\n{text}");
+        args && env
+    }
+    /// SB-515: every agent Switchboard starts on a key runs with its own full access (Kimi Code's
+    /// `--auto`, Hermes's `--yolo`, OpenCode's `--auto`, Goose's `GOOSE_MODE=auto`, Pi's
+    /// `--approve`, Aider's `--yes-always`), Hermes's and OpenCode's hand-overs included, unless
+    /// the person chose `ask`.
+    #[cfg(not(windows))]
+    #[test]
+    fn every_agent_on_a_key_runs_with_full_access_unless_the_person_chose_ask() {
+        let continuation = crate::continuation::Continuation {
+            workflow_id: "wf_00112233445566bb".into(),
+            handoff_id: "ho_synthetic".into(),
+            observatory: crate::continuation::McpServer {
+                command: "/opt/engine/python".into(),
+                args: vec!["/opt/engine/mcp/server.py".into()],
+            },
+            previous_provider: Some("claude".into()),
+        };
+        for ask in [false, true] {
+            let f = fixture();
+            if ask {
+                crate::agent_settings::set_permissions(&f.root, crate::agent_settings::ASK)
+                    .unwrap();
+            }
+            openrouter_key(&f, Some("moonshotai/kimi-k2"));
+            for agent in ["kimi-code", "hermes", "opencode", "goose", "pi", "aider"] {
+                let (path, _) = openrouter_launch(&f, agent, Some("moonshotai/kimi-k2"))
+                    .unwrap_or_else(|e| panic!("{agent}: {e}"));
+                let text = fs::read_to_string(&path).unwrap();
+                assert_eq!(carries_full_access(&text, agent), !ask, "{agent}: {text}");
+            }
+            let (path, _) = hermes_continuation_session(
+                &f.root,
+                &f.store,
+                Path::new("/opt/Agent Tools/hermes"),
+                Path::new("/opt/Switchboard Tools/switchboard"),
+                &f.project,
+                &continuation,
+                None,
+            )
+            .unwrap();
+            let text = fs::read_to_string(&path).unwrap();
+            assert_eq!(carries_full_access(&text, "hermes"), !ask, "{text}");
+            assert!(text.contains("'chat' '--query-file' "), "{text}");
+            let (path, _) = opencode_continuation_session(
+                &f.root,
+                &f.store,
+                Path::new("/opt/Agent Tools/opencode"),
+                Path::new("/opt/Switchboard Tools/switchboard"),
+                &f.project,
+                &continuation,
+            )
+            .unwrap();
+            let text = fs::read_to_string(&path).unwrap();
+            assert_eq!(carries_full_access(&text, "opencode"), !ask, "{text}");
+        }
+    }
+    /// SB-515: a catalog agent on a group's API key, through the proxy, runs with its own full
+    /// access too (Claude Code's `--dangerously-skip-permissions`, OpenCode's `--auto`, Goose's
+    /// `GOOSE_MODE=auto`), unless the person chose `ask`.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_catalog_agent_through_the_proxy_runs_with_full_access_unless_asked() {
+        for ask in [false, true] {
+            let f = fixture();
+            if ask {
+                crate::agent_settings::set_permissions(&f.root, crate::agent_settings::ASK)
+                    .unwrap();
+            }
+            let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+            let api = f.add(
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default",
+                "synthetic-api-key",
+            );
+            f.store.select(Provider::Claude, "default", &api).unwrap();
+            for agent in ["claude-code", "opencode", "goose"] {
+                launch_agent_with(
+                    &f.root,
+                    &f.store,
+                    &proxy,
+                    agent,
+                    "default",
+                    &f.project,
+                    None,
+                    goose_installed,
+                    terminal_opens,
+                )
+                .unwrap_or_else(|e| panic!("{agent}: {e}"));
+                let text = fs::read_to_string(
+                    f.root
+                        .join(format!("runtimes/agent-{agent}-default"))
+                        .join("launch.command"),
+                )
+                .unwrap();
+                assert_eq!(carries_full_access(&text, agent), !ask, "{agent}: {text}");
+            }
+        }
     }
     #[cfg(not(windows))]
     #[tokio::test]

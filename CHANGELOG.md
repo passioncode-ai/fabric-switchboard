@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Every agent Switchboard starts now runs without permission prompts unless you chose `switchboard agents permissions ask` (SB-515): Kimi Code, Hermes, OpenCode, Goose, Pi and Aider get their own full-access switches, as Claude Code and Codex already did, so a hand-over nobody watches no longer stops on a question. A board request run on another machine now takes its permission mode there, and Codex runs it as `codex exec` instead of reading the prompt flag as a profile.
+
 ## 0.7.120
 
 - A session Switchboard launched in a Git worktree is now served by its own group (SB-452). Before this fix, Claude Code read the worktree's local settings from its main checkout, so a launch in a worktree of another group than its main checkout's ran on the main checkout's group: on 2026-11-18 a launch for the pay-per-token group ran on another group's subscriptions, its key was never used and its ceiling never counted anything. Every managed Claude launch now passes its home's own route file (`switchboard-route.json`) as `--settings`, last on its command line, which Claude Code ranks above a folder's local settings; a session the duty officer, a restart wave or *Continue* resumes keeps it. The proxy refuses a request whose launch named another group than its route when one of the two is the pay-per-token group, and counts every request served by another group than its own (`mismatched` in `switchboard statistics`, `proxy_group_mismatch` in the log). A `claude` you start yourself in such a worktree still takes its main checkout's group and is counted the same way: launch it with Switchboard.
