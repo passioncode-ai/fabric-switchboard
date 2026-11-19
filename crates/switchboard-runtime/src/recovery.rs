@@ -756,8 +756,9 @@ mod tests {
     fn a_recovery_claim_never_takes_an_account_turned_off() {
         let root = tempfile::tempdir().unwrap();
         let mut s = snapshot();
+        // `off` alone (a store never holds it with `enabled`, but the test does): the rule must
+        // ask `usable()`, not `enabled`.
         let new = s.accounts.iter_mut().find(|a| a.id == "new").unwrap();
-        new.enabled = false;
         new.off = Some(switchboard_core::TurnedOff::by_person(50));
         s.accounts.push(account("spare"));
         let none = HashSet::new();

@@ -18,6 +18,21 @@ struct Disk {
     snapshot: Snapshot,
 }
 
+/// 2026-11-19 audit M5-03: a file of a later version is refused by its version before the typed
+/// parse, whose unknown fields (`deny_unknown_fields`) would otherwise read it as corrupt: the
+/// person reads that a newer Switchboard wrote it. Readers of 0.7.123 and older lack this and
+/// report such a file as corrupt.
+#[derive(Deserialize)]
+struct VersionOnly {
+    schema_version: u32,
+}
+fn refuse_later_version(bytes: &[u8]) -> Result<(), String> {
+    match serde_json::from_slice::<VersionOnly>(bytes) {
+        Ok(v) if v.schema_version > 17 => Err("Unsupported account metadata version".into()),
+        _ => Ok(()),
+    }
+}
+
 /// Version 3 only while project rules exist, so 0.3 builds keep opening rule-free files;
 /// version 4 only while projects exist, so 0.5 builds refuse a file whose reservations they
 /// would ignore rather than silently hand a project's accounts to every folder.
@@ -51,7 +66,9 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // Version 17 only while the person turned an account or a Kimi Code account off, a
     // delegated seat records its call back, or the journal holds such a turn (W1.2, DEC-0027): a
     // 0.7.123 or older reader refuses the unknown field and action rather than read an account
-    // the person turned off as one it may turn on. The way back to such a version is restoring a
+    // the person turned off as one it may turn on; it parses the whole file before the version,
+    // so it reports the file as corrupt (from this version on, `refuse_later_version` names a
+    // later version instead, 2026-11-19 audit M5-03). The way back to such a version is restoring a
     // backup there (its accounts come back off, as before).
     if snapshot.accounts.iter().any(|a| a.off.is_some())
         || snapshot.kimi_accounts.iter().any(|k| k.off.is_some())
@@ -192,6 +209,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             if bytes.len() as u64 > MAX_FILE {
                 return Err("Account metadata exceeds size limit".into());
             }
+            refuse_later_version(&bytes)?;
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
             if !matches!(disk.schema_version, 1..=17) {
@@ -274,6 +292,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
     let path = root.join(METADATA);
     let snapshot = if path.exists() {
         let bytes = read_private(&path, MAX_FILE)?;
+        refuse_later_version(&bytes)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
         if !matches!(disk.schema_version, 1..=17) {

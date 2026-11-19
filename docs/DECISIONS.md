@@ -877,7 +877,7 @@ research notes); the ones still in force that the board cites are seeded below w
     person's off. The code cannot tell the person's off from an older automatic one that left no
     record, so it takes the safe reading: nothing automatic may turn such an account on. Its time
     is the account's newest `account_updated` journal entry, else the time of the migration. The
-    store is written at schema version 17, which a 0.7.123 or older reader refuses. The way back
+    store is written at schema version 17, which a 0.7.123 or older reader refuses as corrupt (it parses the file before its version; a reader from this release on names the version first, audit M5-03). The way back
     to such a version is restoring a backup there: the backup's accounts come back off, as before.
     A delegated seat's call back is recorded on its record (`Delegation.surrendered_at`, review
     round 1 of PR #821), so a journal that rolled over its 256 entries never turns a called-back

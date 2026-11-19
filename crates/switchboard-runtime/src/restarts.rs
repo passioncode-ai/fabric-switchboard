@@ -910,6 +910,11 @@ fn in_place_outcome(
 /// process did not end) or `not_started` (no Terminal window opened).
 #[cfg(unix)]
 fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'static str>) {
+    // 2026-11-19 audit M5-02 (DEC-0027): an account turned off between the plan and the wave is
+    // never resumed in its home; the session is left as it is.
+    if crate::resumable::turned_off_home(root, &e.config).is_some() {
+        return ("failed", Some("cannot_resume"));
+    }
     let Some(program) = crate::launch::find_program("claude") else {
         return ("failed", Some("cannot_resume"));
     };

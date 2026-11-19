@@ -2949,19 +2949,21 @@ mod views {
             purged_at: None,
             surrendered_at,
         };
-        let mut s = Snapshot::default();
-        s.accounts = vec![
-            account("on", true),
-            Account {
-                off: Some(TurnedOff::by_person(5)),
-                ..account("off", false)
-            },
-            account("away", false),
-            account("lease", false),
-            account("back", false),
-            account("back-before", false),
-            account("plain", false),
-        ];
+        let mut s = Snapshot {
+            accounts: vec![
+                account("on", true),
+                Account {
+                    off: Some(TurnedOff::by_person(5)),
+                    ..account("off", false)
+                },
+                account("away", false),
+                account("lease", false),
+                account("back", false),
+                account("back-before", false),
+                account("plain", false),
+            ],
+            ..Default::default()
+        };
         s.elsewhere.insert("away".into(), 3);
         s.delegated.insert("lease".into(), seat(Some(4), None));
         s.delegated.insert("back".into(), seat(None, Some(4)));

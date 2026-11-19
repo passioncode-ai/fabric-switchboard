@@ -44,8 +44,9 @@ pub fn turned_off_home(root: &Path, config: &Path) -> Option<String> {
         .as_os_str()
         .to_str()?
         .to_owned();
+    // The store's own cap on the file (2 MiB, `persistence::MAX_FILE`).
     let bytes =
-        switchboard_core::private_fs::read_private(&root.join("accounts.json"), 16 << 20).ok()?;
+        switchboard_core::private_fs::read_private(&root.join("accounts.json"), 2 << 20).ok()?;
     let disk: Value = serde_json::from_slice(&bytes).ok()?;
     disk["snapshot"]["accounts"]
         .as_array()?
