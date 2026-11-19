@@ -79,13 +79,23 @@ pub struct Inputs<'a> {
     pub now: i64,
 }
 
+/// SB-550: a machine whose Switchboard did not answer three reads in a row (a minute apart).
+pub const MACHINE_UNREACHABLE: &str =
+    "Another machine's Switchboard has not answered three reads in a row. Check that the machine is on and reachable over ssh.";
+/// SB-550: that machine's Switchboard reports a failing health check, or that it is not running.
+pub const MACHINE_HEALTH: &str =
+    "Another machine's Switchboard reports a failing health check. Open Other machines to see which.";
+/// SB-550: sessions on that machine need a person: a second copy, a board run gone quiet.
+pub const MACHINE_SESSIONS: &str =
+    "Sessions on another machine need a look: a second copy, or a board run that has gone quiet.";
+
 /// SB-412: dispatches refused at this computer's session limit. SB-417: listed while they wait
 /// (since the pool last admitted a board start), with no one-hour cutoff.
 pub const DISPATCH_REFUSED: &str =
     "Board runs are waiting: this computer's session limit refused them, and none has started since.";
 
 /// Reasons in the order they are listed.
-const ORDER: [&str; 15] = [
+const ORDER: [&str; 18] = [
     "keychain_too_large",
     "token_rotated",
     "session_duplicate",
@@ -98,6 +108,9 @@ const ORDER: [&str; 15] = [
     "renewal_refused",
     "move_unknown",
     "refused_there",
+    "machine_unreachable",
+    "machine_health",
+    "machine_sessions",
     "key_outside_tokens",
     "usage_failing",
     "ceiling_question",
@@ -320,6 +333,62 @@ pub fn build(inputs: &Inputs) -> Value {
                 },
             }),
         );
+    }
+    // SB-550: each machine group's Switchboard, read every minute: one that stopped answering,
+    // and from a read that worked, its failing health checks and its sessions that need a person.
+    // Each item names the machine as its label; the sentence names none.
+    for machine in &snapshot.machines {
+        let Some(read) = inputs.remote.machines.get(&machine.name) else {
+            continue;
+        };
+        let item = |reason: &str, detail: &str, since: Option<i64>, window: &str| {
+            json!({
+                "account_id": null, "label": machine.name, "provider": null, "pool": null,
+                "machine": machine.name, "machine_pool": machine.pool,
+                "reason": reason, "detail": detail, "since": since,
+                "action": {"tool": "switchboard_machines", "window": window},
+            })
+        };
+        if read.unreachable() {
+            let mut listed = item(
+                "machine_unreachable",
+                MACHINE_UNREACHABLE,
+                read.as_of,
+                "open_machines",
+            );
+            listed["failures"] = json!(read.failures);
+            listed["code"] = json!(read.reason);
+            push("machine_unreachable", machine.name.clone(), listed);
+            continue;
+        }
+        let failing = read.failing_checks();
+        if !failing.is_empty() {
+            let mut listed = item(
+                "machine_health",
+                MACHINE_HEALTH,
+                // When the failure was first seen by a read that worked (review of PR #861).
+                read.health_since.or(read.as_of),
+                "open_machines",
+            );
+            listed["checks"] = json!(failing);
+            push("machine_health", machine.name.clone(), listed);
+        }
+        let troubled = read.troubled_sessions();
+        if !troubled.is_empty() {
+            // When the trouble was first seen by a read that worked (review of PR #861).
+            let since = read.sessions_since.or(read.as_of);
+            let mut listed = item("machine_sessions", MACHINE_SESSIONS, since, "open_sessions");
+            listed["count"] = json!(troubled.len());
+            let mut kinds: Vec<&str> = troubled.iter().map(|s| s.why.as_str()).collect();
+            kinds.sort_unstable();
+            kinds.dedup();
+            listed["kinds"] = json!(kinds);
+            listed["session_ids"] = json!(troubled
+                .iter()
+                .filter_map(|s| s.session_id.clone())
+                .collect::<Vec<_>>());
+            push("machine_sessions", machine.name.clone(), listed);
+        }
     }
     // SB-509: one item for the sessions on the proxy's old token, with a restart wave as the fix
     // (never a restart by itself).
@@ -729,6 +798,7 @@ mod tests {
         let copy = |id: &str, status: &str| AccountRead {
             id: id.into(),
             used_percent: None,
+            observed_at: None,
             usage_status: Some(status.into()),
             enabled: Some(true),
         };
@@ -741,6 +811,7 @@ mod tests {
                 reason: None,
                 failures: 0,
                 accounts: vec![copy("a", "rejected"), copy("b", "ok")],
+                ..MachineRead::default()
             },
         );
         let answer = build(&Inputs {
@@ -761,6 +832,124 @@ mod tests {
         assert_eq!(answer["items"][0]["since"], 9_000);
         assert_eq!(answer["items"][0]["detail"], REFUSED_THERE);
         assert_eq!(answer["items"][0]["action"]["window"], "open_machines");
+    }
+
+    /// SB-550: a machine that stopped answering, and from a read that worked its failing health
+    /// checks and the sessions there that need a person, each one item naming the machine; the
+    /// sentence names none, and a stale read names nothing but the silence.
+    #[test]
+    fn a_silent_machine_its_failing_health_and_its_troubled_sessions_are_listed() {
+        use crate::remote_usage::{HealthRead, MachineRead, SessionRead, SessionsRead, State};
+        let machine = |pool: &str, name: &str| switchboard_core::Machine {
+            pool: pool.into(),
+            name: name.into(),
+            identity: None,
+            aliases: vec![],
+            created_at: 1,
+        };
+        let snapshot = Snapshot {
+            machines: vec![
+                machine("machine_a", "alpha"),
+                machine("machine_b", "beta"),
+                machine("machine_c", "gamma"),
+            ],
+            ..Default::default()
+        };
+        let row = |why: &str, group: &str, session: &str, since: i64| SessionRead {
+            id: format!("pid:{since}"),
+            group: group.into(),
+            why: why.into(),
+            agent: Some("claude-code".into()),
+            launch_id: None,
+            session_id: Some(session.into()),
+            since: Some(since),
+        };
+        let healthy = MachineRead {
+            tried_at: 9_900,
+            as_of: Some(9_900),
+            health_since: Some(9_000),
+            sessions_since: Some(8_500),
+            sessions: Some(SessionsRead {
+                rows: vec![
+                    row("stuck", "needs_you", "s-1", 9_000),
+                    row("duplicate", "needs_you", "s-2", 8_000),
+                    // A gone run is history there, never an item here.
+                    row("gone", "needs_you", "s-5", 7_000),
+                    row("working", "running", "s-3", 9_500),
+                    row("ready_to_continue", "needs_you", "s-4", 9_600),
+                ],
+                ..Default::default()
+            }),
+            health: Some(HealthRead {
+                state: "fail".into(),
+                checks: [("crashes", "fail"), ("sign_in", "warn"), ("owner", "ok")]
+                    .into_iter()
+                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                    .collect(),
+            }),
+            ..Default::default()
+        };
+        let mut remote = State::default();
+        remote.machines.insert("alpha".into(), healthy.clone());
+        remote.machines.insert(
+            "beta".into(),
+            MachineRead {
+                tried_at: 9_950,
+                as_of: Some(7_000),
+                reason: Some("unreachable".into()),
+                failures: crate::remote_usage::BACKOFF_AFTER,
+                ..healthy.clone()
+            },
+        );
+        // Failed once only: its last good items stay, so they do not come and go.
+        remote.machines.insert(
+            "gamma".into(),
+            MachineRead {
+                reason: Some("unreachable".into()),
+                failures: 1,
+                ..healthy
+            },
+        );
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &remote,
+            watch: &[],
+            refusals: None,
+            too_large: &[],
+            rotated: None,
+            now: 10_000,
+        });
+        assert_eq!(
+            reasons(&answer),
+            [
+                "machine_unreachable",
+                "machine_health",
+                "machine_health",
+                "machine_sessions",
+                "machine_sessions"
+            ]
+        );
+        let items = answer["items"].as_array().unwrap();
+        assert_eq!(items[0]["label"], "beta");
+        assert_eq!(items[0]["since"], 7_000);
+        assert_eq!(items[0]["detail"], MACHINE_UNREACHABLE);
+        assert_eq!(items[0]["action"]["window"], "open_machines");
+        assert_eq!(items[1]["label"], "alpha");
+        assert_eq!(items[2]["label"], "gamma");
+        assert_eq!(items[1]["checks"], json!(["crashes"]));
+        assert_eq!(items[1]["since"], 9_000, "when the failure was first seen");
+        assert_eq!(items[3]["count"], 2);
+        assert_eq!(items[3]["kinds"], json!(["duplicate", "stuck"]));
+        assert_eq!(items[3]["since"], 8_500, "when the trouble was first seen");
+        assert_eq!(items[3]["action"]["window"], "open_sessions");
+        for item in items {
+            assert!(!item["detail"].as_str().unwrap().contains("alpha"));
+            assert_eq!(item["action"]["tool"], "switchboard_machines");
+        }
     }
 
     #[test]

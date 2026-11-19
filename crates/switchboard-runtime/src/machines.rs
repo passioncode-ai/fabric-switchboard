@@ -315,10 +315,12 @@ pub fn list(root: &Path, snapshot: &Snapshot) -> Value {
         .iter()
         .map(|m| {
             let (program, data_dir) = crate::targets::program_for(root, &m.name, None, None);
-            let read = reads.machines.get(&m.name).map_or(Value::Null, |r| {
-                json!({"as_of": r.as_of, "tried_at": r.tried_at, "reason": r.reason,
-                    "failures": r.failures})
-            });
+            // SB-550: with which call it answered, its sessions' counts and the rows that need a
+            // person, and its own health.
+            let read = reads
+                .machines
+                .get(&m.name)
+                .map_or(Value::Null, crate::remote_usage::machine_view);
             json!({
                 "pool": m.pool, "name": m.name, "identity": m.identity, "aliases": m.aliases,
                 "created_at": m.created_at, "read": read,
