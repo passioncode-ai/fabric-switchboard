@@ -3189,7 +3189,9 @@ mod tests {
         let store = Arc::new(
             Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
         );
-        let raw = json!({"claudeAiOauth":{"accessToken":"synthetic-held","expiresAt":(now()+3600)*1000}}).to_string();
+        let raw =
+            json!({"claudeAiOauth":{"accessToken":"synthetic-held","expiresAt":(now()+3600)*1000}})
+                .to_string();
         let account = store
             .add(
                 "Held".into(),
