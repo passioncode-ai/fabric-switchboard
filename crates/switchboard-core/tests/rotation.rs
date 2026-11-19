@@ -1072,7 +1072,8 @@ fn an_idle_account_is_checked_every_ten_minutes_and_just_after_a_reset() {
 }
 
 #[test]
-fn rotation_pools_routed_and_in_use_accounts_keep_the_three_minute_cadence() {
+fn routed_and_in_use_accounts_keep_the_three_minute_cadence_and_spares_of_a_rotating_pool_the_idle_one(
+) {
     use switchboard_core::{CHECK_ACTIVE_SECONDS, CHECK_IDLE_SECONDS};
     let (_root, _vault, store) = setup();
     let now = clock();
@@ -1088,7 +1089,9 @@ fn rotation_pools_routed_and_in_use_accounts_keep_the_three_minute_cadence() {
     for id in [&rotating, &idle, &routed, &other, &idle_free] {
         observe(&store, id, 40., now);
     }
-    assert_eq!(next_check(&store, &rotating), now + CHECK_ACTIVE_SECONDS);
+    // SB-518 (DEC-0032): an account that only could be switched to carries no traffic; it is
+    // read on the idle cadence, and a switch to it checks it fresh first.
+    assert_eq!(next_check(&store, &rotating), now + CHECK_IDLE_SECONDS);
     assert_eq!(next_check(&store, &routed), now + CHECK_ACTIVE_SECONDS);
     assert_eq!(next_check(&store, &other), now + CHECK_IDLE_SECONDS);
     assert_eq!(next_check(&store, &idle_free), now + CHECK_IDLE_SECONDS);
@@ -2367,4 +2370,431 @@ fn with_no_room_anywhere_a_limited_group_waits_on_the_account_free_first() {
         .rotation_decision_with(&p, Some(&a), now, &only)
         .unwrap();
     assert_eq!(decision.candidate_id.as_deref(), Some(c.as_str()));
+}
+
+// SB-518 (DEC-0032): the smart usage mode, the store's half.
+fn header_usage(percent: f64, at: i64, windows: &[&str]) -> Usage {
+    Usage {
+        used_percent: percent,
+        observed_at: at,
+        resets_at: Some(at + 3600),
+        source: "response_headers".into(),
+        windows: windows
+            .iter()
+            .map(|name| UsageWindow {
+                name: (*name).into(),
+                used_percent: percent,
+                resets_at: Some(at + 3600),
+            })
+            .collect(),
+    }
+}
+fn endpoint_usage(percent: f64, at: i64) -> Usage {
+    Usage {
+        used_percent: percent,
+        observed_at: at,
+        resets_at: Some(at + 3600),
+        source: "claude_oauth".into(),
+        windows: ["five_hour", "seven_day", "seven_day_opus"]
+            .iter()
+            .map(|name| UsageWindow {
+                name: (*name).into(),
+                used_percent: percent,
+                resets_at: Some(at + 3600),
+            })
+            .collect(),
+    }
+}
+fn routed_account(store: &Store, now: i64) -> String {
+    let id = account_in(store, "org-routed", "routed", now);
+    store.select(Provider::Claude, "routed", &id).unwrap();
+    id
+}
+
+#[test]
+fn a_complete_header_observation_postpones_the_next_check_up_to_the_ceiling() {
+    use switchboard_core::{CHECK_ACTIVE_SECONDS, PASSIVE_CEILING_SECONDS};
+    let (_root, _vault, store) = setup();
+    let now = clock() - 3000;
+    let id = routed_account(&store, now);
+    let both = ["five_hour", "seven_day"];
+    // Before the endpoint answered once in this process, a header postpones nothing.
+    store.observe(&id, header_usage(10., now, &both)).unwrap();
+    assert_eq!(next_check(&store, &id), now);
+    store.observe(&id, endpoint_usage(10., now + 1)).unwrap();
+    assert_eq!(next_check(&store, &id), now + 1 + CHECK_ACTIVE_SECONDS);
+    // A complete header counts as a check: the next one is three minutes after it.
+    store
+        .observe(&id, header_usage(12., now + 100, &both))
+        .unwrap();
+    assert_eq!(next_check(&store, &id), now + 100 + CHECK_ACTIVE_SECONDS);
+    // A partial one does not postpone it.
+    store
+        .observe(&id, header_usage(13., now + 200, &["five_hour"]))
+        .unwrap();
+    assert_eq!(next_check(&store, &id), now + 100 + CHECK_ACTIVE_SECONDS);
+    // Traffic that never stops still meets the endpoint every half hour.
+    let ceiling = now + 1 + PASSIVE_CEILING_SECONDS;
+    let mut at = now + 300;
+    while at < ceiling {
+        store.observe(&id, header_usage(14., at, &both)).unwrap();
+        assert!(
+            next_check(&store, &id) <= ceiling,
+            "postponed past the ceiling at {at}"
+        );
+        at += 60;
+    }
+    assert_eq!(next_check(&store, &id), ceiling);
+    // Past it, a header keeps the check due.
+    store.observe(&id, header_usage(14., at, &both)).unwrap();
+    assert_eq!(next_check(&store, &id), at);
+    // The endpoint's answer starts the ceiling again.
+    let fresh = now + 1 + PASSIVE_CEILING_SECONDS + 400;
+    store.observe(&id, endpoint_usage(15., fresh)).unwrap();
+    store
+        .observe(&id, header_usage(15., fresh + 10, &both))
+        .unwrap();
+    assert_eq!(next_check(&store, &id), fresh + 10 + CHECK_ACTIVE_SECONDS);
+    // A new credential generation is never postponed by its headers, though the endpoint
+    // answered the previous one within the ceiling.
+    let renewed = store
+        .upsert(
+            "org-routed".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "routed".into(),
+            credential("org-routed-new", now + 9999),
+            Some(identity("org-routed")),
+        )
+        .unwrap()
+        .id;
+    assert_eq!(renewed, id);
+    // Its first check failed: the failure's schedule stands, no header of it is postponed by
+    // the previous generation's endpoint answer.
+    store
+        .usage_health(&id, "failed", fresh + 15, fresh + 15 + CHECK_ACTIVE_SECONDS)
+        .unwrap();
+    store
+        .observe(&id, header_usage(16., fresh + 20, &both))
+        .unwrap();
+    assert_eq!(next_check(&store, &id), fresh + 15 + CHECK_ACTIVE_SECONDS);
+    // Nor its second, until the endpoint answered the new generation.
+    store
+        .observe(&id, header_usage(16., fresh + 25, &both))
+        .unwrap();
+    assert_eq!(next_check(&store, &id), fresh + 15 + CHECK_ACTIVE_SECONDS);
+    store.observe(&id, endpoint_usage(16., fresh + 30)).unwrap();
+    store
+        .observe(&id, header_usage(16., fresh + 40, &both))
+        .unwrap();
+    assert_eq!(next_check(&store, &id), fresh + 40 + CHECK_ACTIVE_SECONDS);
+}
+
+#[test]
+fn the_account_in_use_switches_on_its_header_figures_while_its_other_windows_age() {
+    let (_root, _vault, store) = setup();
+    let now = clock() - 3000;
+    let current = account(&store, "org-current", now);
+    let spare = account(&store, "org-spare", now);
+    store.select(Provider::Claude, "default", &current).unwrap();
+    let both = ["five_hour", "seven_day"];
+    let p = policy();
+    let none = Default::default();
+    store.observe(&current, endpoint_usage(50., now)).unwrap();
+    // Ten minutes of headers: the per-model window keeps the endpoint's age.
+    store
+        .observe(&current, header_usage(60., now + 590, &both))
+        .unwrap();
+    let usage = store
+        .snapshot()
+        .unwrap()
+        .accounts
+        .into_iter()
+        .find(|a| a.id == current)
+        .unwrap()
+        .usage
+        .unwrap();
+    assert_eq!(
+        usage.observed_at, now,
+        "a header never freshens a per-model window"
+    );
+    store
+        .observe(&spare, endpoint_usage(10., now + 595))
+        .unwrap();
+    // Below the threshold the header figure decides nothing: the account waits for the
+    // endpoint's next answer, which is not "unavailable".
+    assert_eq!(
+        store
+            .rotation_decision_with(&p, Some(&current), now + 600, &none)
+            .unwrap()
+            .reason,
+        "stale_usage"
+    );
+    // At it, the fresh header figure is enough to move.
+    store
+        .observe(&current, header_usage(95., now + 598, &both))
+        .unwrap();
+    let decision = store
+        .rotation_decision_with(&p, Some(&current), now + 600, &none)
+        .unwrap();
+    assert_eq!(decision.candidate_id, Some(spare.clone()));
+    // A partial header is not such a figure.
+    let (_root2, _vault2, other) = setup();
+    let current = account(&other, "org-current", now);
+    let spare = account(&other, "org-spare", now);
+    other.select(Provider::Claude, "default", &current).unwrap();
+    other.observe(&current, endpoint_usage(50., now)).unwrap();
+    other
+        .observe(&current, header_usage(95., now + 598, &["five_hour"]))
+        .unwrap();
+    other
+        .observe(&spare, endpoint_usage(10., now + 595))
+        .unwrap();
+    assert_eq!(
+        other
+            .rotation_decision_with(&p, Some(&current), now + 600, &none)
+            .unwrap()
+            .reason,
+        "usage_unavailable"
+    );
+}
+
+#[test]
+fn header_observations_reach_the_disk_at_most_once_a_minute() {
+    use switchboard_core::HEADER_FLUSH_SECONDS;
+    let (_root, _vault, store) = setup();
+    let now = clock() - 3000;
+    let id = routed_account(&store, now);
+    store.observe(&id, endpoint_usage(10., now)).unwrap();
+    store.flush().unwrap();
+    let writes = store.metadata_writes();
+    let both = ["five_hour", "seven_day"];
+    for n in 0..20 {
+        store
+            .observe(&id, header_usage(10. + n as f64, now + 1 + n, &both))
+            .unwrap();
+    }
+    assert_eq!(
+        store.metadata_writes(),
+        writes,
+        "every changed header waits"
+    );
+    assert!(store.headers_pending());
+    // The store stamps the first waiting header with the wall clock.
+    let since = clock() + 1000;
+    store
+        .flush_headers_if_older(since + 1, HEADER_FLUSH_SECONDS)
+        .unwrap();
+    assert_eq!(store.metadata_writes(), writes, "not yet a minute");
+    store
+        .flush_headers_if_older(since + HEADER_FLUSH_SECONDS + 5, HEADER_FLUSH_SECONDS)
+        .unwrap();
+    assert_eq!(
+        store.metadata_writes(),
+        writes + 1,
+        "one write for all of them"
+    );
+    assert!(!store.headers_pending());
+    store
+        .flush_headers_if_older(since + 2 * HEADER_FLUSH_SECONDS + 5, HEADER_FLUSH_SECONDS)
+        .unwrap();
+    assert_eq!(store.metadata_writes(), writes + 1, "nothing left to write");
+}
+
+#[test]
+fn near_its_limit_the_endpoint_is_asked_only_once_no_header_came_for_a_minute() {
+    use switchboard_core::{
+        CHECK_NEAR_LIMIT_SECONDS, HEADER_FRESH_SECONDS, NEAR_LIMIT_SLACK_SECONDS,
+    };
+    let (_root, _vault, store) = setup();
+    let now = clock() - 3000;
+    let id = routed_account(&store, now);
+    let both = ["five_hour", "seven_day"];
+    store.observe(&id, endpoint_usage(96., now)).unwrap();
+    assert_eq!(
+        next_check(&store, &id),
+        now + CHECK_NEAR_LIMIT_SECONDS - NEAR_LIMIT_SLACK_SECONDS
+    );
+    // Each header moves the near-limit check a minute after it.
+    store
+        .observe(&id, header_usage(96., now + 40, &both))
+        .unwrap();
+    assert_eq!(next_check(&store, &id), now + 40 + HEADER_FRESH_SECONDS);
+    // An endpoint answer right after a header waits out that header's minute too.
+    store.observe(&id, endpoint_usage(97., now + 50)).unwrap();
+    assert_eq!(next_check(&store, &id), now + 40 + HEADER_FRESH_SECONDS);
+}
+
+#[test]
+fn the_pools_next_account_is_not_pulled_in_while_its_headers_are_fresh() {
+    let (_root, _vault, store) = setup();
+    let now = clock() - 3000;
+    let current = account_in(&store, "org-current", "work", now);
+    let next = account_in(&store, "org-next", "work", now);
+    store.select(Provider::Claude, "work", &current).unwrap();
+    store.observe(&current, endpoint_usage(96., now)).unwrap();
+    store.observe(&next, endpoint_usage(30., now)).unwrap();
+    store
+        .observe(
+            &next,
+            header_usage(30., now + 5, &["five_hour", "seven_day"]),
+        )
+        .unwrap();
+    assert_eq!(store.pull_in_next_accounts(now + 20).unwrap(), 0);
+    assert_eq!(store.pull_in_next_accounts(now + 70).unwrap(), 1);
+}
+
+#[test]
+fn a_candidate_known_only_from_an_older_figure_is_checked_fresh_before_the_switch() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    let p = policy();
+    let none = Default::default();
+    observe(&store, &a, 95., now);
+    // Nothing measured but a and b: c, never measured, ranks after any known figure, at any age.
+    // Two hours old (and still before its window's reset): ranked on it all the same.
+    store
+        .observe(
+            &b,
+            Usage {
+                used_percent: 10.,
+                observed_at: now - 7200,
+                resets_at: Some(now + 3600),
+                source: "claude_oauth".into(),
+                windows: vec![UsageWindow {
+                    name: "five_hour".into(),
+                    used_percent: 10.,
+                    resets_at: Some(now + 3600),
+                }],
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .rotation_candidate_to_confirm(&p, Some(&a), now, &none)
+            .unwrap(),
+        Some(b.clone()),
+        "the last known figure orders at any age"
+    );
+    // One last known full is never checked: the never-measured one is.
+    store
+        .observe(
+            &b,
+            Usage {
+                used_percent: 100.,
+                observed_at: now - 7000,
+                resets_at: Some(now + 3600),
+                source: "claude_oauth".into(),
+                windows: vec![UsageWindow {
+                    name: "five_hour".into(),
+                    used_percent: 100.,
+                    resets_at: Some(now + 3600),
+                }],
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .rotation_candidate_to_confirm(&p, Some(&a), now, &none)
+            .unwrap(),
+        Some(c.clone())
+    );
+    // Nor one last known past the decision's headroom (90 - 10) before any reset: a fresh check
+    // could only find it fuller.
+    store
+        .observe(
+            &b,
+            Usage {
+                used_percent: 85.,
+                observed_at: now - 6900,
+                resets_at: Some(now + 3600),
+                source: "claude_oauth".into(),
+                windows: vec![UsageWindow {
+                    name: "five_hour".into(),
+                    used_percent: 85.,
+                    resets_at: Some(now + 3600),
+                }],
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .rotation_candidate_to_confirm(&p, Some(&a), now, &none)
+            .unwrap(),
+        Some(c.clone())
+    );
+    store.update(&c, "C".into(), false).unwrap();
+    // Ten minutes old: past the policy's five.
+    observe(&store, &b, 10., now - 600);
+    let strict = store
+        .rotation_decision_with(&p, Some(&a), now, &none)
+        .unwrap();
+    assert_eq!(
+        strict.candidate_id, None,
+        "never switched on the old figure"
+    );
+    assert_eq!(
+        store
+            .rotation_candidate_to_confirm(&p, Some(&a), now, &none)
+            .unwrap(),
+        Some(b.clone())
+    );
+    // The fresh check answers: the switch takes it on that figure.
+    observe(&store, &b, 12., now);
+    assert_eq!(
+        store
+            .rotation_candidate_to_confirm(&p, Some(&a), now, &none)
+            .unwrap(),
+        None,
+        "nothing left to confirm"
+    );
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &none)
+        .unwrap();
+    assert_eq!(decision.candidate_id, Some(b.clone()));
+    // A fresh check that finds it full takes it out.
+    observe(&store, &b, 99., now);
+    assert_eq!(
+        store
+            .rotation_decision_with(&p, Some(&a), now, &none)
+            .unwrap()
+            .candidate_id,
+        None
+    );
+    // An account in use held by a limit waits for nothing: SB-98's last known figure.
+    let limited: std::collections::HashSet<String> = [a.clone()].into();
+    assert_eq!(
+        store
+            .rotation_candidate_to_confirm(&p, Some(&a), now, &limited)
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn the_timer_mode_keeps_the_fixed_cadence_of_0_7_121() {
+    use switchboard_core::{UsageMode, CHECK_ACTIVE_SECONDS};
+    let (_root, _vault, store) = setup();
+    let now = clock() - 3000;
+    store.set_usage_mode(UsageMode::Timer);
+    assert_eq!(UsageMode::parse("on-demand"), Some(UsageMode::OnDemand));
+    assert_eq!(UsageMode::parse("sometimes"), None);
+    let id = routed_account(&store, now);
+    let spare = account_in(&store, "org-spare", "default", now);
+    store.set_policy(policy()).unwrap();
+    store.observe(&id, endpoint_usage(10., now)).unwrap();
+    store.observe(&spare, endpoint_usage(10., now)).unwrap();
+    // Every account of a switching group on the active cadence, as before.
+    assert_eq!(next_check(&store, &spare), now + CHECK_ACTIVE_SECONDS);
+    // A complete header postpones nothing.
+    store
+        .observe(
+            &id,
+            header_usage(12., now + 100, &["five_hour", "seven_day"]),
+        )
+        .unwrap();
+    assert_eq!(next_check(&store, &id), now + CHECK_ACTIVE_SECONDS);
 }

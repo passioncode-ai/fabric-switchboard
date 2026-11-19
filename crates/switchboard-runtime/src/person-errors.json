@@ -38,6 +38,8 @@
     "Claude config format is invalid.": "The Claude Code config file is not valid JSON. Nothing was changed; open Claude Code once so it can repair the file, then retry.",
     "Claude credential and config identities differ.": "The CLI's sign-in is incomplete or does not match itself. Sign in with the CLI again, then add the account again.",
     "Claude credential exceeds size limit.": "This Claude credential is too large to write. Nothing was changed; sign in to the account again.",
+    "Claude Code's Keychain item is too large to write safely. Sign out of MCP servers you no longer use in Claude Code, then retry.": "Claude Code's sign-in is too large to write to the Keychain safely. Nothing was changed; sign out of MCP servers you no longer use in Claude Code, then retry.",
+    "The Keychain item is too large to write safely. Nothing was changed.": "This Keychain item is too large to write safely. Nothing was changed.",
     "Claude credential rollback needs Keychain access.": "Credential recovery needs Keychain access. Unlock Keychain and sign in through Claude before retrying.",
     "Claude credential write needs Keychain access.": "Switching Claude Code needs Keychain access. Unlock Keychain and allow access, then retry.",
     "Claude native credential is invalid.": "The CLI's sign-in is incomplete or does not match itself. Sign in with the CLI again, then add the account again.",

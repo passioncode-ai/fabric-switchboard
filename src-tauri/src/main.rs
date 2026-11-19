@@ -83,6 +83,8 @@ impl Slot {
                     // (never a development build); the runtime checks the data folder too.
                     if std::env::current_exe().is_ok_and(|exe| residency::packaged(&exe)) {
                         owner.runtime.enable_shell_hook();
+                        // SB-510: the watchdog's system job, for the app's own data folder only.
+                        owner.runtime.enable_watchdog();
                     }
                 }
             });
@@ -271,6 +273,15 @@ async fn send_account(
             delegate: delegate.unwrap_or(false),
             lease_hours,
         })
+        .await
+}
+/// SB-450: whether the sessions a restart cut are continued; `on` changes it.
+#[tauri::command]
+async fn boot_resume(on: Option<bool>, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::BootResume { on })
         .await
 }
 /// SB-403 S3: whether Switchboard reads or changes the person's own sign-in; `on` changes it.
@@ -470,6 +481,30 @@ async fn recall_account(
             program: None,
             remote_data_dir: None,
             decision: None,
+        })
+        .await
+}
+/// SB-473: every machine this computer knows (moves and runs), as `switchboard targets` lists them,
+/// for the move dialog's machine picker; with `probe`, each asked whether it answers.
+#[tauri::command]
+async fn targets(probe: bool, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Targets { probe })
+        .await
+}
+/// SB-474: another machine's groups, organizations and accounts, read over ssh as `switchboard
+/// remote status` reads them, for the move dialog's group picker.
+#[tauri::command]
+async fn remote_status(target: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::RemoteStatus {
+            target,
+            program: None,
+            remote_data_dir: None,
         })
         .await
 }
@@ -1715,6 +1750,7 @@ async fn launch_agent(
             via: via.unwrap_or_default(),
             model,
             key,
+            effort: None,
         })
         .await
 }
@@ -2186,6 +2222,8 @@ fn main() {
             send_account,
             recall_account,
             machines,
+            targets,
+            remote_status,
             attention,
             given_accounts,
             events,
@@ -2247,6 +2285,7 @@ fn main() {
             feed,
             capacity,
             duty,
+            boot_resume,
             own_sign_in,
             proxy_users,
             session_tree,

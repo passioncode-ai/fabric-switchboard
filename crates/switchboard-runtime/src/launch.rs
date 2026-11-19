@@ -28,10 +28,37 @@ pub struct Login {
 }
 /// SB-259: names the operator's own Claude folder in a session Switchboard launched.
 pub(crate) const SOURCE_DIR: &str = "SWITCHBOARD_CLAUDE_SOURCE_DIR";
+/// SB-452: a managed Claude home's own route (0600): the proxy's route of the launch's group,
+/// its token and the launch's group, passed as `--settings`, which Claude Code ranks above a
+/// folder's `.claude/settings.local.json` (and a worktree's, which it reads from the main
+/// checkout). Rewritten at each launch and repointed with `launch.command` when the proxy moves.
+pub(crate) const ROUTE_FILE: &str = "switchboard-route.json";
+/// SB-452: the argument that gives a Claude session its home's route file, last on its command
+/// line (a later `--settings` would replace it whole).
+pub(crate) fn route_arg(home: &Path) -> String {
+    format!("--settings={}", home.join(ROUTE_FILE).to_string_lossy())
+}
+/// SB-452: writes `home`'s route file for a managed Claude session of `pool` through `base`.
+fn write_route(home: &Path, base: &str, token: &str, pool: &str) -> Result<(), String> {
+    let route = json!({"env": {
+        "ANTHROPIC_BASE_URL": base,
+        "ANTHROPIC_AUTH_TOKEN": token,
+        "ANTHROPIC_API_KEY": "",
+        "ANTHROPIC_CUSTOM_HEADERS": format!("X-Switchboard-Launch-Group: {pool}"),
+    }});
+    private_write(
+        &home.join(ROUTE_FILE),
+        serde_json::to_string(&route).unwrap().as_bytes(),
+        false,
+    )
+}
 pub(crate) const CONFLICTS: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
+    // SB-533: a managed session's route header (`X-Switchboard-Launch-Group`, a folder's
+    // capability) never reaches a session it starts; a session of its own gets its own route.
+    "ANTHROPIC_CUSTOM_HEADERS",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
@@ -317,6 +344,11 @@ fn script_with(
     working_directory: &Path,
 ) -> String {
     let mut result = format!("#!{SCRIPT_SHELL}\nset +x\nunset {}\n", CONFLICTS.join(" "));
+    // SB-455: Terminal, a session host, `--in-place` and `launch --headless` run this script with
+    // the PATH of whatever started it (launchd's short one for the app and `serve`, a terminal's
+    // own for `--in-place`). That PATH stays first (a person's nvm, pyenv or mise shims win); the
+    // login PATH comes after it, so a hook finds `node` from Homebrew.
+    result.push_str(&path_export(program));
     for (key, value) in env {
         result.push_str(&format!("export {key}={}\n", quote(value)));
     }
@@ -491,25 +523,240 @@ const RESERVATION_TTL: Duration = Duration::from_secs(10 * 60);
 /// A marker dated ahead of the clock (a clock set back) has no knowable age, so it expires
 /// by the same distance rather than holding the home until the clock catches up.
 fn reservation_expired(written: SystemTime, now: SystemTime) -> bool {
-    match now.duration_since(written) {
-        Ok(age) => age > RESERVATION_TTL,
-        Err(ahead) => ahead.duration() > RESERVATION_TTL,
+    older_than(written, now, RESERVATION_TTL)
+}
+/// SB-440: a marker handed to a caller that runs the script itself (`launch --in-place`,
+/// `--headless`, `--hosted`, `continue --in-place`) is taken within moments of the answer. One no
+/// script took after this long belongs to a caller that gave up (a control request that timed out
+/// after the owner had prepared the session): longer than the caller's own wait for the answer
+/// (`control::limit_secs`, 120 s for `Launch` and `Continue`), with a margin, so an answer that
+/// arrives at the end of that wait is still run.
+pub(crate) const UNCLAIMED_TTL: Duration = Duration::from_secs(5 * 60);
+/// SB-440: who runs a home's script once its preparation is done, written into its marker.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Handed {
+    /// Terminal (or PowerShell) was asked to open it, or a continuation prepared in place waits
+    /// in the hand-over queue for a console (SB-108); either may take a while, so the marker holds
+    /// for `RESERVATION_TTL`.
+    Terminal,
+    /// The caller got the script in the answer and runs it at once (`UNCLAIMED_TTL`).
+    Caller,
+}
+impl Handed {
+    /// SB-449: who runs an in-place continuation's script: the hand-over queue, where it may wait
+    /// for a console (`Terminal`'s hold), or the caller that asked for it (`Caller`).
+    pub fn for_continue(queued: bool) -> Self {
+        if queued {
+            Handed::Terminal
+        } else {
+            Handed::Caller
+        }
+    }
+    fn as_str(self) -> &'static str {
+        match self {
+            Handed::Terminal => "terminal",
+            Handed::Caller => "caller",
+        }
     }
 }
+/// SB-440: whether a home's `.launch-pending` still holds it.
+#[derive(Debug, PartialEq, Eq)]
+enum Pending {
+    Absent,
+    Held,
+    /// Nobody will run the script any more; the code says why (`expired`, `launcher_gone`,
+    /// `unclaimed`).
+    Stale(&'static str),
+}
+/// Whether `written` is more than `ttl` away from `now`, in either direction: a marker dated
+/// ahead of the clock (a clock set back) expires by the same distance.
+fn older_than(written: SystemTime, now: SystemTime, ttl: Duration) -> bool {
+    match now.duration_since(written) {
+        Ok(age) => age > ttl,
+        Err(ahead) => ahead.duration() > ttl,
+    }
+}
+/// SB-440: reads a marker. A marker holds while its preparation runs (`{"pid": N, "token": T}`,
+/// the process preparing it and its start token, released at once when that process is gone or
+/// its pid now names another process), then while its script has not run
+/// (`{"pid": null, "by": "terminal" | "caller"}`, for `RESERVATION_TTL` or `UNCLAIMED_TTL`). An
+/// empty or unreadable marker (one an earlier version wrote) holds for `RESERVATION_TTL`; one
+/// whose time cannot be read, and anything that is not a regular file, always holds, as before.
+/// Reads only.
+fn pending(home: &Path, now: SystemTime) -> Result<Pending, String> {
+    pending_at(&home.join(".launch-pending"), now)
+}
+fn pending_at(path: &Path, now: SystemTime) -> Result<Pending, String> {
+    let path = path.to_path_buf();
+    let meta = match fs::symlink_metadata(&path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Pending::Absent),
+        Err(_) => return Err("Session state unavailable. Inspect the managed home.".into()),
+    };
+    if !meta.file_type().is_file() {
+        return Ok(Pending::Held);
+    }
+    // A time that cannot be read cannot expire: the marker holds, as before.
+    let Ok(written) = meta.modified() else {
+        return Ok(Pending::Held);
+    };
+    if reservation_expired(written, now) {
+        return Ok(Pending::Stale("expired"));
+    }
+    let marker: Value = switchboard_core::private_fs::read_private(&path, 256)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or(Value::Null);
+    if let Some(pid) = marker["pid"].as_u64().and_then(|p| u32::try_from(p).ok()) {
+        let age = now.duration_since(written).unwrap_or_default();
+        return Ok(if launcher_gone(pid, marker["token"].as_u64(), age) {
+            Pending::Stale("launcher_gone")
+        } else {
+            Pending::Held
+        });
+    }
+    if marker["by"] == Handed::Caller.as_str() && older_than(written, now, UNCLAIMED_TTL) {
+        return Ok(Pending::Stale("unclaimed"));
+    }
+    Ok(Pending::Held)
+}
+/// SB-440: the process preparing a home is gone, or its pid now names another process: its start
+/// token (`copies::process_token`, the same on every platform it can be read) differs from the one
+/// the marker recorded. Without a recorded token (none could be read when it was written), Unix
+/// falls back to the process's age against the marker's; a start that cannot be read holds.
+fn launcher_gone(pid: u32, token: Option<u64>, marker_age: Duration) -> bool {
+    if pid == 0 || !crate::copies::alive(pid) {
+        return true;
+    }
+    if let Some(recorded) = token {
+        return crate::copies::process_token(pid).is_some_and(|now| now != recorded);
+    }
+    #[cfg(unix)]
+    {
+        process_age(pid).is_some_and(|age| pid_reused(marker_age, age))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = marker_age;
+        false
+    }
+}
+/// SB-440 (review round 1): clears a stale marker without ever removing a fresh one another
+/// launch wrote after it was judged: the marker is first moved aside under a name of its own (a
+/// rename takes exactly the file that is there now), judged again there, and removed only when it
+/// is still stale; a marker that holds goes back (a hard link, which never replaces a marker
+/// written meanwhile) and the home stays busy.
+fn clear_stale(home: &Path, now: SystemTime) -> Result<(), String> {
+    clear_stale_with(home, now, |from, to| fs::hard_link(from, to))
+}
+/// `clear_stale` with the link that puts a marker back (tests make it fail).
+fn clear_stale_with(
+    home: &Path,
+    now: SystemTime,
+    link: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), String> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let path = home.join(".launch-pending");
+    let aside = home.join(format!(
+        ".launch-pending.stale-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    match fs::rename(&path, &aside) {
+        Ok(()) => {}
+        // Gone meanwhile: its script started or another launch cleared it.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(HOME_BUSY.into()),
+    }
+    match pending_at(&aside, now) {
+        Ok(Pending::Stale(reason)) => {
+            let _ = fs::remove_file(&aside);
+            crate::oplog::event(
+                "launch_reservation",
+                &[
+                    ("outcome", crate::oplog::Field::Code("cleared")),
+                    ("reason", crate::oplog::Field::Code(reason)),
+                ],
+            );
+            Ok(())
+        }
+        _ => {
+            match link(&aside, &path) {
+                // Back in place; the copy aside goes.
+                Ok(()) => {
+                    let _ = fs::remove_file(&aside);
+                }
+                // Another marker took the name meanwhile and holds the home itself.
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let _ = fs::remove_file(&aside);
+                }
+                // SB-448: no link here (a file system without hard links, a refused link): the
+                // marker is moved back instead, never deleted while it holds.
+                Err(_) => {
+                    let _ = fs::rename(&aside, &path);
+                }
+            }
+            Err(HOME_BUSY.into())
+        }
+    }
+}
+const HOME_BUSY: &str = "Close the existing session before changing its home.";
 pub(crate) struct Reservation {
     path: PathBuf,
     pub(crate) committed: bool,
 }
 impl Reservation {
     pub(crate) fn new(home: &Path) -> Result<Self, String> {
+        // SB-448: only a new reservation clears a stale marker; every other check only reads.
+        if let Pending::Stale(_) = pending(home, SystemTime::now())? {
+            clear_stale(home, SystemTime::now())?;
+        }
         ensure_idle(home)?;
         let path = home.join(".launch-pending");
-        switchboard_core::private_fs::create_new(&path)
+        let mut file = switchboard_core::private_fs::create_new(&path)
             .map_err(|_| "Close the existing session before changing its home.")?;
-        Ok(Self {
+        // SB-440: the process preparing the home and its start token, so a crash while it
+        // prepares frees the home.
+        let reservation = Self {
             path,
             committed: false,
-        })
+        };
+        {
+            use std::io::Write;
+            let me = std::process::id();
+            file.write_all(
+                json!({"pid": me, "token": crate::copies::process_token(me)})
+                    .to_string()
+                    .as_bytes(),
+            )
+            .map_err(|_| "Session state unavailable. Inspect the managed home.")?;
+        }
+        Ok(reservation)
+    }
+    /// SB-440: the preparation is done and `by` runs the script, which removes the marker as it
+    /// starts. The marker is rewritten in place, never created again: a script that already
+    /// started (or a dispatched run that already took the home) removed it, and that stays so.
+    pub(crate) fn commit(&mut self, by: Handed) {
+        self.committed = true;
+        if !fs::symlink_metadata(&self.path).is_ok_and(|m| m.file_type().is_file()) {
+            return;
+        }
+        let mut options = fs::OpenOptions::new();
+        options.write(true).truncate(true);
+        // Never through a link put in the marker's place.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+        if let Ok(mut file) = options.open(&self.path) {
+            use std::io::Write;
+            let _ = file.write_all(
+                json!({"pid": null, "by": by.as_str()})
+                    .to_string()
+                    .as_bytes(),
+            );
+        }
     }
 }
 impl Drop for Reservation {
@@ -582,6 +829,7 @@ pub(crate) fn repoint_managed(
             ("launch.command", true),
             ("launch.ps1", true),
             ("config.toml", false),
+            (ROUTE_FILE, false),
         ] {
             let path = home.path().join(name);
             let Ok(bytes) = switchboard_core::private_fs::read_private(&path, 256 * 1024) else {
@@ -735,7 +983,7 @@ pub fn begin_login(
     } else {
         open_terminal(&home, &script(&home, &program, &args, &env, true, &home))?;
     }
-    reservation.committed = true;
+    reservation.commit(Handed::Terminal);
     Ok(Login {
         id,
         provider,
@@ -904,12 +1152,9 @@ fn login_completed(home: &Path) -> bool {
     read_regular(&home.join(".completed")).is_ok_and(|v| v == "complete")
 }
 pub(crate) fn reservation_open(home: &Path) -> bool {
-    fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|meta| {
-        meta.file_type().is_file()
-            && !meta
-                .modified()
-                .is_ok_and(|t| reservation_expired(t, SystemTime::now()))
-    })
+    // SB-449: the same judgement as `ensure_idle`: a marker that is not a regular file holds here
+    // too (CONTRACTS); only a home whose marker cannot be looked at holds no reservation.
+    pending(home, SystemTime::now()) == Ok(Pending::Held)
 }
 /// A sign-in's journal, when it names a known provider and a valid label and pool.
 fn login_journal(home: &Path) -> Option<(Provider, String, String, i64)> {
@@ -1186,12 +1431,31 @@ pub(crate) fn process_started(pid: u32) -> Option<SystemTime> {
             + Duration::from_micros(info.pbi_start_tvusec),
     )
 }
+/// SB-445: the process's start, from `/proc/<pid>/stat` field 22 (clock ticks after boot) and the
+/// boot time in `/proc/stat`; the modification time of `/proc/<pid>` is not its start.
 #[cfg(target_os = "linux")]
 fn process_started(pid: u32) -> Option<SystemTime> {
-    fs::symlink_metadata(format!("/proc/{pid}"))
-        .ok()?
-        .modified()
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // After the command name in parentheses, field 22 (`starttime`) is the 20th.
+    let rest = &stat[stat.rfind(')')? + 1..];
+    let ticks: u64 = rest.split_whitespace().nth(19)?.parse().ok()?;
+    // SB-449: the boot time does not change while this process runs; read it once.
+    static BOOT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    let boot: u64 = (*BOOT.get_or_init(|| {
+        fs::read_to_string("/proc/stat")
+            .ok()?
+            .lines()
+            .find_map(|line| line.strip_prefix("btime ")?.trim().parse().ok())
+    }))?;
+    // SAFETY: sysconf only reads a configuration value.
+    let hz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) })
         .ok()
+        .filter(|hz| *hz > 0)?;
+    Some(
+        std::time::UNIX_EPOCH
+            + Duration::from_secs(boot)
+            + Duration::from_micros(ticks.checked_mul(1_000_000)? / hz),
+    )
 }
 #[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 fn process_started(_pid: u32) -> Option<SystemTime> {
@@ -1221,26 +1485,48 @@ fn process_age_from_ps(pid: u32) -> Option<Duration> {
         .then(|| parse_elapsed(&String::from_utf8_lossy(&output.stdout)))
         .flatten()
 }
+/// Whether nothing holds `home`: no marker that still holds and no live session. Reads only
+/// (SB-448): a stale marker counts as idle, since nothing will run its script, and is left for
+/// the next `Reservation::new` to clear (SB-440: also when its launcher is gone, not only after
+/// ten minutes), so a check never removes a marker another launch writes meanwhile.
 pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
-    let pending = home.join(".launch-pending");
-    match fs::symlink_metadata(&pending) {
-        Ok(meta) => {
-            let expired = meta.file_type().is_file()
-                && meta
-                    .modified()
-                    .is_ok_and(|t| reservation_expired(t, SystemTime::now()));
-            // The script never ran: releasing the abandoned marker frees the home.
-            if !expired || fs::remove_file(&pending).is_err() {
-                return Err("Close the existing session before changing its home.".into());
-            }
+    match pending(home, SystemTime::now())? {
+        Pending::Absent | Pending::Stale(_) => {}
+        Pending::Held => {
+            return Err("Close the existing session before changing its home.".into());
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return Err("Session state unavailable. Inspect the managed home.".into()),
     }
     if session_running(home)? {
         return Err("Close the existing session before changing its home.".into());
     }
     Ok(())
+}
+/// SB-450 (review round 3 of #836): whether a home's `.session-pid` marker cannot name the
+/// process that holds `pid` now: it was written before this boot, or (Unix) the process is younger
+/// than the marker by more than `PID_REUSE_MARGIN` (the pid was reused). An unknown age keeps it.
+pub(crate) fn marker_outlived(marker: &Path, pid: u32) -> bool {
+    let Ok(written) = fs::symlink_metadata(marker).and_then(|m| m.modified()) else {
+        return false;
+    };
+    let written_at = written
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    if crate::boot_resume::boot().is_some_and(|boot| written_at < boot) {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        SystemTime::now()
+            .duration_since(written)
+            .ok()
+            .zip(process_age(pid))
+            .is_some_and(|(marker_age, age)| pid_reused(marker_age, age))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
 }
 /// Whether a live session holds `home`: its marker names a process that is still the session
 /// (the pid alive and at least as old as the marker; on Windows, the pid with its creation
@@ -1896,6 +2182,8 @@ fn launch_agent_with(
         }
         args.extend(["--model".into(), model.to_owned()]);
     }
+    // SB-515: the agent runs with its own full access unless the person chose `ask`.
+    with_full_access(root, &profile.id, &mut args, &mut env);
     // SB-212: the session's own launch id, for the record and for what it launches.
     let launch_id = crate::launches::new_id();
     env.insert(crate::launches::ENV.into(), launch_id.clone());
@@ -1982,18 +2270,51 @@ pub const ANTHROPIC_AGENT_UNSUPPORTED: &str =
     "Only Hermes runs on an Anthropic key for now. Choose Hermes, or its OpenRouter key.";
 pub const ANTHROPIC_MODEL_NEEDED: &str =
     "Choose a model for this launch, or set the key's default model with switchboard agents anthropic model.";
+/// SB-535: the reasoning levels Hermes takes as `--reasoning` (Hermes 0.22.2 `chat --help`).
+pub const HERMES_EFFORTS: &[&str] = &[
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+];
+pub const EFFORT_INVALID: &str =
+    "Choose a reasoning level: none, minimal, low, medium, high, xhigh, max or ultra.";
 /// SB-390: starts Hermes in a folder on the Anthropic key saved under `key` (`team-a`,
 /// `personal`) and `model` (default: the key's model), as `hermes --provider anthropic -m
-/// <model>`. Like an OpenRouter launch (`launch_agent_openrouter`), it runs in a Hermes home of
-/// its own (`HERMES_HOME`, so `~/.hermes`'s own sign-ins do not win over the key), and the key is
-/// read when the session starts (`switchboard agents anthropic key <name>`), never written. No
-/// proxy, group or account is involved, and no ceiling counts it.
+/// <model>` and, with `effort`, `--reasoning <effort>` (SB-535). Like an OpenRouter launch
+/// (`launch_agent_openrouter`), it runs in a Hermes home of its own (`HERMES_HOME`, so
+/// `~/.hermes`'s own config and sign-ins are never read; that home is what `--ignore-user-config`
+/// would give, and it also keeps the settings below), and the key is read when the session starts
+/// (`switchboard agents anthropic key <name>`), never written. No proxy, group or account is
+/// involved, and no ceiling counts it yet (SB-536).
 pub fn launch_agent_anthropic(
     root: &Path,
     agent: &str,
     key: &str,
     model: Option<&str>,
+    effort: Option<&str>,
     working_directory: &Path,
+    start: fn(&Path) -> Result<(), String>,
+) -> Result<Value, String> {
+    launch_agent_anthropic_with(
+        root,
+        agent,
+        key,
+        model,
+        effort,
+        working_directory,
+        find_program,
+        agent_cli(),
+        start,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn launch_agent_anthropic_with(
+    root: &Path,
+    agent: &str,
+    key: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    working_directory: &Path,
+    find: fn(&str) -> Option<PathBuf>,
+    cli: Option<PathBuf>,
     start: fn(&Path) -> Result<(), String>,
 ) -> Result<Value, String> {
     let (id, name) = ANTHROPIC_AGENTS
@@ -2001,6 +2322,9 @@ pub fn launch_agent_anthropic(
         .find(|(id, _)| *id == agent)
         .copied()
         .ok_or(ANTHROPIC_AGENT_UNSUPPORTED)?;
+    if effort.is_some_and(|e| !HERMES_EFFORTS.contains(&e)) {
+        return Err(EFFORT_INVALID.into());
+    }
     let saved = crate::anthropic_keys::find(root, key)?;
     let model = match model {
         Some(m) if !crate::anthropic_keys::model_valid(m) => {
@@ -2010,25 +2334,36 @@ pub fn launch_agent_anthropic(
         None => saved.model.clone().ok_or(ANTHROPIC_MODEL_NEEDED)?,
     };
     let working_directory = agent_folder(root, working_directory)?;
-    let program = find_program(id).ok_or_else(|| {
+    let program = find(id).ok_or_else(|| {
         format!("{name} is not installed. Install it first, then launch it again.")
     })?;
-    let cli = agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
+    let cli = cli.ok_or(OPENROUTER_CLI_MISSING)?;
     let homes = root.join("runtimes");
     private_dir(&homes)?;
     let home = homes.join(format!("agent-{id}-anthropic-{key}"));
     private_dir(&home)?;
-    let own = home.join("agent-home");
-    private_dir(&own)?;
+    // SB-535: the home's own config keeps Hermes on this key: it never adopts Claude Code's
+    // sign-in (`auth.adopt_external_logins: false`), has no fallback provider, and its side tasks
+    // run on the same key and model; the home's `.env` and the script clear every other provider
+    // key, so nothing this launch does is billed elsewhere.
+    let own = hermes_anthropic_home(&home, &model)?;
     let launch_id = crate::launches::new_id();
-    let env = BTreeMap::from([
+    let mut env = BTreeMap::from([
         (
             "HERMES_HOME".to_string(),
             own.to_string_lossy().into_owned(),
         ),
         (crate::launches::ENV.to_string(), launch_id.clone()),
     ]);
-    let args = ["--provider", "anthropic", "-m", model.as_str()];
+    let mut args: Vec<String> = ["--provider", "anthropic", "-m", model.as_str()]
+        .map(str::to_owned)
+        .to_vec();
+    if let Some(effort) = effort {
+        args.extend(["--reasoning".to_owned(), effort.to_owned()]);
+    }
+    // SB-515: Hermes runs with its own full access unless the person chose `ask`.
+    with_full_access(root, id, &mut args, &mut env);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let key_command = vec![
         "--data-dir".to_string(),
         root.to_string_lossy().into_owned(),
@@ -2036,17 +2371,26 @@ pub fn launch_agent_anthropic(
         "anthropic".into(),
         "key".into(),
         key.to_owned(),
+        // SB-420: the key prints only into the pipe this script reads it from.
+        "--to-pipe".into(),
     ];
-    let content = script_with(
-        &home,
-        &program,
-        &args,
-        &env,
-        Some(("ANTHROPIC_API_KEY", &cli, &key_command)),
-        false,
-        &working_directory,
+    let content = with_unset(
+        script_with(
+            &home,
+            &program,
+            &args,
+            &env,
+            Some(("ANTHROPIC_API_KEY", &cli, &key_command)),
+            false,
+            &working_directory,
+        ),
+        HERMES_PROVIDER_KEYS,
     );
     let path = write_launch_script(&home, &content)?;
+    let label = match effort {
+        Some(effort) => format!("{key} · {model} · {effort}"),
+        None => format!("{key} · {model}"),
+    };
     // Listed under Sessions like any launch, labelled with the key's name and model; never the key.
     let record = json!({
         "account_id": format!("anthropic:{key}"), "provider": "anthropic", "agent": id,
@@ -2054,13 +2398,40 @@ pub fn launch_agent_anthropic(
         "pool": "anthropic", "mode": "isolated",
         "working_directory": working_directory, "in_place": false,
         "launched_at": switchboard_proxy::now(), "continues": null,
-        "label": format!("{key} · {model}"),
+        "label": label,
     });
     crate::launches::record(root, &home, record, &launch_id)?;
     start(&path)?;
     Ok(
-        json!({"launched": true, "agent": id, "name": name, "via": "anthropic", "key": key, "model": model}),
+        json!({"launched": true, "agent": id, "name": name, "via": "anthropic", "key": key, "model": model, "effort": effort}),
     )
+}
+/// SB-535: the Hermes home of a launch on a named Anthropic key: Hermes's built-in `anthropic`
+/// provider (its key from `ANTHROPIC_API_KEY`, which the script reads from the vault), no
+/// fallback, no adopted sign-in, every side task on the same provider and model.
+fn hermes_anthropic_home(home: &Path, model: &str) -> Result<PathBuf, String> {
+    let own = home.join("agent-home");
+    private_dir(&own)?;
+    let mut config = String::from(
+        "# Written by Fabric Switchboard for this launch: Hermes on a named Anthropic key.\n\
+fallback_providers: []\n\
+auth:\n  adopt_external_logins: false\n\
+auxiliary:\n",
+    );
+    for task in HERMES_AUX_TASKS {
+        config.push_str(&format!(
+            "  {task}:\n    provider: anthropic\n    model: \"{model}\"\n"
+        ));
+    }
+    switchboard_core::private_fs::private_write(&own.join("config.yaml"), config.as_bytes())
+        .map_err(|_| "Managed home unavailable.".to_string())?;
+    let dotenv: String = HERMES_PROVIDER_KEYS
+        .iter()
+        .map(|name| format!("{name}=\n"))
+        .collect();
+    switchboard_core::private_fs::private_write(&own.join(".env"), dotenv.as_bytes())
+        .map_err(|_| "Managed home unavailable.".to_string())?;
+    Ok(own)
 }
 pub const OPENROUTER_CLI_MISSING: &str =
     "The switchboard command was not found. Install it from Agents, then launch again.";
@@ -2202,6 +2573,8 @@ fn hermes_continuation_session(
                 .iter()
                 .map(|a| a.replace("{model}", &model)),
         );
+        // SB-515: nobody may be there to answer Hermes's approval prompts.
+        with_full_access(root, "hermes", &mut args, &mut env);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let content = script_with(
             &session,
@@ -2346,7 +2719,12 @@ pub(crate) fn opencode_continuation_session(
         let launch_id = crate::launches::new_id();
         env.insert(crate::launches::ENV.into(), launch_id.clone());
         let model_arg = format!("openrouter/{model}");
-        let args = ["--prompt", first.as_str(), "-m", model_arg.as_str()];
+        let mut args: Vec<String> = ["--prompt", first.as_str(), "-m", model_arg.as_str()]
+            .map(str::to_owned)
+            .to_vec();
+        // SB-515: nobody may be there to answer OpenCode's permission prompts.
+        with_full_access(root, "opencode", &mut args, &mut env);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let content = script_with(
             &session,
             program,
@@ -2498,6 +2876,8 @@ fn key_command(
             command.push(pool.clone());
         }
     }
+    // SB-420: the key prints only into the pipe this script reads it from.
+    command.push("--to-pipe".into());
     Ok((command, slot))
 }
 fn openrouter_session(
@@ -2565,6 +2945,8 @@ fn openrouter_session(
                 .map(|a| a.replace("{model}", model)),
         );
     }
+    // SB-515: the agent runs with its own full access unless the person chose `ask`.
+    with_full_access(root, &recipe.id, &mut args, &mut env);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     // SB-144, SB-213: the key of the project the agent starts in, by the slot its spend gate read,
     // never by its folder when the script runs.
@@ -2644,6 +3026,7 @@ pub fn launch_continuation(
 }
 /// `launch_continuation` prepared for the caller's own terminal (SB-108): the same session, home
 /// and first prompt, its script returned instead of Terminal opened.
+#[allow(clippy::too_many_arguments)]
 pub fn continuation_here(
     root: &Path,
     store: &Arc<Store>,
@@ -2652,6 +3035,7 @@ pub fn continuation_here(
     mode: &str,
     working_directory: &Path,
     continuation: &Continuation,
+    handed: Handed,
 ) -> Result<(bool, PathBuf), String> {
     continuation_here_with(
         root,
@@ -2662,6 +3046,7 @@ pub fn continuation_here(
         working_directory,
         &NATIVE,
         continuation,
+        handed,
     )
 }
 #[allow(clippy::too_many_arguments)]
@@ -2674,11 +3059,12 @@ fn continuation_here_with(
     working_directory: &Path,
     host: &Host,
     continuation: &Continuation,
+    handed: Handed,
 ) -> Result<(bool, PathBuf), String> {
     if cfg!(windows) {
         return Err(IN_PLACE_UNSUPPORTED.into());
     }
-    let (tools, script) = launch_full(
+    let (tools, script, _) = launch_core(
         root,
         store,
         proxy,
@@ -2689,6 +3075,8 @@ fn continuation_here_with(
         Some(continuation),
         &[],
         true,
+        handed,
+        None,
     )?;
     Ok((tools, script.ok_or(IN_PLACE_UNSUPPORTED)?))
 }
@@ -2854,6 +3242,11 @@ fn launch_full(
         continuation,
         extra,
         in_place,
+        if in_place {
+            Handed::Caller
+        } else {
+            Handed::Terminal
+        },
         None,
     )
     .map(|(tools, script, _)| (tools, script))
@@ -2870,6 +3263,8 @@ fn launch_core(
     continuation: Option<&Continuation>,
     extra: &[String],
     in_place: bool,
+    // SB-440: who runs the script once it is prepared (only when it is not opened in Terminal).
+    handed: Handed,
     headless: Option<&Headless>,
 ) -> Result<(bool, Option<PathBuf>, Option<Dispatched>), String> {
     if !extra_valid(extra) {
@@ -3000,6 +3395,7 @@ fn launch_core(
         );
         match account.provider {
             Provider::Claude => {
+                write_route(&home, &base, proxy.token(), &pool)?;
                 env.insert("ANTHROPIC_BASE_URL".into(), base);
                 env.insert("ANTHROPIC_AUTH_TOKEN".into(), proxy.token().into());
                 env.insert("ANTHROPIC_API_KEY".into(), String::new());
@@ -3073,8 +3469,13 @@ fn launch_core(
     // config file; a caller's own `--mcp-config` still adds to it (SB-94, measured on 2.1.296).
     let config = config.map(|path| format!("--mcp-config={path}"));
     // SB-247: a dispatched run starts no interactive session (`headless_args`).
+    // SB-452: a managed Claude session takes its route from its home's own file, whatever a
+    // folder's (or its main checkout's) local settings say.
+    let route =
+        (mode == "managed" && account.provider == Provider::Claude).then(|| route_arg(&home));
     if let Some(h) = headless {
-        let args = headless_args(account.provider, config.as_deref(), h);
+        let mut args = headless_args(account.provider, config.as_deref(), h);
+        args.extend(route.clone());
         let launch_id = crate::launches::new_id();
         env.insert(crate::launches::ENV.into(), launch_id.clone());
         env.insert(DISPATCH_ENV.into(), h.workflow.clone());
@@ -3112,7 +3513,7 @@ fn launch_core(
             &working_directory,
             &launch_id,
         )?;
-        reservation.committed = true;
+        reservation.commit(Handed::Caller);
         journal_launch(store, id, mode);
         return Ok((
             cli.is_some(),
@@ -3134,6 +3535,12 @@ fn launch_core(
         args.push(first.as_str());
     }
     args.extend(extra.iter().map(String::as_str));
+    // SB-452: last, so a caller's own `--settings` cannot replace it; before a caller's `--`, after
+    // which it would be read as a prompt.
+    if let Some(route) = &route {
+        let at = args.iter().position(|a| *a == "--").unwrap_or(args.len());
+        args.insert(at, route.as_str());
+    }
     // SB-212: the session's own launch id, for the record and for what it launches.
     let launch_id = crate::launches::new_id();
     env.insert(crate::launches::ENV.into(), launch_id.clone());
@@ -3158,7 +3565,7 @@ fn launch_core(
     if !in_place {
         (host.start_terminal)(&path)?;
     }
-    reservation.committed = true;
+    reservation.commit(if in_place { handed } else { Handed::Terminal });
     journal_launch(store, id, mode);
     Ok((cli.is_some(), in_place.then_some(path), None))
 }
@@ -3173,48 +3580,53 @@ pub const DISPATCH_HANDOFF_ENV: &str = "FABRIC_DISPATCH_HANDOFF";
 pub const DISPATCH_REQUEST_ENV: &str = "FABRIC_DISPATCH_REQUEST";
 /// SB-247: Fabric's id for the dispatch (`--dispatch-id`), absent without the flag.
 pub const DISPATCH_ID_ENV: &str = "FABRIC_DISPATCH_ID";
-/// SB-298: the arguments that bypass an interactive session's permission prompts, unless the
-/// person chose `ask` or the caller's own arguments already name a permission mode. Codex takes
-/// them as `-c` overrides, which hold before a subcommand such as `resume` (a caller's console
-/// passes one); Claude Code takes its flag.
-pub(crate) fn bypass_args(root: &Path, provider: Provider, extra: &[String]) -> Vec<&'static str> {
-    let (args, own): (&[&'static str], &[&str]) = match provider {
-        Provider::Claude => (
-            &["--dangerously-skip-permissions"],
-            &[
-                "--dangerously-skip-permissions",
-                "--permission-mode",
-                "--allow-dangerously-skip-permissions",
-            ],
-        ),
-        Provider::Codex => (
-            &[
-                "-c",
-                "approval_policy=\"never\"",
-                "-c",
-                "sandbox_mode=\"danger-full-access\"",
-            ],
-            &[
-                "--dangerously-bypass-approvals-and-sandbox",
-                "--yolo",
-                "--full-auto",
-                "-a",
-                "--ask-for-approval",
-                "-s",
-                "--sandbox",
-                "approval_policy",
-                "sandbox_mode",
-            ],
-        ),
-    };
+/// SB-515: an agent's own full-access arguments and environment (its catalog entry's
+/// `full_access`), unless the person chose `ask` (`agents permissions ask`) or the caller's own
+/// arguments already name a mode, which then wins. The one rule for every agent Switchboard
+/// starts: Claude Code and Codex sessions (SB-298), Kimi Code, Hermes, OpenCode and the catalog
+/// agents on a key.
+pub(crate) fn full_access(
+    root: &Path,
+    agent: &str,
+    extra: &[String],
+) -> Option<&'static crate::agent_catalog::FullAccess> {
+    let access = crate::agent_catalog::full_access(agent)?;
     let named = extra.iter().any(|a| {
-        own.iter()
+        access
+            .named
+            .iter()
             .any(|o| a == o || a.starts_with(&format!("{o}=")))
     });
     if named || !crate::agent_settings::bypass(root) {
-        return Vec::new();
+        return None;
     }
-    args.to_vec()
+    Some(access)
+}
+/// SB-515: `args` and `env` of a launch of `agent` with its full-access arguments after the
+/// launch's own and its full-access environment, unless `full_access` gives none.
+pub(crate) fn with_full_access(
+    root: &Path,
+    agent: &str,
+    args: &mut Vec<String>,
+    env: &mut BTreeMap<String, String>,
+) {
+    if let Some(access) = full_access(root, agent, &[]) {
+        args.extend(access.args.iter().cloned());
+        env.extend(access.env.clone());
+    }
+}
+/// SB-298: the arguments that bypass an interactive session's permission prompts, unless the
+/// person chose `ask` or the caller's own arguments already name a permission mode. Codex takes
+/// them as `-c` overrides, which hold before a subcommand such as `resume` (a caller's console
+/// passes one); Claude Code takes its flag. SB-515: read from the catalog's `full_access`.
+pub(crate) fn bypass_args(root: &Path, provider: Provider, extra: &[String]) -> Vec<&'static str> {
+    let agent = match provider {
+        Provider::Claude => "claude-code",
+        Provider::Codex => "codex",
+    };
+    full_access(root, agent, extra)
+        .map(|a| a.args.iter().map(String::as_str).collect())
+        .unwrap_or_default()
 }
 /// SB-405: a hand-over taken with `--ask` continues only on Claude Code or Codex.
 pub const ASK_AGENT: &str = "Only a Claude Code or Codex hand-over can start with permission prompts on, and this one continues on another agent. It is still waiting: take it without --ask, or leave it for Terminal.";
@@ -3475,28 +3887,54 @@ pub const DISPATCH_FAILED: &str =
     "The dispatched session did not start: its program could not be run.";
 pub const DISPATCH_WOULD_NOT_STOP: &str =
     "The dispatched session did not stop. End its process by hand, then stop it again.";
-/// SB-247: the PATH a run started by the owner gets: the program's own folder first (a
-/// `#!/usr/bin/env node` launcher finds its `node` beside it), then the owner's, then the
-/// per-user and Homebrew folders the desktop app's PATH lacks.
+/// SB-247, SB-455: the PATH of a dispatched run (`spawn_headless`), which inherits none: the
+/// program's own folder first (a `#!/usr/bin/env node` launcher finds its `node` beside it), then
+/// the person's login PATH (`login_path::login_dirs`, asked by the process that builds the run),
+/// then this process's, then the per-user and Homebrew folders a launchd PATH lacks.
 pub(crate) fn headless_path(program: &Path) -> std::ffi::OsString {
-    let mut dirs: Vec<PathBuf> = program
-        .parent()
-        .map(Path::to_path_buf)
+    session_path(program, crate::login_path::login_dirs().as_deref())
+}
+/// SB-455: a session script's `PATH` line (a launch script, a resume script): the program's own
+/// folder, then the `PATH` the script was started with, then the rest of `headless_path` after it
+/// (a folder already in that `PATH` may appear twice; lookup takes the first). The inherited `PATH` stays ahead of the login one, so a terminal's
+/// version-manager shims are not shadowed by `/usr/bin`.
+pub(crate) fn path_export(program: &Path) -> String {
+    path_export_with(program, crate::login_path::login_dirs().as_deref())
+}
+/// `path_export` with the login folders given.
+pub(crate) fn path_export_with(program: &Path, login: Option<&[PathBuf]>) -> String {
+    use fabric_sessions_core::cli::quoted;
+    let first = program.parent().filter(|d| !d.as_os_str().is_empty());
+    let rest: Vec<PathBuf> = std::env::split_paths(&session_path(program, login))
+        .filter(|d| Some(d.as_path()) != first)
+        .collect();
+    let rest = std::env::join_paths(rest).unwrap_or_default();
+    let rest = rest.to_string_lossy();
+    let mut line = String::from("export PATH=");
+    match first {
+        Some(first) => {
+            line.push_str(&quoted(&first.to_string_lossy()));
+            line.push_str("\"${PATH:+:$PATH}\"");
+            if !rest.is_empty() {
+                line.push_str(&quoted(&format!(":{rest}")));
+            }
+        }
+        None if rest.is_empty() => line.push_str("\"${PATH:-}\""),
+        None => {
+            line.push_str("\"${PATH:+$PATH:}\"");
+            line.push_str(&quoted(&rest));
+        }
+    }
+    line.push('\n');
+    line
+}
+/// `headless_path` with the login folders given.
+pub(crate) fn session_path(program: &Path, login: Option<&[PathBuf]>) -> std::ffi::OsString {
+    let extra: Vec<PathBuf> = std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".local/bin"))
         .into_iter()
         .collect();
-    if let Some(path) = std::env::var_os("PATH") {
-        dirs.extend(std::env::split_paths(&path));
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(PathBuf::from(home).join(".local/bin"));
-    }
-    dirs.extend([
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-    ]);
-    let mut seen = std::collections::BTreeSet::new();
-    dirs.retain(|d| seen.insert(d.clone()));
-    std::env::join_paths(dirs).unwrap_or_default()
+    crate::login_path::merge(program.parent(), login, std::env::var_os("PATH"), &extra)
 }
 /// SB-247: starts a dispatched run from the owner's own process: no Terminal, no PowerShell. It
 /// leads its own process group (Unix) or a new process group with no window (Windows), reads
@@ -3592,6 +4030,7 @@ pub(crate) fn dispatch_session(
         Some(continuation),
         &[],
         false,
+        Handed::Caller,
         Some(headless),
     )?
     .2
@@ -3799,12 +4238,7 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
 /// A home's session state now (`starting`, `running`, `ended` or `unknown`, see `sessions`)
 /// and when its process started, from its marker.
 pub(crate) fn home_state(home: &Path) -> (&'static str, Option<i64>) {
-    let pending = fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|meta| {
-        meta.file_type().is_file()
-            && !meta
-                .modified()
-                .is_ok_and(|t| reservation_expired(t, SystemTime::now()))
-    });
+    let pending = reservation_open(home);
     let state = if pending {
         "starting"
     } else {
@@ -4296,6 +4730,11 @@ mod tests {
         );
         assert!(s.contains("'/tmp/a'\\''b'"));
         assert!(s.contains("unset ANTHROPIC_API_KEY"));
+        let unset = s.lines().find(|l| l.starts_with("unset ")).unwrap();
+        assert!(
+            unset.split(' ').any(|w| w == "ANTHROPIC_CUSTOM_HEADERS"),
+            "SB-533: a parent session's route header is cleared"
+        );
         assert!(s.contains(".completed"));
         assert!(!s.contains("set -x"));
     }
@@ -4514,7 +4953,7 @@ mod tests {
     fn stale_reservation_no_longer_holds_the_home() {
         let root = tempfile::tempdir().unwrap();
         let mut hold = Reservation::new(root.path()).unwrap();
-        hold.committed = true; // Terminal was asked to run the script, which never ran.
+        hold.commit(Handed::Terminal); // Terminal was asked to run the script, which never ran.
         drop(hold);
         age(&root.path().join(".launch-pending"), 9 * 60);
         assert!(
@@ -4523,8 +4962,233 @@ mod tests {
         );
         age(&root.path().join(".launch-pending"), 11 * 60);
         assert!(ensure_idle(root.path()).is_ok());
-        assert!(!root.path().join(".launch-pending").exists());
+        // SB-448: a check only reads; the next reservation clears the stale marker.
+        assert!(root.path().join(".launch-pending").exists());
         assert!(Reservation::new(root.path()).is_ok());
+    }
+    /// SB-448: takes a reservation on `home`, as the next launch does, and answers the reasons
+    /// of the stale markers it cleared; the reservation is dropped, so no marker is left.
+    fn reserve_clearing(home: &Path) -> Vec<&'static str> {
+        let (hold, events) = crate::oplog::capture_fields(|| Reservation::new(home));
+        drop(hold.expect("the next launch proceeds"));
+        assert!(!home.join(".launch-pending").exists());
+        events
+            .into_iter()
+            .filter(|(event, _)| *event == "launch_reservation")
+            .flat_map(|(_, fields)| fields)
+            .filter_map(|(name, field)| match (name, field) {
+                ("reason", crate::oplog::Field::Code(code)) => Some(code),
+                _ => None,
+            })
+            .collect()
+    }
+    /// SB-440: the marker's contents as `ensure_idle` reads them, with its time set back.
+    fn marker(home: &Path, contents: &str, seconds: u64) {
+        let path = home.join(".launch-pending");
+        private_write(&path, contents.as_bytes(), false).unwrap();
+        age(&path, seconds);
+    }
+    #[test]
+    fn sb440_a_marker_no_caller_took_frees_the_home_after_five_minutes() {
+        // The 2026-11-18 incident: the owner prepared an in-place session, the CLI's control
+        // request had already timed out, and nothing ran the script.
+        let root = tempfile::tempdir().unwrap();
+        let unclaimed = r#"{"pid":null,"by":"caller"}"#;
+        marker(root.path(), unclaimed, 4 * 60);
+        assert!(
+            reservation_open(root.path()),
+            "a caller still has time to run it"
+        );
+        assert!(ensure_idle(root.path()).is_err());
+        marker(root.path(), unclaimed, 6 * 60);
+        assert!(!reservation_open(root.path()));
+        assert_eq!(home_state(root.path()).0, "ended");
+        let (idle, events) = crate::oplog::capture_fields(|| ensure_idle(root.path()));
+        idle.unwrap();
+        assert!(events.is_empty(), "a check clears nothing: {events:?}");
+        assert!(root.path().join(".launch-pending").exists());
+        assert_eq!(reserve_clearing(root.path()), ["unclaimed"]);
+    }
+    #[test]
+    fn sb440_a_marker_handed_to_terminal_still_holds_for_ten_minutes() {
+        let root = tempfile::tempdir().unwrap();
+        marker(root.path(), r#"{"pid":null,"by":"terminal"}"#, 6 * 60);
+        assert!(
+            ensure_idle(root.path()).is_err(),
+            "Terminal may still be opening"
+        );
+        marker(root.path(), "", 6 * 60);
+        assert!(
+            ensure_idle(root.path()).is_err(),
+            "an earlier version's marker"
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn sb440_a_marker_whose_preparing_process_is_gone_is_cleared_at_once() {
+        let root = tempfile::tempdir().unwrap();
+        let mut child = Command::new("/usr/bin/true").spawn().unwrap();
+        let gone = child.id();
+        child.wait().unwrap();
+        marker(root.path(), &format!(r#"{{"pid":{gone}}}"#), 0);
+        assert!(ensure_idle(root.path()).is_ok());
+        assert_eq!(reserve_clearing(root.path()), ["launcher_gone"]);
+        // A live preparing process (this one) still holds the home.
+        marker(
+            root.path(),
+            &format!(r#"{{"pid":{}}}"#, std::process::id()),
+            0,
+        );
+        assert!(ensure_idle(root.path()).is_err());
+        assert!(root.path().join(".launch-pending").exists());
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
+    #[test]
+    fn sb440_a_preparer_is_told_by_its_start_token_not_its_pid_alone() {
+        // Review round 1: a pid reused by another process frees the home on every platform.
+        let root = tempfile::tempdir().unwrap();
+        let me = std::process::id();
+        let token = crate::copies::process_token(me).expect("this process's start token");
+        marker(
+            root.path(),
+            &json!({"pid": me, "token": token}).to_string(),
+            0,
+        );
+        assert!(ensure_idle(root.path()).is_err(), "the same process holds");
+        marker(
+            root.path(),
+            &json!({"pid": me, "token": token + 1}).to_string(),
+            0,
+        );
+        assert!(ensure_idle(root.path()).is_ok());
+        assert_eq!(reserve_clearing(root.path()), ["launcher_gone"]);
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sb445_a_linux_process_started_when_it_was_spawned() {
+        let before = SystemTime::now();
+        let mut child = Command::new("/bin/sleep").arg("5").spawn().unwrap();
+        let started = process_started(child.id());
+        let _ = child.kill();
+        let _ = child.wait();
+        let started = started.expect("the start of a live child");
+        let slack = Duration::from_secs(3);
+        assert!(started + slack >= before && started <= SystemTime::now() + slack);
+    }
+    #[test]
+    fn sb440_clearing_a_stale_marker_never_removes_a_fresh_one() {
+        // Review round 1: between judging a marker stale and clearing it, another launch may have
+        // cleared it and written its own; that one stays and keeps the home.
+        let root = tempfile::tempdir().unwrap();
+        let fresh = json!({"pid": null, "by": "caller"}).to_string();
+        marker(root.path(), &fresh, 0);
+        assert_eq!(
+            clear_stale(root.path(), SystemTime::now()).unwrap_err(),
+            HOME_BUSY
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join(".launch-pending")).unwrap(),
+            fresh
+        );
+        marker(root.path(), &fresh, 6 * 60);
+        clear_stale(root.path(), SystemTime::now()).unwrap();
+        assert!(!root.path().join(".launch-pending").exists());
+        // Nothing is left aside either way, and a marker already gone is not an error.
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+        clear_stale(root.path(), SystemTime::now()).unwrap();
+    }
+    #[test]
+    fn sb448_a_marker_that_cannot_be_linked_back_is_moved_back_never_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        let fresh = json!({"pid": null, "by": "caller"}).to_string();
+        marker(root.path(), &fresh, 0);
+        let refused = |_: &Path, _: &Path| -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+        };
+        assert_eq!(
+            clear_stale_with(root.path(), SystemTime::now(), refused).unwrap_err(),
+            HOME_BUSY
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join(".launch-pending")).unwrap(),
+            fresh
+        );
+        assert_eq!(
+            fs::read_dir(root.path()).unwrap().count(),
+            1,
+            "nothing left aside"
+        );
+        // Another marker took the name meanwhile: it stays, and the copy aside goes.
+        let taken = |_: &Path, to: &Path| -> std::io::Result<()> {
+            fs::write(to, "other")?;
+            Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
+        };
+        assert!(clear_stale_with(root.path(), SystemTime::now(), taken).is_err());
+        assert_eq!(
+            fs::read_to_string(root.path().join(".launch-pending")).unwrap(),
+            "other"
+        );
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+    #[test]
+    fn sb448_read_only_checks_never_remove_a_marker() {
+        let f = tempfile::tempdir().unwrap();
+        let home = f.path().join("runtimes").join("claude-tokens");
+        private_dir(&f.path().join("runtimes")).unwrap();
+        private_dir(&home).unwrap();
+        marker(&home, r#"{"pid":null,"by":"caller"}"#, 6 * 60);
+        // Stale: nothing will run its script, so no session runs, and the marker stays.
+        assert!(!launched_session_running(f.path(), Provider::Claude, &[]));
+        assert!(!reservation_open(&home));
+        assert_eq!(home_state(&home).0, "ended");
+        assert!(ensure_idle(&home).is_ok());
+        assert!(home.join(".launch-pending").exists());
+        // A marker that holds is a running launch.
+        marker(&home, r#"{"pid":null,"by":"caller"}"#, 0);
+        assert!(launched_session_running(f.path(), Provider::Claude, &[]));
+        assert_eq!(home_state(&home).0, "starting");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn sb449_a_marker_that_is_not_a_regular_file_holds_everywhere() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".launch-pending")).unwrap();
+        assert!(ensure_idle(root.path()).is_err());
+        assert!(reservation_open(root.path()));
+        assert_eq!(home_state(root.path()).0, "starting");
+        assert!(Reservation::new(root.path()).is_err());
+        assert!(root.path().join(".launch-pending").is_dir());
+    }
+    #[test]
+    fn sb449_an_in_place_continue_is_the_callers_unless_queued() {
+        assert_eq!(Handed::for_continue(false), Handed::Caller);
+        assert_eq!(Handed::for_continue(true), Handed::Terminal);
+    }
+    #[test]
+    fn sb440_a_reservation_names_its_preparer_then_who_runs_the_script() {
+        let root = tempfile::tempdir().unwrap();
+        let read = || -> Value {
+            serde_json::from_slice(&fs::read(root.path().join(".launch-pending")).unwrap()).unwrap()
+        };
+        let mut hold = Reservation::new(root.path()).unwrap();
+        let me = std::process::id();
+        assert_eq!(
+            read(),
+            json!({"pid": me, "token": crate::copies::process_token(me)})
+        );
+        hold.commit(Handed::Caller);
+        assert_eq!(read(), json!({"pid": null, "by": "caller"}));
+        drop(hold);
+        assert!(
+            root.path().join(".launch-pending").exists(),
+            "the script removes it"
+        );
+        // A script that already started removed the marker; committing never writes it again.
+        fs::remove_file(root.path().join(".launch-pending")).unwrap();
+        let mut hold = Reservation::new(root.path()).unwrap();
+        fs::remove_file(root.path().join(".launch-pending")).unwrap();
+        hold.commit(Handed::Terminal);
+        assert!(!root.path().join(".launch-pending").exists());
     }
     #[test]
     fn sign_in_whose_terminal_never_ran_can_be_cancelled_once_its_reservation_expires() {
@@ -4532,7 +5196,7 @@ mod tests {
         let home = root.path().join("login");
         private_dir(&home).unwrap();
         let mut hold = Reservation::new(&home).unwrap();
-        hold.committed = true;
+        hold.commit(Handed::Terminal);
         drop(hold);
         let login = Login {
             id: Uuid::new_v4().to_string(),
@@ -5632,6 +6296,85 @@ mod tests {
     fn goose_installed(_: &str) -> Option<PathBuf> {
         Some(PathBuf::from("/opt/Agent Tools/goose"))
     }
+    fn hermes_installed(_: &str) -> Option<PathBuf> {
+        Some(PathBuf::from("/opt/Agent Tools/hermes"))
+    }
+    /// SB-535: Hermes on a named Anthropic key runs at the reasoning level asked, never adopts
+    /// Claude Code's sign-in, falls back nowhere and keeps its side tasks on the same key.
+    #[test]
+    fn hermes_on_a_named_anthropic_key_keeps_to_that_key_at_its_reasoning_level() {
+        let f = fixture();
+        crate::anthropic_keys::set(
+            &f.root,
+            &f.store,
+            "team-a",
+            "sk-ant-api03-synthetic-named",
+            Some("claude-fable-5-2"),
+            1,
+        )
+        .unwrap();
+        let cli = Some(PathBuf::from("/opt/Agent Tools/switchboard"));
+        let launch = |effort: Option<&str>| {
+            launch_agent_anthropic_with(
+                &f.root,
+                "hermes",
+                "team-a",
+                None,
+                effort,
+                &f.project,
+                hermes_installed,
+                cli.clone(),
+                terminal_opens,
+            )
+        };
+        assert_eq!(launch(Some("extreme")).unwrap_err(), EFFORT_INVALID);
+        let answer = launch(Some("xhigh")).unwrap();
+        assert_eq!(answer["via"], "anthropic");
+        assert_eq!(answer["model"], "claude-fable-5-2");
+        assert_eq!(answer["effort"], "xhigh");
+        let home = f.root.join("runtimes/agent-hermes-anthropic-team-a");
+        let config = fs::read_to_string(home.join("agent-home/config.yaml")).unwrap();
+        assert!(config.contains("auth:\n  adopt_external_logins: false"));
+        assert!(config.contains("fallback_providers: []"));
+        assert!(config.contains(
+            "  title_generation:\n    provider: anthropic\n    model: \"claude-fable-5-2\""
+        ));
+        assert!(config.contains("  compression:\n    provider: anthropic"));
+        assert!(!config.contains("synthetic-named"));
+        let dotenv = fs::read_to_string(home.join("agent-home/.env")).unwrap();
+        assert_eq!(dotenv.lines().count(), HERMES_PROVIDER_KEYS.len());
+        assert!(!dotenv.contains("ANTHROPIC_API_KEY"));
+        let script = fs::read_to_string(home.join(if cfg!(windows) {
+            "launch.ps1"
+        } else {
+            "launch.command"
+        }))
+        .unwrap();
+        assert!(script.contains("--reasoning") && script.contains("xhigh"));
+        assert!(script.contains("--provider") && script.contains("anthropic"));
+        assert!(script.contains("HERMES_HOME"));
+        assert!(!script.contains("synthetic-named"));
+        #[cfg(not(windows))]
+        {
+            assert!(script.contains("unset OPENROUTER_API_KEY NOUS_API_KEY"));
+            // The parent's proxy route never reaches it (SB-533).
+            assert!(script.contains(" ANTHROPIC_BASE_URL"));
+            assert!(script.contains("ANTHROPIC_API_KEY=\"$("));
+        }
+        let record = recorded(&home);
+        assert_eq!(record["pool"], "anthropic");
+        assert_eq!(record["label"], "team-a · claude-fable-5-2 · xhigh");
+        // Without a level Hermes keeps its own, and the flag is not passed.
+        let plain = launch(None).unwrap();
+        assert_eq!(plain["effort"], Value::Null);
+        let script = fs::read_to_string(home.join(if cfg!(windows) {
+            "launch.ps1"
+        } else {
+            "launch.command"
+        }))
+        .unwrap();
+        assert!(!script.contains("--reasoning"));
+    }
     /// SB-201: an agent launched through the proxy on an API-key account records its session
     /// and the account's context, as a Claude Code launch does.
     #[tokio::test]
@@ -6500,6 +7243,126 @@ mod tests {
             crate::agent_settings::PERMISSIONS_INVALID
         );
     }
+    /// SB-515: whether a launch script gives `agent` its full access (its catalog arguments and
+    /// environment), or none of it.
+    #[cfg(not(windows))]
+    fn carries_full_access(text: &str, agent: &str) -> bool {
+        let access = crate::agent_catalog::full_access(agent).unwrap();
+        let exec = text.lines().find(|l| l.starts_with("exec ")).unwrap_or("");
+        let args = access
+            .args
+            .iter()
+            .all(|a| exec.contains(&format!(" {}", quote(a))));
+        let env = access
+            .env
+            .iter()
+            .all(|(k, v)| text.contains(&format!("export {k}={}\n", quote(v))));
+        let none = access.args.iter().all(|a| !text.contains(&quote(a)))
+            && access
+                .env
+                .keys()
+                .all(|k| !text.contains(&format!("export {k}=")));
+        assert!(args && env || none, "{agent}: partly given\n{text}");
+        args && env
+    }
+    /// SB-515: every agent Switchboard starts on a key runs with its own full access (Kimi Code's
+    /// `--auto`, Hermes's `--yolo`, OpenCode's `--auto`, Goose's `GOOSE_MODE=auto`, Pi's
+    /// `--approve`, Aider's `--yes-always`), Hermes's and OpenCode's hand-overs included, unless
+    /// the person chose `ask`.
+    #[cfg(not(windows))]
+    #[test]
+    fn every_agent_on_a_key_runs_with_full_access_unless_the_person_chose_ask() {
+        let continuation = crate::continuation::Continuation {
+            workflow_id: "wf_00112233445566bb".into(),
+            handoff_id: "ho_synthetic".into(),
+            observatory: crate::continuation::McpServer {
+                command: "/opt/engine/python".into(),
+                args: vec!["/opt/engine/mcp/server.py".into()],
+            },
+            previous_provider: Some("claude".into()),
+        };
+        for ask in [false, true] {
+            let f = fixture();
+            if ask {
+                crate::agent_settings::set_permissions(&f.root, crate::agent_settings::ASK)
+                    .unwrap();
+            }
+            openrouter_key(&f, Some("moonshotai/kimi-k2"));
+            for agent in ["kimi-code", "hermes", "opencode", "goose", "pi", "aider"] {
+                let (path, _) = openrouter_launch(&f, agent, Some("moonshotai/kimi-k2"))
+                    .unwrap_or_else(|e| panic!("{agent}: {e}"));
+                let text = fs::read_to_string(&path).unwrap();
+                assert_eq!(carries_full_access(&text, agent), !ask, "{agent}: {text}");
+            }
+            let (path, _) = hermes_continuation_session(
+                &f.root,
+                &f.store,
+                Path::new("/opt/Agent Tools/hermes"),
+                Path::new("/opt/Switchboard Tools/switchboard"),
+                &f.project,
+                &continuation,
+                None,
+            )
+            .unwrap();
+            let text = fs::read_to_string(&path).unwrap();
+            assert_eq!(carries_full_access(&text, "hermes"), !ask, "{text}");
+            assert!(text.contains("'chat' '--query-file' "), "{text}");
+            let (path, _) = opencode_continuation_session(
+                &f.root,
+                &f.store,
+                Path::new("/opt/Agent Tools/opencode"),
+                Path::new("/opt/Switchboard Tools/switchboard"),
+                &f.project,
+                &continuation,
+            )
+            .unwrap();
+            let text = fs::read_to_string(&path).unwrap();
+            assert_eq!(carries_full_access(&text, "opencode"), !ask, "{text}");
+        }
+    }
+    /// SB-515: a catalog agent on a group's API key, through the proxy, runs with its own full
+    /// access too (Claude Code's `--dangerously-skip-permissions`, OpenCode's `--auto`, Goose's
+    /// `GOOSE_MODE=auto`), unless the person chose `ask`.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_catalog_agent_through_the_proxy_runs_with_full_access_unless_asked() {
+        for ask in [false, true] {
+            let f = fixture();
+            if ask {
+                crate::agent_settings::set_permissions(&f.root, crate::agent_settings::ASK)
+                    .unwrap();
+            }
+            let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+            let api = f.add(
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default",
+                "synthetic-api-key",
+            );
+            f.store.select(Provider::Claude, "default", &api).unwrap();
+            for agent in ["claude-code", "opencode", "goose"] {
+                launch_agent_with(
+                    &f.root,
+                    &f.store,
+                    &proxy,
+                    agent,
+                    "default",
+                    &f.project,
+                    None,
+                    goose_installed,
+                    terminal_opens,
+                )
+                .unwrap_or_else(|e| panic!("{agent}: {e}"));
+                let text = fs::read_to_string(
+                    f.root
+                        .join(format!("runtimes/agent-{agent}-default"))
+                        .join("launch.command"),
+                )
+                .unwrap();
+                assert_eq!(carries_full_access(&text, agent), !ask, "{agent}: {text}");
+            }
+        }
+    }
     #[cfg(not(windows))]
     #[tokio::test]
     async fn a_dashboards_console_launch_reaches_the_agent_as_sent() {
@@ -6561,6 +7424,8 @@ mod tests {
             "--dangerously-skip-permissions".to_string(),
         ];
         expected.extend(sent.iter().cloned());
+        // SB-452: the home's own route, last (Claude Code 2.1.327 takes it after the prompt too).
+        expected.push(route_arg(ours.parent().unwrap()));
         assert_eq!(args, expected);
         no_value_is_read_as_a_config(&args);
         for (key, value) in context {
@@ -6713,7 +7578,15 @@ mod tests {
             previous_provider: None,
         };
         let (_, script) = continuation_here_with(
-            &f.root, &f.store, &proxy, &id, "isolated", &f.project, &host, &resumed,
+            &f.root,
+            &f.store,
+            &proxy,
+            &id,
+            "isolated",
+            &f.project,
+            &host,
+            &resumed,
+            Handed::Terminal,
         )
         .unwrap();
         assert_eq!(
@@ -6723,6 +7596,13 @@ mod tests {
         let text = fs::read_to_string(&script).unwrap();
         assert!(text.contains("export OBSERVATORY_WORKFLOW_ID='wf_0123456789abcdef'\n"));
         assert!(text.contains(&quote(&crate::continuation::prompt(&resumed))));
+        // SB-440: prepared for the hand-over queue (`Handed::Terminal`), the script may wait for
+        // a console, so its home holds for ten minutes, not `UNCLAIMED_TTL`.
+        let marker: Value = serde_json::from_slice(
+            &fs::read(f.root.join("homes").join(&id).join(".launch-pending")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(marker, json!({"pid": null, "by": "terminal"}));
     }
     #[cfg(unix)]
     #[tokio::test]
@@ -6766,7 +7646,15 @@ mod tests {
             previous_provider: None,
         };
         continuation_here_with(
-            &f.root, &f.store, &proxy, &id, "isolated", &f.project, &host, &resumed,
+            &f.root,
+            &f.store,
+            &proxy,
+            &id,
+            "isolated",
+            &f.project,
+            &host,
+            &resumed,
+            Handed::Terminal,
         )
         .unwrap();
         let home = f.root.join("homes").join(&id);
@@ -6838,7 +7726,15 @@ mod tests {
             "synthetic-api-key",
         );
         continuation_here_with(
-            &f.root, &f.store, &proxy, &codex, "isolated", &f.project, &host, &resumed,
+            &f.root,
+            &f.store,
+            &proxy,
+            &codex,
+            "isolated",
+            &f.project,
+            &host,
+            &resumed,
+            Handed::Terminal,
         )
         .unwrap();
         let home = f.root.join("homes").join(&codex);
@@ -7120,7 +8016,104 @@ mod tests {
                 "--mcp-config={}",
                 home.join("switchboard-mcp.json").to_string_lossy()
             ))));
+            // SB-452: the home's own route, last on the command line, so a folder's (or a
+            // worktree's main checkout's) local settings cannot send the session elsewhere.
+            let route = quote(&route_arg(&home));
+            let exec = text.lines().find(|l| l.starts_with("exec ")).unwrap();
+            assert!(exec.ends_with(&route), "{exec}");
         }
+        let file = home.join(ROUTE_FILE);
+        let route: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        assert_eq!(
+            route,
+            json!({"env": {
+                "ANTHROPIC_BASE_URL": format!("http://{}/claude/work", proxy.address()),
+                "ANTHROPIC_AUTH_TOKEN": proxy.token(),
+                "ANTHROPIC_API_KEY": "",
+                "ANTHROPIC_CUSTOM_HEADERS": "X-Switchboard-Launch-Group: work",
+            }})
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+    /// SB-452: a caller's own words come before the home's route, and a caller's `--` after it.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn the_launch_route_follows_a_callers_words_and_precedes_its_end_of_options() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "work", CLAUDE_OAUTH);
+        f.store.select(Provider::Claude, "work", &id).unwrap();
+        let (_, script) = launch_full(
+            &f.root,
+            &f.store,
+            &proxy,
+            &id,
+            "managed",
+            &f.project,
+            &TEST_HOST,
+            None,
+            &[
+                "--settings".into(),
+                "/theirs.json".into(),
+                "--".into(),
+                "-x".into(),
+            ],
+            true,
+        )
+        .unwrap();
+        let home = f.root.join("runtimes").join("claude-work");
+        let text = fs::read_to_string(script.unwrap()).unwrap();
+        let exec = text.lines().find(|l| l.starts_with("exec ")).unwrap();
+        assert!(
+            exec.ends_with(&format!(
+                "'--settings' '/theirs.json' {} '--' '-x'",
+                quote(&route_arg(&home))
+            )),
+            "{exec}"
+        );
+    }
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn sb440_an_in_place_launch_nobody_ran_frees_the_group_runtime() {
+        // 2026-11-18: `launch --mode managed --headless` timed out on its control request after
+        // the owner had prepared `runtimes/claude-tokens`; every later launch was refused.
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "tokens", CLAUDE_OAUTH);
+        f.store.select(Provider::Claude, "tokens", &id).unwrap();
+        let prepare = || {
+            launch_full(
+                &f.root,
+                &f.store,
+                &proxy,
+                &id,
+                "managed",
+                &f.project,
+                &TEST_HOST,
+                None,
+                &[],
+                true,
+            )
+        };
+        prepare().unwrap();
+        let home = f.root.join("runtimes").join("claude-tokens");
+        assert_eq!(home_state(&home).0, "starting");
+        assert_eq!(
+            prepare().unwrap_err(),
+            "Close the existing session before changing its home.",
+            "a caller that may still run the script keeps the home"
+        );
+        age(&home.join(".launch-pending"), 6 * 60);
+        assert_eq!(home_state(&home).0, "ended", "nobody will run it");
+        prepare().unwrap();
+        assert_eq!(home_state(&home).0, "starting");
     }
     #[tokio::test]
     async fn managed_codex_launch_points_codex_at_the_local_proxy() {
@@ -7256,6 +8249,13 @@ mod tests {
             f.launch(&proxy, &id, "isolated", &host).unwrap_err(),
             "Terminal could not open."
         );
+        // SB-440: the failed launch took its own marker away; nothing was left to clear.
+        assert!(!f
+            .root
+            .join("homes")
+            .join(&id)
+            .join(".launch-pending")
+            .exists());
         assert!(ensure_idle(&f.root.join("homes").join(&id)).is_ok());
         let events = f.store.snapshot().unwrap().events;
         assert!(!events.iter().any(|e| e.action == "launch"));
@@ -7276,6 +8276,140 @@ mod tests {
         let names: Vec<&str> = unset.split(' ').skip(1).collect();
         assert_eq!(names, CONFLICTS);
         assert!(text.find("unset ").unwrap() < text.find("export ").unwrap_or(usize::MAX));
+    }
+    /// SB-455: a launch script exports the program's folder, then the PATH it was started with,
+    /// then the login PATH for what that PATH lacks.
+    #[cfg(unix)]
+    #[test]
+    fn a_launch_script_exports_the_login_path() {
+        let brew = PathBuf::from("/synthetic/homebrew/bin");
+        let text = crate::login_path::with_login(vec![brew.clone(), "/usr/bin".into()], || {
+            script(
+                Path::new("/tmp/home"),
+                Path::new("/opt/agent/bin/claude"),
+                &[],
+                &BTreeMap::new(),
+                false,
+                Path::new("/tmp/project"),
+            )
+        });
+        let line = text
+            .lines()
+            .find(|l| l.starts_with("export PATH="))
+            .unwrap();
+        let prefix = format!(
+            "export PATH='/opt/agent/bin'\"${{PATH:+:$PATH}}\"':{}:/usr/bin:",
+            brew.display()
+        );
+        assert!(line.starts_with(&prefix), "{line}");
+        assert!(line.contains("/opt/homebrew/bin"));
+        // The program's folder is not repeated after the inherited PATH.
+        assert_eq!(line.matches("/opt/agent/bin").count(), 1);
+        // Exported after the scrub and before the session's own variables and its program.
+        assert!(text.find("unset ").unwrap() < text.find("export PATH=").unwrap());
+        assert!(text.find("export PATH=").unwrap() < text.find("exec ").unwrap());
+        // The resume script of the duty officer and Continue carries the same line.
+        let resume = crate::login_path::with_login(vec![brew.clone()], || {
+            crate::duty::resume_script_for(
+                Path::new("/tmp/config"),
+                "/tmp/project",
+                "s1",
+                Path::new("/opt/agent/bin/claude"),
+                &[],
+                None,
+            )
+        });
+        assert!(resume.contains(&format!(
+            "export PATH='/opt/agent/bin'\"${{PATH:+:$PATH}}\"':{}:",
+            brew.display()
+        )));
+    }
+    /// SB-455 (review round 1): the PATH a script was started with stays ahead of the login PATH,
+    /// so a terminal's shim folder wins over `/usr/bin`; with an empty PATH the session still gets
+    /// the program's folder and the login folders, and never an empty entry.
+    #[cfg(unix)]
+    #[test]
+    fn the_inherited_path_stays_ahead_of_the_login_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let shims = base.join("shims");
+        let brew = base.join("brew");
+        fs::create_dir_all(&shims).unwrap();
+        fs::create_dir_all(&brew).unwrap();
+        let line = path_export_with(
+            Path::new("/opt/agent/bin/claude"),
+            Some(&[brew.clone(), "/usr/bin".into()]),
+        );
+        let probe = format!("{line}printf '%s' \"$PATH\"");
+        let run = |path: String| {
+            let output = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(&probe)
+                .env_clear()
+                .env("PATH", path)
+                .output()
+                .unwrap();
+            String::from_utf8(output.stdout).unwrap()
+        };
+        let got = run(format!("{}:/usr/bin:/bin", shims.display()));
+        let dirs: Vec<PathBuf> = std::env::split_paths(&got).collect();
+        assert_eq!(dirs[0], PathBuf::from("/opt/agent/bin"));
+        assert_eq!(dirs[1], shims);
+        let at = |d: &Path| dirs.iter().position(|x| x == d).unwrap();
+        assert!(at(&shims) < at(&brew));
+        let got = run(String::new());
+        assert!(
+            got.starts_with(&format!("/opt/agent/bin:{}:", brew.display())),
+            "{got}"
+        );
+        assert!(!got.contains("::") && !got.ends_with(':'), "{got}");
+    }
+    /// SB-455: a hook the session runs through `/bin/sh` (as Claude Code runs its hooks) finds a
+    /// tool that only the login PATH names, although the script starts with a launchd PATH.
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_in_a_launched_session_finds_a_tool_on_the_login_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let brew = base.join("homebrew/bin");
+        fs::create_dir_all(&brew).unwrap();
+        private_write(
+            &brew.join("sb455-node"),
+            b"#!/bin/sh\necho synthetic-node\n",
+            true,
+        )
+        .unwrap();
+        let agent_dir = base.join("agent");
+        fs::create_dir(&agent_dir).unwrap();
+        let report = base.join("report");
+        let agent = agent_dir.join("claude");
+        private_write(
+            &agent,
+            format!(
+                "#!/bin/sh\n/bin/sh -c 'sb455-node' > {} 2>&1\n",
+                quote(&report.to_string_lossy())
+            )
+            .as_bytes(),
+            true,
+        )
+        .unwrap();
+        let home = base.join("home");
+        private_dir(&home).unwrap();
+        let project = base.join("project");
+        fs::create_dir(&project).unwrap();
+        let text = crate::login_path::with_login(vec![brew.clone()], || {
+            script(&home, &agent, &[], &BTreeMap::new(), false, &project)
+        });
+        let path = home.join("launch.command");
+        private_write(&path, text.as_bytes(), true).unwrap();
+        let status = Command::new(SCRIPT_SHELL)
+            .arg(&path)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(fs::read_to_string(report).unwrap(), "synthetic-node\n");
     }
     /// Runs the real generated script with zsh against hostile paths and a polluted
     /// environment. Terminal launches only exist on macOS, which is where zsh is guaranteed.

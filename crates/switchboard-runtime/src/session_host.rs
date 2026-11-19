@@ -230,6 +230,19 @@ pub fn live_hosts(root: &Path) -> Vec<(String, u32)> {
             if !crate::launches::valid_id(&id) {
                 return None;
             }
+            // SB-450: a descriptor written before this boot names a host the restart ended,
+            // whatever process holds its pid now.
+            if let (Some(boot), Ok(written)) = (
+                crate::boot_resume::boot(),
+                e.metadata().and_then(|m| m.modified()),
+            ) {
+                let written = written
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs() as i64);
+                if written < boot {
+                    return None;
+                }
+            }
             let bytes =
                 switchboard_core::private_fs::read_private(&e.path(), MAX_DESCRIPTOR).ok()?;
             let pid = serde_json::from_slice::<Value>(&bytes).ok()?["pid"].as_i64()?;
@@ -525,6 +538,56 @@ fn spawn_on(program: &Path, slave: &OwnedFd) -> io::Result<std::process::Child> 
     command.spawn()
 }
 
+/// SB-450: starts the host of `launch_id` as its own process, as `cli session-host` (its own
+/// session, nothing on its stdio), so it outlives whoever started it, and waits until it can be
+/// attached (ten seconds at most). `launch --hosted`, `sessions continue --hosted` and the owner's
+/// continuation after a restart all start a host this one way. A thread reaps the host when it
+/// ends, so the starting process keeps no zombie.
+pub fn start_detached(
+    root: &Path,
+    launch_id: &str,
+    program: &Path,
+    cli: &Path,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    let mut command = Command::new(cli);
+    command
+        .arg("--data-dir")
+        .arg(root)
+        .args(["session-host", "--launch-id", launch_id, "--program"])
+        .arg(program)
+        .args(["--rows", &rows.to_string(), "--cols", &cols.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    unsafe {
+        command.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|_| "The session host could not start.")?;
+    for _ in 0..100 {
+        if attachable(root, launch_id).is_some() {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            return Ok(());
+        }
+        if let Ok(Some(_)) = child.try_wait() {
+            return Err("The session host stopped before the session started.".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Err("The session host did not answer within ten seconds.".into())
+}
+
 /// What a host starts.
 pub struct Start<'a> {
     pub root: &'a Path,
@@ -534,6 +597,35 @@ pub struct Start<'a> {
     pub cols: u16,
     /// Close the session after this long with no viewer, no input and no output; None never.
     pub idle: Option<Duration>,
+}
+
+/// SB-506: what the idle close does with a quiet session that showed evidence of work or not.
+#[derive(Debug, PartialEq, Eq)]
+enum Keep {
+    /// It works: kept, and looked at again later.
+    Kept,
+    /// It works, but it has been kept for `cap` since the first keep of this quiet spell: closed.
+    Capped,
+    /// No evidence of work: closed.
+    Close,
+}
+
+/// SB-506: the host's decision, with this quiet spell's first keep in `first_kept`. Pure.
+fn keep_working(
+    works: bool,
+    first_kept: &mut Option<std::time::Instant>,
+    now: std::time::Instant,
+    cap: Duration,
+) -> Keep {
+    if !works {
+        return Keep::Close;
+    }
+    let first = *first_kept.get_or_insert(now);
+    if now.duration_since(first) >= cap {
+        Keep::Capped
+    } else {
+        Keep::Kept
+    }
 }
 
 /// How a hosted session ended.
@@ -609,13 +701,24 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         let (root, launch) = (start.root.to_owned(), start.launch_id.to_owned());
         std::thread::spawn(move || {
             let check = (idle / 4).clamp(Duration::from_millis(100), Duration::from_secs(30));
+            // SB-506: after a session was kept because it still works, the next look at its
+            // processes waits a duty check's interval; the cheap look at the terminal goes on.
+            let mut kept_until: Option<std::time::Instant> = None;
+            // When this quiet spell's first keep was, for the cap (`duty::HOST_KEEP_CAP_SECONDS`).
+            let mut first_kept: Option<std::time::Instant> = None;
             loop {
                 std::thread::sleep(check);
                 let inner = session.lock();
                 if inner.exit.is_some() {
                     return;
                 }
-                if inner.viewers.is_empty() && inner.last_activity.elapsed() >= idle {
+                let quiet = inner.viewers.is_empty() && inner.last_activity.elapsed() >= idle;
+                if !quiet {
+                    // A viewer or the terminal moved: a later quiet spell starts its own count.
+                    kept_until = None;
+                    first_kept = None;
+                }
+                if quiet && kept_until.is_none_or(|t| std::time::Instant::now() >= t) {
                     drop(inner);
                     // SB-396 D3: a session stopped on a limit waits for an account; its host
                     // continues it, so its window is not closed under it.
@@ -630,8 +733,47 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                                 now - idle.as_secs() as i64,
                             )
                     });
+                    // SB-506: nor one that shows it still works (`duty::session_works`: it asks
+                    // the person, runs a command or a launch of its own, its transcripts were
+                    // written, or its turn uses CPU). Only evidence keeps it: what could not be
+                    // read leaves the terminal's rule alone, and a session no live Claude Code
+                    // process holds (another agent) too. Kept at most a day from the first keep.
+                    if !stopped {
+                        let works = id.as_deref().is_some_and(|s| {
+                            crate::duty::session_works(&root, s, now, idle.as_secs() as i64)
+                        });
+                        let cap = Duration::from_secs(crate::duty::HOST_KEEP_CAP_SECONDS);
+                        match keep_working(works, &mut first_kept, std::time::Instant::now(), cap) {
+                            Keep::Kept => {
+                                kept_until = Some(
+                                    std::time::Instant::now()
+                                        + Duration::from_secs(crate::duty::CHECK_SECONDS as u64),
+                                );
+                                crate::oplog::event(
+                                    "session_host_idle",
+                                    &[("result", crate::oplog::Field::Code("kept_working"))],
+                                );
+                                continue;
+                            }
+                            Keep::Capped => crate::oplog::event(
+                                "session_host_idle",
+                                &[("result", crate::oplog::Field::Code("kept_capped"))],
+                            ),
+                            Keep::Close => {}
+                        }
+                    }
                     if stopped {
                         continue;
+                    }
+                    // The look above takes seconds: a viewer who attached or typed meanwhile keeps
+                    // the session (review round 2 of PR #853).
+                    {
+                        let inner = session.lock();
+                        if !inner.viewers.is_empty() || inner.last_activity.elapsed() < idle {
+                            kept_until = None;
+                            first_kept = None;
+                            continue;
+                        }
                     }
                     session.end("idle");
                     // SB-396 D5: the session can be continued as itself later.
@@ -1643,6 +1785,26 @@ mod tests {
         }
         write_frame(&mut first.stream, INPUT, b"x\n").unwrap();
         assert_eq!(host.join().unwrap().reason, "exited");
+    }
+
+    #[test]
+    fn a_working_session_is_kept_at_most_a_day_from_its_first_keep() {
+        // SB-506 (review round 1 of PR #853): evidence keeps it, its absence closes it, and a
+        // keep that lasts past the cap closes it too.
+        let cap = Duration::from_secs(crate::duty::HOST_KEEP_CAP_SECONDS);
+        let start = std::time::Instant::now();
+        let mut first = None;
+        assert_eq!(keep_working(false, &mut first, start, cap), Keep::Close);
+        assert_eq!(first, None);
+        assert_eq!(keep_working(true, &mut first, start, cap), Keep::Kept);
+        assert_eq!(first, Some(start));
+        let later = start + Duration::from_secs(3600);
+        assert_eq!(keep_working(true, &mut first, later, cap), Keep::Kept);
+        assert_eq!(first, Some(start), "the first keep is kept");
+        assert_eq!(
+            keep_working(true, &mut first, start + cap, cap),
+            Keep::Capped
+        );
     }
 
     #[test]

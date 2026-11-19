@@ -44,6 +44,15 @@ pub const SESSION_STUCK: &str =
 pub const SESSION_GONE: &str =
     "A board run's process is gone, but its end was not recorded. Stop the run to record it.";
 
+/// SB-509: a launch whose process is gone left a session with its history here; it can be
+/// continued as itself. Offered once per session (`session_watch::offer`).
+pub const SESSION_CONTINUABLE: &str =
+    "A session's process ended without its end being recorded. Its history is here: continue it as the same session.";
+/// SB-509: the proxy's token changed (its port was taken), and sessions started before still send
+/// the old one, which is refused.
+pub const TOKEN_ROTATED: &str =
+    "The proxy's token changed when its port was taken, so sessions started before it are refused. Restart them.";
+
 /// What the list is built from; every field is already in memory or one small file read.
 pub struct Inputs<'a> {
     pub snapshot: &'a Snapshot,
@@ -62,25 +71,64 @@ pub struct Inputs<'a> {
     /// SB-412, SB-417: the dispatches refused at the session limit that still wait
     /// (`dispatch_refusals::waiting`), or none.
     pub refusals: Option<&'a Value>,
+    /// SB-420: Claude Code Keychain items Switchboard could not write, too large
+    /// (`item_size::read`).
+    pub too_large: &'a [crate::item_size::Entry],
+    /// SB-510: the watchdog's current findings (`watchdog::current`), the owner's own codes left
+    /// out when the owner builds the list.
+    pub watchdog: &'a [Value],
+    /// SB-509: the sessions left on the proxy's old token (`token_rotation::sessions`), or none.
+    pub rotated: Option<&'a Value>,
     pub now: i64,
 }
+
+/// SB-550: a machine whose Switchboard did not answer three reads in a row (a minute apart).
+pub const MACHINE_UNREACHABLE: &str =
+    "Another machine's Switchboard has not answered three reads in a row. Check that the machine is on and reachable over ssh.";
+/// SB-550: that machine's Switchboard reports a failing health check, or that it is not running.
+pub const MACHINE_HEALTH: &str =
+    "Another machine's Switchboard reports a failing health check. Open Other machines to see which.";
+/// SB-550: sessions on that machine need a person: a second copy, a board run gone quiet.
+pub const MACHINE_SESSIONS: &str =
+    "Sessions on another machine need a look: a second copy, or a board run that has gone quiet.";
 
 /// SB-412: dispatches refused at this computer's session limit. SB-417: listed while they wait
 /// (since the pool last admitted a board start), with no one-hour cutoff.
 pub const DISPATCH_REFUSED: &str =
     "Board runs are waiting: this computer's session limit refused them, and none has started since.";
 
+/// SB-510: what the watchdog found, by its code.
+pub const WATCHDOG_OWNER_DOWN: &str =
+    "Switchboard stopped without finishing its work and has not started again. Open it.";
+pub const WATCHDOG_OWNER_NOT_ANSWERING: &str =
+    "Switchboard is running but did not answer for five seconds. Quit it and open it again.";
+pub const WATCHDOG_OWNER_STOPPED: &str =
+    "Switchboard is not running, so nothing switches accounts or watches sessions. Open it.";
+pub const WATCHDOG_ACT_UNFINISHED: &str =
+    "An act of the duty officer or a board run's stop was left half done more than 10 minutes ago.";
+pub const WATCHDOG_BOARD_RUN_GONE: &str =
+    "A board run's process has been gone for over 30 minutes with no end recorded.";
+pub const WATCHDOG_DUPLICATE_SESSION: &str =
+    "One session has run in two processes for over 15 minutes.";
+
 /// Reasons in the order they are listed.
-const ORDER: [&str; 12] = [
+const ORDER: [&str; 19] = [
+    "watchdog",
+    "keychain_too_large",
+    "token_rotated",
     "session_duplicate",
     "session_stuck",
     "session_gone",
+    "session_continuable",
     "dispatch_refused",
     "sign_in",
     "seat_ended",
     "renewal_refused",
     "move_unknown",
     "refused_there",
+    "machine_unreachable",
+    "machine_health",
+    "machine_sessions",
     "key_outside_tokens",
     "usage_failing",
     "ceiling_question",
@@ -243,6 +291,10 @@ pub fn build(inputs: &Inputs) -> Value {
             Some(crate::session_watch::GONE) if finding["dispatch"] == true => {
                 ("session_gone", SESSION_GONE)
             }
+            // SB-509: a gone launch whose session can be continued as itself, offered once.
+            Some(crate::session_watch::GONE) if finding["continuable"] == true => {
+                ("session_continuable", SESSION_CONTINUABLE)
+            }
             _ => continue,
         };
         let label = finding["folder"]
@@ -283,12 +335,94 @@ pub fn build(inputs: &Inputs) -> Value {
                         "if_gone": true,
                         "command": format!("switchboard dispatch stop --launch-id {id} --if-gone"),
                     }),
+                    // SB-509: continued only when the person (or an agent on their word) asks.
+                    ("session_continuable", _) => json!({
+                        "tool": "switchboard_session_continue", "window": "continue_session",
+                        "command": format!(
+                            "switchboard sessions continue {}",
+                            finding["session_id"].as_str().unwrap_or_default()
+                        ),
+                    }),
                     (_, Some(id)) if finding["dispatch"] == true => json!({
                         "tool": "switchboard_dispatch_stop", "window": "dispatch_stop",
                         "command": format!("switchboard dispatch stop --launch-id {id}"),
                     }),
                     _ => json!({"tool": "switchboard_sessions", "window": "open_sessions"}),
                 },
+            }),
+        );
+    }
+    // SB-550: each machine group's Switchboard, read every minute: one that stopped answering,
+    // and from a read that worked, its failing health checks and its sessions that need a person.
+    // Each item names the machine as its label; the sentence names none.
+    for machine in &snapshot.machines {
+        let Some(read) = inputs.remote.machines.get(&machine.name) else {
+            continue;
+        };
+        let item = |reason: &str, detail: &str, since: Option<i64>, window: &str| {
+            json!({
+                "account_id": null, "label": machine.name, "provider": null, "pool": null,
+                "machine": machine.name, "machine_pool": machine.pool,
+                "reason": reason, "detail": detail, "since": since,
+                "action": {"tool": "switchboard_machines", "window": window},
+            })
+        };
+        if read.unreachable() {
+            let mut listed = item(
+                "machine_unreachable",
+                MACHINE_UNREACHABLE,
+                read.as_of,
+                "open_machines",
+            );
+            listed["failures"] = json!(read.failures);
+            listed["code"] = json!(read.reason);
+            push("machine_unreachable", machine.name.clone(), listed);
+            continue;
+        }
+        let failing = read.failing_checks();
+        if !failing.is_empty() {
+            let mut listed = item(
+                "machine_health",
+                MACHINE_HEALTH,
+                // When the failure was first seen by a read that worked (review of PR #861).
+                read.health_since.or(read.as_of),
+                "open_machines",
+            );
+            listed["checks"] = json!(failing);
+            push("machine_health", machine.name.clone(), listed);
+        }
+        let troubled = read.troubled_sessions();
+        if !troubled.is_empty() {
+            // When the trouble was first seen by a read that worked (review of PR #861).
+            let since = read.sessions_since.or(read.as_of);
+            let mut listed = item("machine_sessions", MACHINE_SESSIONS, since, "open_sessions");
+            listed["count"] = json!(troubled.len());
+            let mut kinds: Vec<&str> = troubled.iter().map(|s| s.why.as_str()).collect();
+            kinds.sort_unstable();
+            kinds.dedup();
+            listed["kinds"] = json!(kinds);
+            listed["session_ids"] = json!(troubled
+                .iter()
+                .filter_map(|s| s.session_id.clone())
+                .collect::<Vec<_>>());
+            push("machine_sessions", machine.name.clone(), listed);
+        }
+    }
+    // SB-509: one item for the sessions on the proxy's old token, with a restart wave as the fix
+    // (never a restart by itself).
+    if let Some(rotated) = inputs.rotated {
+        let sessions = rotated["sessions"].as_array().cloned().unwrap_or_default();
+        push(
+            "token_rotated",
+            String::new(),
+            json!({
+                "account_id": null, "label": null, "provider": null, "pool": null,
+                "reason": "token_rotated", "detail": TOKEN_ROTATED,
+                "since": rotated["at"],
+                "count": sessions.len(),
+                "sessions": sessions,
+                "action": {"tool": "switchboard_sessions_restart_plan", "window": "restart_wave",
+                    "command": "switchboard sessions restart plan"},
             }),
         );
     }
@@ -308,6 +442,68 @@ pub fn build(inputs: &Inputs) -> Value {
                 "freed": refused["freed"],
                 "freed_at": refused["freed_at"],
                 "action": {"tool": "switchboard_capacity", "window": "open_capacity"},
+            }),
+        );
+    }
+    // SB-420: one item per Claude Code item refused as too large; the fix is in Claude Code, so
+    // the window offers no button (`none`).
+    for entry in inputs.too_large {
+        push(
+            "keychain_too_large",
+            entry.item.clone(),
+            json!({
+                "account_id": null, "label": null, "provider": "claude", "pool": null,
+                "reason": "keychain_too_large", "detail": crate::item_size::DETAIL,
+                "since": entry.at,
+                "item": entry.item,
+                "during": entry.during,
+                "action": {"tool": "switchboard_status", "window": "none"},
+            }),
+        );
+    }
+    // SB-510: one item per finding of the watchdog, which watches the owner from outside it.
+    for finding in inputs.watchdog {
+        let Some(code) = finding["code"].as_str() else {
+            continue;
+        };
+        let (detail, action) = match code {
+            crate::watchdog::OWNER_DOWN => (
+                WATCHDOG_OWNER_DOWN,
+                json!({"tool": "switchboard_status", "window": "none"}),
+            ),
+            crate::watchdog::OWNER_NOT_ANSWERING => (
+                WATCHDOG_OWNER_NOT_ANSWERING,
+                json!({"tool": "switchboard_status", "window": "none"}),
+            ),
+            crate::watchdog::OWNER_STOPPED => (
+                WATCHDOG_OWNER_STOPPED,
+                json!({"tool": "switchboard_status", "window": "none"}),
+            ),
+            crate::watchdog::ACT_UNFINISHED => (
+                WATCHDOG_ACT_UNFINISHED,
+                json!({"tool": "switchboard_duty", "window": "open_sessions"}),
+            ),
+            crate::watchdog::BOARD_RUN_GONE => (
+                WATCHDOG_BOARD_RUN_GONE,
+                json!({"tool": "switchboard_sessions", "window": "open_sessions"}),
+            ),
+            crate::watchdog::DUPLICATE_SESSION => (
+                WATCHDOG_DUPLICATE_SESSION,
+                json!({"tool": "switchboard_sessions", "window": "open_sessions"}),
+            ),
+            _ => continue,
+        };
+        // Failures first (review round 2 of PR #852), then by code.
+        let rank = if finding["severity"] == "fail" { 0 } else { 1 };
+        push(
+            "watchdog",
+            format!("{rank}{code}"),
+            json!({
+                "account_id": null, "label": null, "provider": null, "pool": null,
+                "reason": "watchdog", "detail": detail, "code": code,
+                "since": finding["first_seen"], "count": finding["count"],
+                "severity": finding["severity"], "ids": finding["ids"],
+                "action": action,
             }),
         );
     }
@@ -369,6 +565,9 @@ mod tests {
             remote: &crate::remote_usage::State::default(),
             watch: &[],
             refusals: None,
+            too_large: &[],
+            watchdog: &[],
+            rotated: None,
             now: 10_000,
         })
     }
@@ -390,6 +589,9 @@ mod tests {
             remote: &crate::remote_usage::State::default(),
             watch: &watch,
             refusals: None,
+            too_large: &[],
+            watchdog: &[],
+            rotated: None,
             now: 10_000,
         });
         // A launch that is gone is shown in the session tree, not here, unless it is a board run
@@ -421,6 +623,139 @@ mod tests {
         );
     }
     #[test]
+    fn a_gone_session_with_its_history_offers_continue_and_a_rotated_token_offers_a_restart() {
+        // SB-509: both are offered, never done by themselves.
+        let snapshot = Snapshot::default();
+        let watch = vec![
+            json!({"kind": "gone", "launch_id": "L-2", "folder": "/work/gamma",
+                "session_id": "s-2", "continuable": true}),
+            json!({"kind": "gone", "launch_id": "L-3", "session_id": "s-3"}),
+        ];
+        let rotated = json!({"at": 9_000, "sessions": [
+            {"pid": 7, "agent": "claude-code", "folder": "/work/a", "launch_id": "L-7"}]});
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &crate::remote_usage::State::default(),
+            watch: &watch,
+            refusals: None,
+            too_large: &[],
+            watchdog: &[],
+            rotated: Some(&rotated),
+            now: 10_000,
+        });
+        assert_eq!(reasons(&answer), ["token_rotated", "session_continuable"]);
+        let restart = &answer["items"][0];
+        assert_eq!(restart["detail"], TOKEN_ROTATED);
+        assert_eq!(restart["count"], 1);
+        assert_eq!(restart["since"], 9_000);
+        assert_eq!(
+            restart["action"]["tool"],
+            "switchboard_sessions_restart_plan"
+        );
+        assert_eq!(restart["action"]["window"], "restart_wave");
+        let resume = &answer["items"][1];
+        assert_eq!(resume["label"], "gamma");
+        assert_eq!(resume["session_id"], "s-2");
+        assert_eq!(
+            resume["action"],
+            json!({"tool": "switchboard_session_continue", "window": "continue_session",
+                "command": "switchboard sessions continue s-2"})
+        );
+    }
+    /// SB-420: a Claude Code item too large to write is one item each, listed first, naming
+    /// what refused it and when; it offers no button, the fix is in Claude Code.
+    #[test]
+    fn a_keychain_item_too_large_to_write_is_listed_first() {
+        let snapshot = Snapshot::default();
+        let too_large = [crate::item_size::Entry {
+            item: crate::item_size::ORDINARY.into(),
+            during: crate::item_size::DURING_RENEWAL.into(),
+            at: 9_000,
+            stamp: Some("1:2".into()),
+            version: None,
+        }];
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &crate::remote_usage::State::default(),
+            watch: &[json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]})],
+            refusals: None,
+            too_large: &too_large,
+            watchdog: &[],
+            rotated: None,
+            now: 10_000,
+        });
+        assert_eq!(
+            reasons(&answer),
+            ["keychain_too_large", "session_duplicate"]
+        );
+        let item = &answer["items"][0];
+        assert_eq!(item["detail"], crate::item_size::DETAIL);
+        assert_eq!(item["item"], "ordinary");
+        assert_eq!(item["during"], "renewal");
+        assert_eq!(item["since"], 9_000);
+        assert_eq!(item["action"]["window"], "none");
+    }
+    #[test]
+    fn the_watchdogs_findings_come_first_one_item_per_code() {
+        // SB-510: the owner that stopped, and an act left half done, as the watchdog wrote them.
+        let snapshot = Snapshot::default();
+        let watchdog = [
+            json!({"code": crate::watchdog::OWNER_DOWN, "severity": "fail", "count": 1,
+                "ids": [], "first_seen": 8_000}),
+            json!({"code": crate::watchdog::ACT_UNFINISHED, "severity": "warn", "count": 2,
+                "ids": ["S1", "S2"], "first_seen": 7_000}),
+            json!({"code": "something_new", "count": 1}),
+        ];
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &crate::remote_usage::State::default(),
+            watch: &[json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]})],
+            refusals: None,
+            too_large: &[],
+            watchdog: &watchdog,
+            rotated: None,
+            now: 10_000,
+        });
+        assert_eq!(
+            reasons(&answer),
+            ["watchdog", "watchdog", "session_duplicate"],
+            "a code this version does not know is left out"
+        );
+        let owner = &answer["items"][0];
+        assert_eq!(owner["code"], "owner_down", "a failure comes first");
+        assert_eq!(owner["action"]["window"], "none");
+        let act = &answer["items"][1];
+        assert_eq!(
+            (
+                act["code"].clone(),
+                act["detail"].clone(),
+                act["since"].clone()
+            ),
+            (
+                json!("act_unfinished"),
+                json!(WATCHDOG_ACT_UNFINISHED),
+                json!(7_000)
+            )
+        );
+        assert_eq!(act["count"], 2);
+        assert_eq!(
+            act["action"],
+            json!({"tool": "switchboard_duty", "window": "open_sessions"})
+        );
+    }
+    #[test]
     fn dispatches_refused_at_the_session_limit_are_one_item_with_their_count() {
         // SB-412: the hour's refusals, however many, are one item that opens the session limit.
         let snapshot = Snapshot::default();
@@ -435,6 +770,9 @@ mod tests {
             remote: &crate::remote_usage::State::default(),
             watch: &[json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]})],
             refusals: Some(&refused),
+            too_large: &[],
+            watchdog: &[],
+            rotated: None,
             now: 10_000,
         });
         assert_eq!(reasons(&answer), ["session_duplicate", "dispatch_refused"]);
@@ -581,6 +919,7 @@ mod tests {
         let copy = |id: &str, status: &str| AccountRead {
             id: id.into(),
             used_percent: None,
+            observed_at: None,
             usage_status: Some(status.into()),
             enabled: Some(true),
         };
@@ -593,6 +932,7 @@ mod tests {
                 reason: None,
                 failures: 0,
                 accounts: vec![copy("a", "rejected"), copy("b", "ok")],
+                ..MachineRead::default()
             },
         );
         let answer = build(&Inputs {
@@ -604,6 +944,9 @@ mod tests {
             remote: &remote,
             watch: &[],
             refusals: None,
+            too_large: &[],
+            watchdog: &[],
+            rotated: None,
             now: 10_000,
         });
         assert_eq!(reasons(&answer), ["refused_there"]);
@@ -611,6 +954,125 @@ mod tests {
         assert_eq!(answer["items"][0]["since"], 9_000);
         assert_eq!(answer["items"][0]["detail"], REFUSED_THERE);
         assert_eq!(answer["items"][0]["action"]["window"], "open_machines");
+    }
+
+    /// SB-550: a machine that stopped answering, and from a read that worked its failing health
+    /// checks and the sessions there that need a person, each one item naming the machine; the
+    /// sentence names none, and a stale read names nothing but the silence.
+    #[test]
+    fn a_silent_machine_its_failing_health_and_its_troubled_sessions_are_listed() {
+        use crate::remote_usage::{HealthRead, MachineRead, SessionRead, SessionsRead, State};
+        let machine = |pool: &str, name: &str| switchboard_core::Machine {
+            pool: pool.into(),
+            name: name.into(),
+            identity: None,
+            aliases: vec![],
+            created_at: 1,
+        };
+        let snapshot = Snapshot {
+            machines: vec![
+                machine("machine_a", "alpha"),
+                machine("machine_b", "beta"),
+                machine("machine_c", "gamma"),
+            ],
+            ..Default::default()
+        };
+        let row = |why: &str, group: &str, session: &str, since: i64| SessionRead {
+            id: format!("pid:{since}"),
+            group: group.into(),
+            why: why.into(),
+            agent: Some("claude-code".into()),
+            launch_id: None,
+            session_id: Some(session.into()),
+            since: Some(since),
+        };
+        let healthy = MachineRead {
+            tried_at: 9_900,
+            as_of: Some(9_900),
+            health_since: Some(9_000),
+            sessions_since: Some(8_500),
+            sessions: Some(SessionsRead {
+                rows: vec![
+                    row("stuck", "needs_you", "s-1", 9_000),
+                    row("duplicate", "needs_you", "s-2", 8_000),
+                    // A gone run is history there, never an item here.
+                    row("gone", "needs_you", "s-5", 7_000),
+                    row("working", "running", "s-3", 9_500),
+                    row("ready_to_continue", "needs_you", "s-4", 9_600),
+                ],
+                ..Default::default()
+            }),
+            health: Some(HealthRead {
+                state: "fail".into(),
+                checks: [("crashes", "fail"), ("sign_in", "warn"), ("owner", "ok")]
+                    .into_iter()
+                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                    .collect(),
+            }),
+            ..Default::default()
+        };
+        let mut remote = State::default();
+        remote.machines.insert("alpha".into(), healthy.clone());
+        remote.machines.insert(
+            "beta".into(),
+            MachineRead {
+                tried_at: 9_950,
+                as_of: Some(7_000),
+                reason: Some("unreachable".into()),
+                failures: crate::remote_usage::BACKOFF_AFTER,
+                ..healthy.clone()
+            },
+        );
+        // Failed once only: its last good items stay, so they do not come and go.
+        remote.machines.insert(
+            "gamma".into(),
+            MachineRead {
+                reason: Some("unreachable".into()),
+                failures: 1,
+                ..healthy
+            },
+        );
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &remote,
+            watch: &[],
+            refusals: None,
+            too_large: &[],
+            rotated: None,
+            watchdog: &[],
+            now: 10_000,
+        });
+        assert_eq!(
+            reasons(&answer),
+            [
+                "machine_unreachable",
+                "machine_health",
+                "machine_health",
+                "machine_sessions",
+                "machine_sessions"
+            ]
+        );
+        let items = answer["items"].as_array().unwrap();
+        assert_eq!(items[0]["label"], "beta");
+        assert_eq!(items[0]["since"], 7_000);
+        assert_eq!(items[0]["detail"], MACHINE_UNREACHABLE);
+        assert_eq!(items[0]["action"]["window"], "open_machines");
+        assert_eq!(items[1]["label"], "alpha");
+        assert_eq!(items[2]["label"], "gamma");
+        assert_eq!(items[1]["checks"], json!(["crashes"]));
+        assert_eq!(items[1]["since"], 9_000, "when the failure was first seen");
+        assert_eq!(items[3]["count"], 2);
+        assert_eq!(items[3]["kinds"], json!(["duplicate", "stuck"]));
+        assert_eq!(items[3]["since"], 8_500, "when the trouble was first seen");
+        assert_eq!(items[3]["action"]["window"], "open_sessions");
+        for item in items {
+            assert!(!item["detail"].as_str().unwrap().contains("alpha"));
+            assert_eq!(item["action"]["tool"], "switchboard_machines");
+        }
     }
 
     #[test]
@@ -708,7 +1170,15 @@ mod tests {
             SESSION_DUPLICATE,
             SESSION_STUCK,
             SESSION_GONE,
+            SESSION_CONTINUABLE,
+            TOKEN_ROTATED,
             DISPATCH_REFUSED,
+            WATCHDOG_OWNER_DOWN,
+            WATCHDOG_OWNER_NOT_ANSWERING,
+            WATCHDOG_OWNER_STOPPED,
+            WATCHDOG_ACT_UNFINISHED,
+            WATCHDOG_BOARD_RUN_GONE,
+            WATCHDOG_DUPLICATE_SESSION,
         ] {
             assert!(
                 !sentence.contains('\u{2014}') && !sentence.contains(" - "),

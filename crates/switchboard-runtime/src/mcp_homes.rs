@@ -105,6 +105,29 @@ pub(crate) fn entries(item: &Value) -> Vec<Entry> {
         .collect()
 }
 
+/// SB-542: `item` without its `mcpOAuth` entries that hold no token and no client registration
+/// (Claude Code's discovery stubs: a name, a URL, `discoveryState` and an empty token), with how many were dropped; `None` when it is not a JSON
+/// object or holds no such entry. Every other field and every entry with a token is kept.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn without_stubs(item: &[u8]) -> Option<(Vec<u8>, usize)> {
+    let mut value: Value = serde_json::from_slice(item).ok()?;
+    let map = value.get_mut("mcpOAuth")?.as_object_mut()?;
+    let before = map.len();
+    map.retain(|_, v| {
+        // An entry that keeps a client registration is kept too: a server without dynamic
+        // registration could not be signed in to again without it.
+        !v.is_object()
+            || ["accessToken", "refreshToken", "clientId", "clientSecret"]
+                .iter()
+                .any(|k| text(v, k).is_some())
+    });
+    let dropped = before - map.len();
+    if dropped == 0 {
+        return None;
+    }
+    Some((serde_json::to_vec(&value).ok()?, dropped))
+}
+
 fn live(expires_at: Option<i64>, now_ms: i64) -> bool {
     expires_at.is_none_or(|t| t > now_ms + MARGIN_MS)
 }
@@ -513,7 +536,7 @@ impl Items for Native {
         #[cfg(target_os = "macos")]
         {
             let user = crate::launch::login_user()?;
-            switchboard_core::security_cli::add(&home.service, &user, &bytes, true).map(|_| ())
+            crate::external_keychain::add_compacting(&home.service, &user, &bytes)
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -550,6 +573,31 @@ pub(crate) fn ordinary_for(root: &Path) -> Option<(PathBuf, String)> {
     ordinary()
 }
 
+/// SB-420: a launch's copy refused as too large is seen in `status` and Needs attention; one
+/// that wrote clears it; one with nothing to carry says nothing about the item's size.
+fn note_carry(root: &Path, result: &Result<usize, String>, now: i64) {
+    match result {
+        Ok(carried) if *carried > 0 => crate::item_size::clear(root, crate::item_size::LAUNCH),
+        Err(error) if crate::item_size::is_too_large(error) => crate::item_size::record(
+            root,
+            crate::item_size::LAUNCH,
+            crate::item_size::DURING_LAUNCH_COPY,
+            now,
+        ),
+        _ => {}
+    }
+}
+
+/// SB-420: an item too large to write without the value on the command line is left as it was
+/// (the launch goes on without the copy) and logged by its own code.
+fn too_large_or_write(error: &str) -> &'static str {
+    if crate::item_size::is_too_large(error) {
+        "too_large"
+    } else {
+        "write"
+    }
+}
+
 static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
 
 /// SB-358 at a launch: carries the other homes' sign-ins into `folder`, a Claude home Switchboard
@@ -576,21 +624,46 @@ pub(crate) fn carry_into(root: &Path, folder: &Path) {
             &|write| crate::external::with_credential_locks(folder, write),
         )
     });
+    note_carry(root, &result, now_ms / 1000);
     match result {
         Ok(0) => {}
         Ok(carried) => crate::oplog::event(
             "mcp_sign_ins",
             &[("carried", crate::oplog::Field::Number(carried as i64))],
         ),
-        Err(_) => crate::oplog::event(
+        Err(error) => crate::oplog::event(
             "mcp_sign_ins",
-            &[("error", crate::oplog::Field::Code("write"))],
+            &[(
+                "error",
+                crate::oplog::Field::Code(too_large_or_write(&error)),
+            )],
         ),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_launch_copy_refused_as_too_large_is_recorded_until_one_writes() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path();
+        note_carry(root, &Err(crate::external::CREDENTIAL_TOO_LARGE.into()), 5);
+        let recorded = crate::item_size::read(root);
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].item, crate::item_size::LAUNCH);
+        assert_eq!(recorded[0].during, crate::item_size::DURING_LAUNCH_COPY);
+        assert_eq!(
+            too_large_or_write(crate::external::CREDENTIAL_TOO_LARGE),
+            "too_large"
+        );
+        assert_eq!(too_large_or_write("locked"), "write");
+        // Nothing to carry, or another failure: the record stays.
+        note_carry(root, &Ok(0), 6);
+        note_carry(root, &Err("locked".into()), 7);
+        assert_eq!(crate::item_size::read(root).len(), 1);
+        note_carry(root, &Ok(2), 8);
+        assert!(crate::item_size::read(root).is_empty());
+    }
     #[test]
     fn with_own_sign_in_off_the_ordinary_home_is_left_out() {
         // SB-403 (review P2-4): `mcp-homes` and a launch's copy never read the ordinary home's
@@ -656,6 +729,36 @@ mod tests {
     fn stub() -> Value {
         json!({"serverName":"plugin:figma:figma","serverUrl":"https://mcp.example/mcp",
             "accessToken":"","discoveryState":{"oauthMetadataFound":true}})
+    }
+    #[test]
+    fn a_too_large_item_drops_only_the_entries_without_a_token() {
+        let item = json!({"claudeAiOauth": {"accessToken": "kept"},
+            "mcpOAuth": {KEY: own(NOW + 3_600_000), "plugin:a:a|1": stub(),
+                "plugin:b:b|2": {"serverName": "b", "refreshToken": "r-only"}},
+            "trustedDeviceToken": "kept-too"});
+        let (bytes, dropped) = without_stubs(&serde_json::to_vec(&item).unwrap()).unwrap();
+        let out: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(dropped, 1);
+        assert_eq!(out["claudeAiOauth"], item["claudeAiOauth"]);
+        assert_eq!(out["trustedDeviceToken"], "kept-too");
+        assert_eq!(out["mcpOAuth"][KEY], item["mcpOAuth"][KEY]);
+        assert!(
+            out["mcpOAuth"].get("plugin:b:b|2").is_some(),
+            "a refresh token alone is kept"
+        );
+        assert!(out["mcpOAuth"].get("plugin:a:a|1").is_none());
+        let registered = json!({"mcpOAuth": {"plugin:c:c|3": {"serverName": "c", "accessToken": "",
+            "clientId": "synthetic-client"}, "plugin:a:a|1": stub()}});
+        let (bytes, dropped) = without_stubs(&serde_json::to_vec(&registered).unwrap()).unwrap();
+        let out: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(dropped, 1);
+        assert!(
+            out["mcpOAuth"].get("plugin:c:c|3").is_some(),
+            "a client registration is kept"
+        );
+        let only_tokens = json!({"mcpOAuth": {KEY: own(NOW)}});
+        assert!(without_stubs(&serde_json::to_vec(&only_tokens).unwrap()).is_none());
+        assert!(without_stubs(b"not json").is_none());
     }
     fn locked(write: &dyn Fn() -> Result<usize, String>) -> Result<usize, String> {
         write()

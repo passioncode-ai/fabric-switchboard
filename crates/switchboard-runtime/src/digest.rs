@@ -43,10 +43,15 @@ const NOT_DONE: &[&str] = &[
     "held",
     "locked",
     "no_account",
+    // SB-518 (DEC-0032): a usage check the provider's budget paced, one its hold stopped before
+    // it was sent, and a switch candidate's check that did not confirm it.
+    "paced",
+    "provider_held",
     "rate_limited",
     "refused",
     "skipped",
     "superseded",
+    "unconfirmed",
 ];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -734,7 +734,12 @@ pub fn tick(root: &Path, now: i64) {
             continue;
         } else {
             let path = terminal_script_path(root, &wave.id, &session);
+            // SB-450: marked before the window opens (no launch record names a Terminal resume).
+            crate::resumable::mark_resuming(root, &session, now);
             let started = path.is_file() && crate::launch::start_terminal(&path).is_ok();
+            if !started {
+                crate::resumable::unmark_resuming(root, &session);
+            }
             e.state = if started { "resuming" } else { "failed" }.into();
             if !started {
                 e.reason = Some("not_started".into());
@@ -904,7 +909,8 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
     let Some(program) = crate::launch::find_program("claude") else {
         return ("failed", Some("cannot_resume"));
     };
-    let bypass = crate::launch::bypass_args(root, switchboard_core::Provider::Claude, &[]);
+    // SB-515: the permission choice as Fabric Sessions asks it (D-7), the one answer it reads.
+    let bypass = crate::session_accounts::resume_flags(root);
     let prompt = e.caller.then(|| caller_prompt(wave));
     let mut script = crate::duty::resume_script_for(
         &e.config,
@@ -943,9 +949,14 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
         json!({"session": e.session, "config": e.config, "cwd": e.cwd, "reason": "restart",
             "at": crate::monitor::now(), "by": "wave"}),
     );
+    // SB-450: marked before the window opens (no launch record names a Terminal resume).
+    crate::resumable::mark_resuming(root, &e.session, crate::monitor::now());
     match crate::launch::start_terminal(&path) {
         Ok(()) => ("resuming", None),
-        Err(_) => ("failed", Some("not_started")),
+        Err(_) => {
+            crate::resumable::unmark_resuming(root, &e.session);
+            ("failed", Some("not_started"))
+        }
     }
 }
 
@@ -1001,6 +1012,7 @@ mod tests {
             command_age: None,
             cpu: None,
             cpu_quiet: None,
+            own_launches: None,
         }
     }
 

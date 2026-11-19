@@ -158,38 +158,9 @@ pub fn attach(root: &Path, launch_id: &str) -> Result<Ended, String> {
 /// Starts the host of `launch_id` as its own process (its own session, nothing on its stdio),
 /// so it outlives this terminal, and waits until it can be attached.
 pub fn spawn(root: &Path, launch_id: &str, program: &Path) -> Result<(), String> {
-    use std::os::unix::process::CommandExt;
     let (rows, cols) = size();
     let exe = std::env::current_exe().map_err(|_| "Switchboard could not find itself.")?;
-    let mut command = std::process::Command::new(exe);
-    command
-        .arg("--data-dir")
-        .arg(root)
-        .args(["session-host", "--launch-id", launch_id, "--program"])
-        .arg(program)
-        .args(["--rows", &rows.to_string(), "--cols", &cols.to_string()])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    unsafe {
-        command.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
-    let mut child = command
-        .spawn()
-        .map_err(|_| "The session host could not start.")?;
-    for _ in 0..100 {
-        if host::attachable(root, launch_id).is_some() {
-            return Ok(());
-        }
-        if let Ok(Some(_)) = child.try_wait() {
-            return Err("The session host stopped before the session started.".into());
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    Err("The session host did not answer within ten seconds.".into())
+    host::start_detached(root, launch_id, program, &exe, rows, cols)
 }
 
 /// The hidden `session-host` command: runs the session until it exits, then records its end.

@@ -130,16 +130,34 @@ pub(crate) struct UsageGate {
     /// not checked faster near its limit for a while. Memory only, seeded from the holds read
     /// at start.
     refused_at: Mutex<HashMap<String, i64>>,
+    /// SB-518 (DEC-0032): the per-provider budget every check passes through. Unbudgeted in a
+    /// test's `UsageGate::default()`; an owner's and the offline CLI's come from `kept_in`.
+    pub(crate) budget: crate::usage_budget::UsageBudget,
     /// Synthetic usage endpoints for tests; production always uses the fixed provider origins.
     #[cfg(test)]
     pub(crate) origins: Mutex<Option<(String, String)>>,
 }
 
 impl UsageGate {
+    /// A gate with the production budget and no file, for tests of the budget.
+    #[cfg(test)]
+    pub(crate) fn budgeted() -> Self {
+        Self {
+            budget: crate::usage_budget::UsageBudget::limited(),
+            ..Self::default()
+        }
+    }
     /// The gate of an owner or of the offline CLI, with the holds recorded before that can still
     /// apply at `now`.
     pub(crate) fn kept_in(path: PathBuf, now: i64) -> Self {
-        let gate = Self::default();
+        let budget = crate::usage_budget::UsageBudget::kept_in(
+            path.with_file_name(crate::usage_budget::PROVIDER_HOLDS_FILE),
+            now,
+        );
+        let gate = Self {
+            budget,
+            ..Self::default()
+        };
         *lock(&gate.path) = Some(path.clone());
         let Ok(bytes) = switchboard_core::private_fs::read_private(&path, MAX_FILE) else {
             return gate;

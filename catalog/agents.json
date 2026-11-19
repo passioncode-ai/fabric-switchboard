@@ -14,6 +14,16 @@
       "install": "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
       "binary": "hermes",
       "headless": "hermes -z \"<prompt>\"",
+      "full_access": {
+        "args": [
+          "--yolo"
+        ],
+        "env": {},
+        "named": [
+          "--yolo"
+        ],
+        "checked": "hermes --help and hermes chat --help 0.22.2 (2026-11-19): --yolo bypasses every dangerous-command approval"
+      },
       "mcp": {
         "supported": true,
         "add_command": "hermes mcp add switchboard --command switchboard --args mcp",
@@ -142,6 +152,18 @@
       "install": "curl -fsSL https://claude.ai/install.sh | bash",
       "binary": "claude",
       "headless": "claude -p \"<prompt>\"",
+      "full_access": {
+        "args": [
+          "--dangerously-skip-permissions"
+        ],
+        "env": {},
+        "named": [
+          "--dangerously-skip-permissions",
+          "--permission-mode",
+          "--allow-dangerously-skip-permissions"
+        ],
+        "checked": "claude --help: --dangerously-skip-permissions, --permission-mode (SB-298, 2026-11-07)"
+      },
       "mcp": {
         "supported": true,
         "add_command": "claude mcp add --scope user switchboard -- switchboard mcp",
@@ -349,6 +371,27 @@
       "install": "brew install --cask codex",
       "binary": "codex",
       "headless": "codex exec \"<prompt>\"",
+      "full_access": {
+        "args": [
+          "-c",
+          "approval_policy=\"never\"",
+          "-c",
+          "sandbox_mode=\"danger-full-access\""
+        ],
+        "env": {},
+        "named": [
+          "--dangerously-bypass-approvals-and-sandbox",
+          "--yolo",
+          "--full-auto",
+          "-a",
+          "--ask-for-approval",
+          "-s",
+          "--sandbox",
+          "approval_policy",
+          "sandbox_mode"
+        ],
+        "checked": "codex --help: -c config overrides hold before a subcommand (SB-298, 2026-11-07)"
+      },
       "mcp": {
         "supported": true,
         "add_command": "codex mcp add switchboard -- switchboard mcp",
@@ -445,6 +488,19 @@
       "install": "curl -fsSL https://pi.dev/install.sh | sh",
       "binary": "pi",
       "headless": "pi -p \"<prompt>\"",
+      "full_access": {
+        "args": [
+          "--approve"
+        ],
+        "env": {},
+        "named": [
+          "--approve",
+          "-a",
+          "--no-approve",
+          "-na"
+        ],
+        "checked": "pi --help 1.1.0 (2026-11-19): no tool prompts; --approve trusts the project's local files for the run"
+      },
       "mcp": {
         "supported": true,
         "add_command": "pi mcp add switchboard -- switchboard mcp",
@@ -701,6 +757,19 @@
       "install": "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
       "binary": "kimi",
       "headless": "kimi -p \"<prompt>\"",
+      "full_access": {
+        "args": [
+          "--auto"
+        ],
+        "env": {},
+        "named": [
+          "--auto",
+          "--yolo",
+          "-y",
+          "--plan"
+        ],
+        "checked": "kimi --help 2.5.3 (2026-11-19): --auto starts in Never Ask mode; --yolo still asks for risky actions"
+      },
       "mcp": {
         "supported": true,
         "add_command": null,
@@ -813,6 +882,16 @@
       "install": "curl -LsSf https://aider.chat/install.sh | sh",
       "binary": "aider",
       "headless": "aider --message \"<prompt>\" --yes-always",
+      "full_access": {
+        "args": [
+          "--yes-always"
+        ],
+        "env": {},
+        "named": [
+          "--yes-always"
+        ],
+        "checked": "not installed here; aider's scripting docs (docs/research/agents-2026-10-05.md, Aider)"
+      },
       "mcp": {
         "supported": false,
         "add_command": null,
@@ -877,6 +956,16 @@
       "install": "brew install anomalyco/tap/opencode",
       "binary": "opencode",
       "headless": "opencode run \"<prompt>\"",
+      "full_access": {
+        "args": [
+          "--auto"
+        ],
+        "env": {},
+        "named": [
+          "--auto"
+        ],
+        "checked": "opencode --help 1.19.0 (2026-11-19): --auto approves every permission not explicitly denied"
+      },
       "mcp": {
         "supported": true,
         "add_command": null,
@@ -992,6 +1081,14 @@
       "install": "brew install block-goose-cli",
       "binary": "goose",
       "headless": "goose run -t \"<prompt>\"",
+      "full_access": {
+        "args": [],
+        "env": {
+          "GOOSE_MODE": "auto"
+        },
+        "named": [],
+        "checked": "goose 1.44.0 (2026-11-19): GOOSE_MODE auto, approve, smart_approve or chat; the environment wins over config.yaml"
+      },
       "mcp": {
         "supported": true,
         "add_command": null,

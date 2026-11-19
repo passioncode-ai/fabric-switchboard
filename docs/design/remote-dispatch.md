@@ -40,7 +40,7 @@ dispatcher checks it and posts the answer as a relay (Fabric's four conditions, 
   `FABRIC_DISPATCH_REQUEST_FILE`, `FABRIC_DISPATCH_RESULT` and `FABRIC_DISPATCH_PROMPT_FILE`
   naming the three files.
 - **D-5. The session runs headless and detached.** Over ssh: `nohup switchboard launch --provider
-  <p> --working-directory <worktree> --headless --by fabric-dispatch -- -p <pointer>` in its own
+  <p> --working-directory <worktree> --headless --by fabric-dispatch -- <agent arguments> <pointer>` (SB-515: Claude Code `[--dangerously-skip-permissions | --permission-mode manual] -p`, Codex `exec [--dangerously-bypass-approvals-and-sandbox | -c approval_policy="never"]`, by the run's `--permissions`) in its own
   process group, where the pointer is a short fixed sentence naming `FABRIC_DISPATCH_PROMPT_FILE`
   (`remote_dispatch::LAUNCH_PROMPT`): `launch` refuses an agent argument over 1024 characters, and
   `prompt.txt` is longer (the first live run, 2026-11-10, ended with exit 1 on exactly that), stdout and stderr to `log`, its pid to `pid`,

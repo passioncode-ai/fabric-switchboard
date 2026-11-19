@@ -2992,3 +2992,302 @@ async fn disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_close
     p.shutdown().await;
     up.abort();
 }
+
+/// SB-452: a request to the pay-per-token group, or to another group, carrying the group its
+/// session's launch named.
+async fn launched_request(
+    proxy: &ProxyHandle,
+    pool: &str,
+    launched_for: &str,
+) -> (StatusCode, String) {
+    let response = reqwest::Client::new()
+        .post(format!(
+            "http://{}/claude/{pool}/v1/messages",
+            proxy.address()
+        ))
+        .bearer_auth(proxy.token())
+        .header(crate::LAUNCH_GROUP_HEADER, launched_for)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    (status, response.text().await.unwrap())
+}
+fn mismatched(tallies: &stats::Tallies) -> u64 {
+    tallies.values().map(|t| t.mismatched).sum()
+}
+
+/// SB-452: a session launched for the pay-per-token group whose request comes through another
+/// group's route (a worktree reading its main checkout's settings) is refused, and the reverse
+/// too; between two subscription groups it is served and counted.
+#[tokio::test]
+async fn a_launch_never_crosses_into_or_out_of_the_pay_per_token_group() {
+    let (_root, s, pool, hits, url, up) = tokens_fixture().await;
+    s.set_group_off(&pool, false).unwrap();
+    tokens_ceiling(&s, &pool, 10_000);
+    add_in(&s, Provider::Claude, "apps", "synthetic-apps", "apps");
+    add_in(&s, Provider::Claude, "other", "synthetic-other", "other");
+    let p = start(s.clone(), url).await;
+    for (route, launched) in [("apps", pool.as_str()), (pool.as_str(), "apps")] {
+        let (status, body) = launched_request(&p, route, launched).await;
+        assert_eq!(status, 403, "{route} for {launched}");
+        assert!(body.contains(crate::LAUNCH_GROUP_MISMATCH), "{body}");
+    }
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "nothing reached the provider"
+    );
+    let refused = p.take_statistics();
+    assert_eq!(mismatched(&refused), 2);
+    assert_eq!(refused.values().map(|t| t.failed).sum::<u64>(), 2);
+    // Its own route: served, nothing counted as crossed.
+    let (status, _) = launched_request(&p, &pool, &pool).await;
+    assert!(status.is_success(), "{status}");
+    let (status, _) = launched_request(&p, "apps", "apps").await;
+    assert!(status.is_success(), "{status}");
+    assert_eq!(mismatched(&p.take_statistics()), 0);
+    // Two subscription groups: served on the route's group, counted.
+    let (status, _) = launched_request(&p, "apps", "other").await;
+    assert!(status.is_success(), "{status}");
+    assert_eq!(mismatched(&p.take_statistics()), 1);
+    assert_eq!(hits.load(Ordering::SeqCst), 3);
+    p.shutdown().await;
+    up.abort();
+}
+
+/// SB-452: a request whose own folder (the working directory its body names) belongs to other
+/// groups than the one serving it is counted: the case of a plain session in a worktree whose
+/// group differs from its main checkout's.
+#[tokio::test]
+async fn a_request_from_a_folder_of_another_group_is_counted() {
+    let (_root, s) = store();
+    add_in(&s, Provider::Claude, "apps", "synthetic-apps", "apps");
+    let (url, up) = fixture(Router::new().route("/v1/messages", post(|| async { "{}" }))).await;
+    let p = start(s.clone(), url).await;
+    p.set_stat_folders(vec![
+        ("/w/app".into(), "apps".into()),
+        ("/w/_worktrees/app-audit".into(), "tokens".into()),
+        ("/w/shared".into(), "apps".into()),
+        ("/w/shared".into(), "tokens".into()),
+    ]);
+    let send = |folder: &str| {
+        let body = format!(
+            "{{\"system\":[{{\"type\":\"text\",\"text\":\"# Environment\\n - Primary working directory: {folder}\\n\"}}],\"messages\":[]}}"
+        );
+        reqwest::Client::new()
+            .post(format!("http://{}/claude/apps/v1/messages", p.address()))
+            .bearer_auth(p.token())
+            .body(body)
+            .send()
+    };
+    for (folder, crossed) in [
+        ("/w/_worktrees/app-audit/src", 1),
+        ("/w/app/src", 0),
+        ("/w/shared", 0),
+        ("/elsewhere", 0),
+    ] {
+        assert!(send(folder).await.unwrap().status().is_success());
+        let tallies = p.take_statistics();
+        assert_eq!(mismatched(&tallies), crossed, "{folder}");
+        assert_eq!(
+            tallies.values().map(|t| t.ok).sum::<u64>(),
+            1,
+            "served all the same"
+        );
+    }
+    p.shutdown().await;
+    up.abort();
+}
+
+/// SB-452: a streamed answer of the pay-per-token key is priced into the group's day, written to
+/// tokens-spend.json, and the ceiling stops the next request.
+#[tokio::test]
+async fn a_streamed_answer_of_the_key_is_priced_and_its_ceiling_stops_the_next() {
+    let (_root, s, pool, _, _, up) = tokens_fixture().await;
+    up.abort();
+    s.set_group_off(&pool, false).unwrap();
+    // $0.30: the first answer ($0.40 of Opus 5.5 input) passes it.
+    tokens_ceiling(&s, &pool, 30);
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counted = hits.clone();
+    let (url, up) = fixture(Router::new().route(
+        "/v1/messages",
+        post(move || {
+            let counted = counted.clone();
+            async move {
+                counted.fetch_add(1, Ordering::SeqCst);
+                let body = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-opus-5-5\",\"usage\":{\"input_tokens\":100000,\"output_tokens\":1}}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hi\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":0}}\n\n";
+                Response::builder()
+                    .header("content-type", "text/event-stream")
+                    .body(Body::from(body))
+                    .unwrap()
+            }
+        }),
+    ))
+    .await;
+    let p = start(s.clone(), url).await;
+    let (status, body) = tokens_request(&p, &pool).await;
+    assert!(status.is_success(), "{status}");
+    assert!(body.contains("message_delta"));
+    assert_eq!(p.spent_today(&pool), 400_000);
+    for _ in 0..200 {
+        if p.spend.pending() == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let file: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(s.root().join(tokens::SPEND_FILE)).unwrap()).unwrap();
+    assert_eq!(file["pools"][&pool], 400_000);
+    let tallies = p.take_statistics();
+    assert_eq!(
+        tallies.values().map(|t| t.cost_micros).sum::<u64>(),
+        400_000
+    );
+    let (status, body) = tokens_request(&p, &pool).await;
+    assert_eq!(status, 403);
+    assert!(
+        body.contains(switchboard_core::TOKENS_CEILING_REACHED),
+        "{body}"
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+    p.shutdown().await;
+    up.abort();
+}
+
+/// SB-453: an upstream answering each call with the next of `answers` (status, `Retry-After`,
+/// `x-should-retry`), then 200 with a priced JSON answer; it counts its calls.
+async fn limited_upstream(
+    answers: Vec<(u16, Option<&'static str>, Option<&'static str>)>,
+) -> (String, JoinHandle<()>, Arc<AtomicUsize>) {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counted = hits.clone();
+    let answers = Arc::new(answers);
+    let (url, up) = fixture(Router::new().route(
+        "/v1/messages",
+        post(move || {
+            let counted = counted.clone();
+            let answers = answers.clone();
+            async move {
+                let n = counted.fetch_add(1, Ordering::SeqCst);
+                match answers.get(n) {
+                    Some((status, retry, should)) => {
+                        let mut r = Response::builder().status(*status);
+                        if let Some(v) = retry {
+                            r = r.header("retry-after", *v);
+                        }
+                        if let Some(v) = should {
+                            r = r.header("x-should-retry", *v);
+                        }
+                        r.body(Body::from(
+                            r#"{"type":"error","error":{"type":"rate_limit_error","message":"synthetic"}}"#,
+                        ))
+                        .unwrap()
+                    }
+                    None => axum::Json(serde_json::json!({
+                        "model": "claude-opus-5-5",
+                        "usage": {"input_tokens": 1000, "output_tokens": 0}
+                    }))
+                    .into_response(),
+                }
+            }
+        }),
+    ))
+    .await;
+    (url, up, hits)
+}
+
+/// SB-453 (DEC-0031): the pay-per-token key's 429 asking for a short wait is waited out inside
+/// the proxy and the same request sent again on the same key, before any byte reached the
+/// session; a long wait, `x-should-retry: false`, a third refusal and a subscription's 429 go to
+/// the session as they came.
+#[tokio::test]
+async fn a_short_rate_limit_of_the_key_is_waited_out_inside_the_proxy() {
+    let (_root, s, pool, _, _, up) = tokens_fixture().await;
+    up.abort();
+    s.set_group_off(&pool, false).unwrap();
+    tokens_ceiling(&s, &pool, 10_000);
+    // Waited out: one 429 asking for a second, then the answer.
+    let (url, up, hits) = limited_upstream(vec![(429, Some("1"), None)]).await;
+    let p = start(s.clone(), url).await;
+    let started = std::time::Instant::now();
+    let (status, _) = tokens_request(&p, &pool).await;
+    assert!(status.is_success(), "{status}");
+    assert!(
+        started.elapsed() >= Duration::from_secs(1),
+        "the wait was kept"
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+    let tallies = p.take_statistics();
+    let sum = |f: fn(&stats::Tally) -> u64| tallies.values().map(f).sum::<u64>();
+    assert_eq!(
+        (sum(|t| t.requests), sum(|t| t.limited), sum(|t| t.ok)),
+        (2, 1, 1)
+    );
+    assert!(p.spent_today(&pool) > 0, "the answer was priced");
+    p.shutdown().await;
+    up.abort();
+    // Not waited: a wait past the bound, or the provider saying not to retry.
+    for answer in [
+        (429, Some("31"), None),
+        (429, Some("1"), Some("false")),
+        (429, None, None),
+    ] {
+        let (url, up, hits) = limited_upstream(vec![answer]).await;
+        let p = start(s.clone(), url).await;
+        let (status, _) = tokens_request(&p, &pool).await;
+        assert_eq!(status, 429, "{answer:?}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "{answer:?}");
+        p.shutdown().await;
+        up.abort();
+    }
+    // Three tries at most.
+    let (url, up, hits) = limited_upstream(vec![(429, Some("1"), None); 3]).await;
+    let p = start(s.clone(), url).await;
+    let (status, _) = tokens_request(&p, &pool).await;
+    assert_eq!(status, 429);
+    assert_eq!(hits.load(Ordering::SeqCst), 3);
+    p.shutdown().await;
+    up.abort();
+    // A ceiling reached during the wait: the request is refused, not sent again.
+    let (url, up, hits) = limited_upstream(vec![(429, Some("1"), None)]).await;
+    let p = start(s.clone(), url).await;
+    let waiting = tokio::spawn({
+        let address = p.address();
+        let token = p.token().to_owned();
+        let pool = pool.clone();
+        async move {
+            reqwest::Client::new()
+                .post(format!("http://{address}/claude/{pool}/v1/messages"))
+                .bearer_auth(token)
+                .body("{}")
+                .send()
+                .await
+                .unwrap()
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    s.set_group_off(&pool, true).unwrap();
+    let response = waiting.await.unwrap();
+    assert_eq!(response.status(), 403);
+    assert!(response
+        .text()
+        .await
+        .unwrap()
+        .contains(switchboard_core::GROUP_OFF));
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+    p.shutdown().await;
+    up.abort();
+    s.set_group_off(&pool, false).unwrap();
+    // A subscription's 429 with no next account: unchanged, it goes to the session at once.
+    add_in(&s, Provider::Claude, "apps", "synthetic-apps", "apps");
+    let (url, up, hits) = limited_upstream(vec![(429, Some("1"), None)]).await;
+    let p = start(s.clone(), url).await;
+    let (status, _) = tokens_request(&p, "apps").await;
+    assert_eq!(status, 429);
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+    p.shutdown().await;
+    up.abort();
+}

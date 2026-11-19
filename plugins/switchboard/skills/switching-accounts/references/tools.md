@@ -11,9 +11,29 @@ Words: the person reads **group** for what tool names and fields call a project,
 group's id is its `pool` (`default` is the default group). **Automatic switching** is what tool
 names and fields call rotation. Say group and automatic switching to the person.
 
-`switchboard mcp --read-only` lists only the 38 tools that read (every tool under
-[Read tools](#read-tools)) and none of the 56 that write. A session Switchboard launches in
-isolated mode gets that set. The server lists 94 tools; each has a section below.
+`switchboard mcp --read-only` lists the 39 tools that only read (every tool under
+[Read tools](#read-tools)) and, since SB-517, the 16 write tools that also have a read form:
+`switchboard_capacity`, `switchboard_own_sign_in`, `switchboard_boot_resume` (without `on`),
+`switchboard_duty` (a dry run included), `switchboard_watchdog` (without `on` or `run`),
+`switchboard_app` (`updates` and `login_item` without `enabled`), `switchboard_analytics`,
+`switchboard_balance`, `switchboard_feed`, `switchboard_anthropic_keys`,
+`switchboard_codex_route`, `switchboard_project_sources`, `switchboard_machine_set` (`keys`, and
+`adopt` without `apply`), `switchboard_login` (`status`, `pending`), `switchboard_usage_mode`
+(without `mode`) and `switchboard_proxy_users` (`list`, or no `action`). There they are annotated
+as reads and answer only that form: a call with a field that changes something, or any other
+write tool, is refused with `isError: true` and `structuredContent.error.code` `read_only`, never
+as an unknown tool. A session Switchboard launches in isolated mode gets that set. The server
+lists 99 tools; each has a section below.
+
+Since SB-517 every call is checked against its tool's `inputSchema` before it runs (types,
+`required`, `enum`, `minimum` and `maximum`, `minLength` and `maxLength`, list items and size,
+and no argument the schema does not name). A fault is a result with `isError: true` whose
+`structuredContent.error` is `{code: "invalid_arguments", field, message}`, the field as a path
+(`executors[0].agent`, `decision.by`), and nothing ran. A `decision` takes the operator's words
+as `by`, `instruction`, `at` and `source`, and nothing else. A tool that would answer a refusal as data (`{state: "refused", reason}`,
+as `switchboard dispatch` does on the CLI) answers an agent `isError: true` with
+`structuredContent.error.code` set to its `reason`; no tool answers that shape yet, so this guards
+the dispatch tools to come.
 
 ## Contents
 
@@ -88,7 +108,12 @@ those used elsewhere.
   whose token has expired, Switchboard first renews that sign-in itself (0.5); the account the
   ordinary Claude Code uses is never renewed, and no credential reaches the agent. Within 60 seconds of the
   last check it answers with the earlier observation and `note` = "Checked less than a
-  minute ago; showing that observation." A read-only server (`switchboard mcp --read-only`)
+  minute ago; showing that observation." Since SB-518 (DEC-0032) a 429 on any check of a provider
+  holds every account of it for at least 15 minutes (longer when the provider asks, doubling on
+  repeats up to an hour): `refresh` then answers "Usage checks are rate limited by the provider.
+  Switchboard waits before the next one." And in the `smart` and `on_demand` modes, past the provider's budget (two checks a minute,
+  a reserve of up to eight) it answers "Usage checks of this provider are paced to keep its usage
+  endpoint answering. Try again in a minute." A read-only server (`switchboard mcp --read-only`)
   never asks the provider: it answers with the stored observation and `note` = "This server is
   read-only: showing the stored observation without asking the provider."
 
@@ -110,6 +135,7 @@ What needs a person, one item per account or question:
 | `session_stuck` | a board run quiet for 30 minutes, its log included | `switchboard_dispatch_stop` with the item's `launch_id` (`action.command` is the CLI act) |
 | `session_gone` | a board run whose process ended with no end recorded | `switchboard_dispatch_stop` with the item's `launch_id` and `if_gone` (records the end, never signals a live run) |
 | `dispatch_refused` | board runs refused at this computer's session limit that still wait, however long ago (`count`, `since`, `last_at`, `newest_request`, `freed`) | `switchboard_capacity` (its `refused_waiting`) |
+| `watchdog` | what the watchdog found from outside Switchboard, by `code`: `owner_down`, `owner_not_answering`, `owner_stopped` (listed only when Switchboard does not answer), `act_unfinished`, `board_run_gone`, `duplicate_session`; with `count`, `ids`, `since` (first seen) and `severity` | `switchboard_watchdog`, then the tool `action.tool` names |
 
 A view: every account listed stays in its group with its selection, and nothing moves; once
 fixed it leaves the list on the next background pass. Read-only, also on a read-only server.
@@ -118,11 +144,19 @@ fixed it leaves the list on the next background pass. Read-only, also on a read-
 Since 0.7.84 (SB-366) `refused_there` also appears: an account on another machine whose copy the
 provider refused there at the last background read (`since` is that read's time); fix it with a
 sign-in on that machine, or call the account back with `switchboard_account_recall`.
+
+Since SB-550 (DEC-0033) three items name another machine (as `label` and `machine`; the sentence
+names none), each with `action.tool` `switchboard_machines`: `machine_unreachable` (its Switchboard
+did not answer three reads a minute apart: `failures`, `code`), and from its last read that
+worked, `machine_health` (its failing health checks, or its owner not running: `checks`) and
+`machine_sessions` (sessions there that need a person, a second copy or a board run gone quiet:
+`count`, `kinds`, `session_ids`; `action.window` `open_sessions`).
 ### `switchboard_anthropic_keys`: `name?` (string), `model?` (string)
 
 The Anthropic API keys agents run on directly (SB-390), each under a name the person chose
 (`team-a`, `personal`): `name`, `saved_at` and default `model`, never a key. With both `name`
-and `model`, changes that key's default model. Saving or removing a key is the person's
+and `model`, changes that key's default model (a write: on a read-only server only the list
+answers). Saving or removing a key is the person's
 (`switchboard agents anthropic set <name> --key-stdin`); a launch picks one with `switchboard
 agents launch hermes --anthropic <name>`. No spending ceiling counts these keys.
 ### `switchboard_launch_keys`: `agent` (string), `folder?` (absolute path)
@@ -135,7 +169,9 @@ the default; an Anthropic Admin key (`sk-ant-admin`) cannot run a model and is r
 Since SB-404 every key carries `metered` (whether a ceiling counts it), and for Claude Code and
 Hermes the pay-per-token group's Claude API keys follow as `kind: group` (`pool`, `group`,
 `account_id`, `selected`): `usable` once the group is on, has a daily ceiling, holds the folder
-and has this key selected, else `why_not` says which.
+and has this key selected, else `why_not` says which. It only reads (SB-517: listed on a
+read-only server too). No MCP tool launches an agent yet: launch from the window or with
+`switchboard agents launch`.
 
 ### `switchboard_observatory_keys`
 
@@ -212,8 +248,12 @@ This Switchboard's health as one report, `agent-health/1` (SB-393), for a watche
 readings into incidents: `state` (the worst check) and `checks`, each `{id, area, state, count,
 fix}`. `state` is `ok`, `warn`, `fail` or `unknown` (never read as ok: `errors_today` is unknown
 while usage counts are off). Checks: `owner`, `sign_in`, `accounts`, `sessions_stuck`,
-`sessions_duplicate`, `sessions_gone`, `crashes` (a crash in the last day fails, in the week warns),
-`errors_today` (50 or more warn). `fix.tool` names the tool that repairs it. Counts and kinds
+`sessions_duplicate`, `sessions_gone`, `machines` (SB-550: another machine that stopped answering,
+a failing health check there or sessions there that need a person warn), `crashes` (a crash in the
+last day fails, in the week warns),
+`errors_today` (50 or more warn), `watchdog` (what the watchdog found: `fail` when Switchboard is
+down or silent; absent where no watchdog job runs, `unknown` only when its installed job's report
+is older than 15 minutes). `fix.tool` names the tool that repairs it. Counts and kinds
 only: no account, folder, session id or text.
 ### `switchboard_bugs`: no arguments
 
@@ -235,11 +275,13 @@ sent; retry); “The session was asked to end, and its end was not seen within 1
 was sent; read `switchboard_sessions`). Closing a viewer only detaches; this ends the session. A write: not on a read-only server.
 macOS and Linux.
 
-### `switchboard_sessions`: `all?` (boolean), `history?` (boolean), `limit?` (integer), `before?` (integer), `launch_id?` (string), `machine?` (boolean), `rows?` (boolean)
+### `switchboard_sessions`: `all?` (boolean), `history?` (boolean), `limit?` (integer), `before?` (integer), `launch_ids?` (array of strings), `launch_id?` (string), `machine?` (boolean), `rows?` (boolean)
 
 With `rows: true` (SB-395): `{rows[], counts {needs_you, running, waiting, ended}, degraded[], observed_at}`, this computer's sessions as the window's Sessions page shows them, needs you first, then running, waiting (stopped on a limit) and ended (the last day), newest first in each. A row is `{id, group, why, acts[], agent, folder, account (label), pool, origin (the surface, null when started by hand), since, launch_id, session_id, pid?, quiet_minutes?, probe_at?, task?}`; `why` is `duplicate`, `stuck`, `gone`, `ready_to_continue`, `working`, `quiet`, `limit` or how a launch ended (`exited`, `stopped`, `timed_out`, `limit`); `acts` names what applies: `close_copy` (`switchboard_session_close_copy` with its `session_id` and `pid`), `attach` and `end` (a hosted session, `switchboard_session_end`). A source that could not be read is named in `degraded` (`recovery` when no owner runs). `switchboard sessions --rows [--target MACHINE]` gives the same, here or on another machine.
 
 With `history: true`, `limit` (1 to 500, default 500) and `before` (Unix seconds) page the launches; the answer's `next_before` is the next page's `before`, null at the end.
+
+With `history: true` and `launch_ids` (1 to 64 ids; SB-423): only those launches, in the order given, a repeated id once, each read by its id and no other record (no chain), as `{launches[], total, next_before: null, missing[]}`; `missing` names the ids with no record. Refused without `history: true` and beside `limit`, `before` or `launch_id`. The CLI is `switchboard sessions --history --launch <id> [--launch <id> ...]`.
 
 With `machine: true` (SB-353): every Claude Code and Codex process of this user instead, Switchboard's or not: `pid`, `agent`, `folder`, `started_at`, `launch_id` (null when unmanaged), `managed`, `last_write_at`, `quiet_minutes`, `quiet` (30 minutes or more), and `total`, `managed`, `unmanaged`, `quiet`. Read from the process table without the owner.
 
@@ -388,11 +430,15 @@ and the background monitor's last decisions; with the app stopped, `monitor.runn
 The backup folder, whether backups run, the newest backups (file, time, account count) and the
 last error. Never their contents.
 
-### `switchboard_recovery`: no arguments
+### `switchboard_recovery`: `open?` (boolean)
 
 Sessions that stopped on a limit and the accounts ready to continue them: each stop's `mode`
 (`capacity` or `probe`) and `probe_at`, and for a waiting stop that is not ready its `reason`
-(`billing`, `account_removed`, `no_account`, `backoff`).
+(`billing`, `account_removed`, `no_account`, `backoff`). Each open stop with a launch names its
+`launch_id` and that launch's `continued_as` (where its work went: `{kind: launch, id}` or
+`{kind: handover, id, launch_id}`; null while nowhere; SB-423). With `open: true`, only the stops
+still open (state `waiting` or `claimed`); `waiting_sessions`, `ready_sessions` and
+`claimed_sessions` stay the counts over every stop. The CLI is `switchboard recovery --open`.
 
 ### `switchboard_handovers`: no arguments
 
@@ -474,8 +520,9 @@ Agents page, or `switchboard agents enable|disable|default`).
 used_percent, resets_at}]`, asked of Kimi at this call) and `error` when Kimi refused the login,
 did not answer, or the login waits for Kimi to renew it (launching the account once does).
 `current` is the ordinary `kimi` (`~/.kimi-code`) the same way, shown and never switched. No
-token is returned or handed to any agent; signing in, launching and removing accounts are the
-operator's (the app, or `switchboard kimi login|launch|remove`).
+token is returned or handed to any agent; signing in and launching accounts are the operator's
+(the app, or `switchboard kimi login|launch`). Removing one, when the operator asks, is
+`switchboard_kimi_remove`.
 
 ### `switchboard_project_suggestions`: no arguments
 
@@ -618,7 +665,7 @@ this machine's ssh key there) keeps it as a guest in the group `pool` names (nev
 group), pinned to this machine's settings signing key. There it is never moved on, given to an agent,
 lent, shared or made the ordinary sign-in, and only this machine calls it back
 (`switchboard_account_recall`). `lease_hours` (1 to 720, default 48): this machine's background
-read of that machine (every 15 minutes) extends it; past it the copy there is switched off but
+read of that machine extends it every 15 minutes (the read itself runs every minute, SB-550); past it the copy there is switched off but
 keeps its sign-in for 30 days (the next read turns it on again, and a call back takes the live
 sign-in), then the sign-in there is removed. The teammate's key line pins the one group there
 (`ssh-serve --pool`). The answer carries `delegated: {lease_hours}`.
@@ -665,11 +712,17 @@ also reads each machine's Switchboard over ssh, all at once, 20 seconds per call
 Reads only.
 
 
-Without `live` (SB-366, DEC-0017) each machine carries `read`: `{as_of, tried_at, reason, failures}`
-of the owner's last background read (every 15 minutes while the owner runs, one hour after three
-failures in a row; `reason` is `unreachable`, `refused` or `unreadable`), and each account `there`:
-`{used_percent, usage_status, enabled, as_of, tried_at, reason}` of its copy on that machine, or
-null before a first read. The numbers are shown, never used to switch or route here.
+Without `live` (SB-366, DEC-0017; SB-550, DEC-0033) each machine carries `read`: `{as_of,
+tried_at, reason, failures, call, sessions, health}` of the owner's last background read (every
+minute while the owner runs, through that machine's own Switchboard over ssh, `switchboard
+remote-status`; every five minutes after three failures in a row; `reason` is `unreachable`,
+`refused` or `unreadable`; `call` is `status`, or `accounts` for an older Switchboard there;
+`sessions` is `{counts, troubled, degraded}`, its rows per group and the rows that need a person by
+`why` and ids; `health` is `{state, failing}`; `health_since` and `sessions_since` are when a read
+that worked first saw a failing check, or sessions there that need a person, null otherwise), and
+each account `there`: `{used_percent,
+observed_at, usage_status, enabled, as_of, tried_at, reason}` of its copy on that machine, or null
+before a first read. The numbers are shown, never used to switch or route here.
 ### `switchboard_machine_set`: `action`, `apply?`, `account_id?`, `on?`, `machine?`, `key?`, `decision?`
 
 Only when the operator asks. `adopt`: places each account marked used elsewhere and in no machine
@@ -884,6 +937,37 @@ the account off the list and `rotate` gives it a new capability (and writes the 
 again): both at once. macOS and Linux only; Windows answers that it is not supported. Changing it
 only when the operator asks. Kept in `<data>/proxy-users.json` (0600, no secret).
 
+### `switchboard_usage_mode`: `mode?`
+
+How quota figures are kept current on this computer (SB-518, DEC-0032). `smart` (the default): a
+response's rate-limit headers with both the five-hour and the seven-day window count as a check, so
+while requests flow the usage endpoint is asked about once every 30 minutes per account
+(sooner near the limit or after a pause); an account
+that carries no traffic is checked every 10 minutes; a switch checks its candidate fresh first;
+each provider has a budget of 2 checks a minute (a burst of 4, at most 2 at once), and a 429 on any
+usage check holds the whole provider for at least 15 minutes, doubling on repeats up to an hour.
+`timer`: the fixed cadence of 0.7.121. `on_demand`: no check on a schedule, only a switch's
+candidate and a person's check. Without `mode` it reads `{usage_mode, modes}`; `mode` changes it,
+only when the operator asks. Kept in `<data>/usage-mode`. A person's check (`switchboard_usage`
+with `refresh`) runs ahead of the budget by at most 4 checks, then answers that checks are paced.
+
+### `switchboard_boot_resume`: `on?`
+
+Continuing sessions after this computer restarts (SB-450, DEC-0030). The owner's first pass after
+a restart continues each Claude Code session the restart cut, as itself (`claude --resume <id>`
+with a prompt to go on) in a session host of its own, attachable by its launch id: Switchboard
+launched it, it was running at the owner's last look before the restart, the restart cut it in a
+turn (its transcript written after its last turn ended, in the two hours before the restart and not
+since, its last words not the person's `/exit`), it has no end (or one by the shutdown's signal),
+nobody closed it on purpose (the person, the duty officer, a session host), it is not a dispatched
+board run, and no process, session host or later launch holds it; with the person's own sign-in
+off, only sessions in Switchboard's own homes; a first pass more than six hours after the restart
+continues nothing (`too_late`). At most five after one restart, newest first, inside the session
+pool; each intent and outcome is journalled in `<data>/boot-resume.jsonl` and never repeated.
+Without `on` it reads `{settings: {on}, boot_time, last_look, window_minutes, max_per_boot, recent,
+supported}`; `on` changes it, only when the operator asks. Kept in `<data>/boot-resume.json`, on
+when absent.
+
 ### `switchboard_duty`: `on?`, `stuck_minutes?`, `waiting_minutes?`, `idle_minutes?`, `max_age_hours?`, `run?`, `dry_run?`
 
 The session duty officer (SB-384, DEC-0021). Every five minutes it looks at each live interactive
@@ -901,6 +985,21 @@ arguments it reads `{settings, check_seconds, watched, left_to_dashboards, waiti
 running_commands, due, recent, supported}`; `on`, `stuck_minutes` and `idle_minutes` change it
 (only when the operator asks; `waiting_minutes` and `max_age_hours` are kept for older settings
 and unused), `run: true` checks now and `dry_run: true` lists what a check would do.
+
+### `switchboard_watchdog`: `on?`, `run?`
+
+The watchdog (SB-510): a system job apart from Switchboard, put in place by the installed app (a
+LaunchAgent `ai.passioncode.fabric-switchboard.watchdog` on macOS, the systemd user timer
+`fabric-switchboard-watchdog.timer` on Linux; none on Windows yet), runs `switchboard watchdog
+--once` every five minutes. It checks that Switchboard answers on its control port within five
+seconds, that no act of the duty officer or stop of a board run was left half done for 10
+minutes, that no board run has been gone for 30 and no session has run in two processes for 15.
+It only reports: `watchdog.json`, `switchboard_attention` (reason `watchdog`) and
+`switchboard_health` (check `watchdog`); it never acts and sends nothing. Without arguments it
+reads `{on, job, interval_seconds, report, current}` (`job`: `installed`, `absent`, `unsupported`
+or `unknown`; `report.findings[{code, severity, count, ids, first_seen}]`; `current`: no older than
+15 minutes). `on` changes it, only when the operator asks (`off` also takes the job out;
+`job_change` says what happened), and `run: true` checks once now.
 
 ### `switchboard_balance`: `add?`, `remove?`, `all_new?`, `backup_add?`, `backup_remove?`
 
@@ -967,6 +1066,22 @@ and `again` (sign a saved account in again) take `id`.
 
 Only when the operator asks. Renames a saved Kimi Code account.
 
+### `switchboard_kimi_remove`: `id`
+
+Only when the operator asks (SB-517). The window's *Remove* of a Kimi Code account: forgets the
+account and deletes its home here, which cannot be undone (sign it in again to bring it back).
+Refused while a `kimi` session runs in it. Returns `{removed}`, `false` when no such account was
+saved, so a second call removes nothing more. Annotated `destructiveHint` and `idempotentHint`.
+
+### `switchboard_openrouter_remove`: `pool?`, `decision?`
+
+Only when the operator asks (SB-517). The window's *Remove* of the OpenRouter key agents run on,
+or with `pool` that group's own key: the saved key and its vault item are deleted, which cannot be
+undone (save or issue a new key to replace it). A key whose spend a spending ceiling counts is
+removed only with `decision`, the operator's own words; without them the refusal names the
+window. Returns `{removed}`, `false` when no key was saved. Annotated `destructiveHint` and
+`idempotentHint`.
+
 ### `switchboard_handovers_set`: `on`
 
 Only when the operator asks. `true`: hand-overs open in Fabric's console; `false`: straight in
@@ -1011,8 +1126,9 @@ its own key inside Hermes, which this server never sets.
 
 Only when the operator asks. `model` is an OpenRouter id (`vendor/model`, for example
 `moonshotai/kimi-k2` or `anthropic/claude-sonnet-4.5`); agents launched on the operator's key
-start on it; with `pool`, the model of that group's own key. Refuses a malformed id. Saving or removing the key itself is the operator's own
-step (the app, or `switchboard agents openrouter set|remove`), never this server.
+start on it; with `pool`, the model of that group's own key. Refuses a malformed id. Saving the key itself is the operator's own
+step (the app, or `switchboard agents openrouter set`), never this server; removing it, when the
+operator asks, is `switchboard_openrouter_remove`.
 
 ## Refusals
 
@@ -1027,7 +1143,9 @@ Fixed texts the server returns with `isError: true`, the same sentences the wind
 | "This session does not run through Switchboard's proxy…" | `target: "route"` to prepare a group, or `claude_cli` with `global: true` after the operator's OK |
 | "No account with id …" | call `switchboard_accounts` for current ids |
 | "Pass an absolute folder." | pass an absolute `path` |
-| "expires_in_hours must be 1 to 720." | pick an expiry in range |
+| "expires_in_hours is a whole number from 1 to 720." | pick an expiry in range (the schema check, SB-517) |
+| "This server is read-only (switchboard mcp --read-only): …" | the call changes something: use a server started without `--read-only`, or call the tool without the fields that change something |
+| "… is required." / "… is not an argument here…" / "… must be …" / "… is one of: …" | the schema check (`error.code` `invalid_arguments`, `error.field` names the argument): fix that argument and call again |
 | "Choose an existing folder." | the folder is missing or inside Switchboard's data folder |
 | "Name one account_id to refresh." | `refresh` needs one `account_id` |
 | "Group not found." | call `switchboard_projects` for current group ids |

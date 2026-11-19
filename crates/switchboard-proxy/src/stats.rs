@@ -23,6 +23,11 @@ pub struct Tally {
     /// SB-401: answers whose model the price table did not know, priced at the dearest family.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub cost_estimated: u64,
+    /// SB-452: requests served by another group than their own: the folder the request names
+    /// belongs to other groups only, or the session's launch named another group (refused when
+    /// one of the two is the pay-per-token group).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub mismatched: u64,
 }
 fn is_zero(n: &u64) -> bool {
     *n == 0
@@ -39,6 +44,7 @@ impl Tally {
         self.cache_write_tokens += other.cache_write_tokens;
         self.cost_micros = self.cost_micros.saturating_add(other.cost_micros);
         self.cost_estimated = self.cost_estimated.saturating_add(other.cost_estimated);
+        self.mismatched = self.mismatched.saturating_add(other.mismatched);
     }
 }
 
@@ -91,7 +97,16 @@ pub fn folder_hint(body: &[u8]) -> Option<String> {
     });
     let raw = cwd.or_else(|| {
         let head = &body[..body.len().min(1024 * 1024)];
-        find(head, b"Working directory: ").map(|at| {
+        // SB-452: Claude Code 2.1.327 writes `Primary working directory: `, older ones
+        // `Working directory: `; the first of either is the session's own (its system prompt).
+        [
+            find(head, b"Working directory: "),
+            find(head, b"working directory: "),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .map(|at| {
             let rest = &head[at + 19..];
             let end = rest
                 .iter()
@@ -457,6 +472,13 @@ mod tests {
         );
         assert_eq!(folder_hint(br#"{"messages":[]}"#), None);
         assert_eq!(folder_hint(br#"Working directory: relative/path\n"#), None);
+        // SB-452: Claude Code 2.1.327's wording, escaped in its JSON body; a later message that
+        // names another folder in the older wording does not win over the system prompt's line.
+        let current = br##"{"system":[{"type":"text","text":"# Environment\n - Primary working directory: /Users/me/DATA/_worktrees/app-audit\n - Is a git repository: true"}],"messages":[{"role":"user","content":"Working directory: /Users/me/elsewhere"}]}"##;
+        assert_eq!(
+            folder_hint(current).as_deref(),
+            Some("/Users/me/DATA/_worktrees/app-audit")
+        );
         let folders = vec![
             "/w/app".to_string(),
             "/w/app/sub".to_string(),
