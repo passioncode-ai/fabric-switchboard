@@ -540,6 +540,7 @@ mod tests {
             during: crate::item_size::DURING_RENEWAL.into(),
             at: 9_000,
             stamp: Some("1:2".into()),
+            version: None,
         }];
         let answer = build(&Inputs {
             snapshot: &snapshot,
