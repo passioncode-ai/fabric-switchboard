@@ -300,13 +300,13 @@ pub const DISPATCH_ID_INVALID: &str =
 
 /// The exit contract (spec §3.4, §6): Claude Code's appended system prompt; for Codex, after the
 /// header.
-pub const EXIT_CONTRACT: &str = "You run with no person, for one Fabric board request. Do the request, answer it in its board thread, complete it (completed, or failed_known with the reason when an error stops you), then end the session. If com.enroll is refused, follow Fabric's board.read-at-start: reply only at an absent slot of generation 0, and always ask the operator. Close the workflow with the final checkpoint only once the request is settled: the board accepted your complete or reconcile, or com.get reads it answered, finished or outcome_unknown. A run that leaves it queued, claimed, accepted or in progress writes its checkpoint without closing, so Fabric can take the workflow back. Never wait for a person: money, deletion and publication go through fabric_effect_request.";
+pub const EXIT_CONTRACT: &str = "You run with no person, for one Fabric board request. Do the request, answer it in its board thread, complete it (completed, or failed_known with the reason when an error stops you), then end the session. If com.enroll is refused, follow Fabric's board.read-at-start: reply only at an absent slot of generation 0, and always ask the operator. Close the workflow with the final checkpoint only once the request is settled: the board accepted your complete or reconcile, or com.get reads it answered, finished or outcome_unknown. A run that leaves it queued, claimed, accepted or in progress writes its checkpoint without closing, so Fabric can take the workflow back. Never wait for a person: money, deletion and publication go through fabric_effect_request, except the release of a product whose entry in passioncode-ai's release-signing/products.json says \"approval\": \"checks\": push its version tag yourself once its checks are green, with no effect request.";
 
 /// SB-338: the contract of an inbox run (Fabric's request `b37b398f`): it settles by read marks.
 /// SB-398: the contract of a run that continues a Fabric task a session let go of.
-pub const RESUME_CONTRACT: &str = "You run with no person, to continue one Fabric task a session left unfinished; its id is the request id in your header. Take it with fabric_work_claim (taskId that id); when another agent holds it, release nothing and end. Continue it from the checkpoint you accepted and the task's own notes, writing observatory_checkpoint_write after every step. End by releasing it with fabric_work_release: how done once its work is finished, or let-go with the reason when you cannot go on; a wait is never an end: record it and its watcher, and keep working on what does not depend on it. This run answers no board request: never claim, accept or complete one. Close the workflow with the final checkpoint once the task is released, then end the session. Never wait for a person: money, deletion and publication go through fabric_effect_request.";
+pub const RESUME_CONTRACT: &str = "You run with no person, to continue one Fabric task a session left unfinished; its id is the request id in your header. Take it with fabric_work_claim (taskId that id); when another agent holds it, release nothing and end. Continue it from the checkpoint you accepted and the task's own notes, writing observatory_checkpoint_write after every step. End by releasing it with fabric_work_release: how done once its work is finished, or let-go with the reason when you cannot go on; a wait is never an end: record it and its watcher, and keep working on what does not depend on it. This run answers no board request: never claim, accept or complete one. Close the workflow with the final checkpoint once the task is released, then end the session. Never wait for a person: money, deletion and publication go through fabric_effect_request, except the release of a product whose entry in passioncode-ai's release-signing/products.json says \"approval\": \"checks\": push its version tag yourself once its checks are green, with no effect request.";
 
-pub const INBOX_CONTRACT: &str = "You run with no person, for this project's unread Fabric board messages; there is no board request of its own. Read every unread message addressed to the project (com.list with unread true), do what is the project's own, answer in its thread where an answer is owed, and mark each message you handled read with com.read_ack. Never claim, accept or complete a request in this run. Write observatory_checkpoint_write at least every 10 minutes. Close the workflow with the final checkpoint once com.list reads nothing unread, then end the session. Never wait for a person: money, deletion and publication go through fabric_effect_request.";
+pub const INBOX_CONTRACT: &str = "You run with no person, for this project's unread Fabric board messages; there is no board request of its own. Read every unread message addressed to the project (com.list with unread true), do what is the project's own, answer in its thread where an answer is owed, and mark each message you handled read with com.read_ack. Never claim, accept or complete a request in this run. Write observatory_checkpoint_write at least every 10 minutes. Close the workflow with the final checkpoint once com.list reads nothing unread, then end the session. Never wait for a person: money, deletion and publication go through fabric_effect_request, except the release of a product whose entry in passioncode-ai's release-signing/products.json says \"approval\": \"checks\": push its version tag yourself once its checks are green, with no effect request.";
 
 /// The exit contract a run is started with.
 pub fn contract(reason: Reason) -> &'static str {
@@ -886,6 +886,17 @@ mod tests {
             assert!(answer["launch_id"].is_null());
         }
         assert!(!EXIT_CONTRACT.contains('\u{2014}'));
+    }
+
+    #[test]
+    fn every_contract_lets_a_checks_approved_release_go_without_an_effect_request() {
+        // Fabric's request 132e98d5: a run asked the operator to approve a release that its
+        // product's checks approve; the operator's rule is that such a release needs no click.
+        for contract in [EXIT_CONTRACT, RESUME_CONTRACT, INBOX_CONTRACT] {
+            assert!(contract.contains("money, deletion and publication go through fabric_effect_request, except the release of a product whose entry in passioncode-ai's release-signing/products.json says \"approval\": \"checks\""), "{contract}");
+            assert!(contract.contains("push its version tag yourself once its checks are green, with no effect request."), "{contract}");
+            assert!(!contract.contains('\u{2014}'), "{contract}");
+        }
     }
 
     #[test]
