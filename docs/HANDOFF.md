@@ -11,7 +11,7 @@
 - **Decisions.** DEC-0033 (amends DEC-0017's cadence). Health of a remote machine counts only failing checks and its owner not running (a warning there is its own Needs attention). The fallback skips `sessions --rows` behind an older restricted entry (it refuses it).
 - **Checks.** Studio: see the PR (gate EXIT line). Copylot en-US f4524725…79b729de and the changelog 8ed9eeb8; ru-RU e1b07239…4486543b.
 
-**Exact next task.** Review the `sb-550-remote-minute` pull request and merge once its gate reads EXIT 0 on the merged head (renumber DEC-0033 if an open pull request took it); after the release, read `switchboard machines list` on the operator's Mac and check each machine's `read.call` is `status` and the Accounts rows of the machine groups show one number.
+**Exact next task.** Review PR #861 (`sb-550-remote-minute`) and merge once its gate reads EXIT 0 on the merged head (renumber DEC-0033 if an open pull request took it); after the release, read `switchboard machines list` on the operator's Mac and check each machine's `read.call` is `status` and the Accounts rows of the machine groups show one number.
 
 ## 2026-11-19: release 0.7.121 and plan section 10 (launch, fleet and lifecycle), waves W10.0 to W10.2 landed
 
