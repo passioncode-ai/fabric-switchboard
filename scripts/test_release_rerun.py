@@ -50,6 +50,35 @@ APT_LOOP = log('##[warning]apt-get failed (attempt 3)',
                '##[error]Process completed with exit code 1.')
 RUNNER = log('##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped.')
 NPM = log('npm error code ECONNRESET', 'npm error network aborted', '##[error]Process completed with exit code 1.')
+# The apt step failed once and recovered; the smoke check failed later with a traceback of ours.
+RECOVERED_THEN_OURS = log(
+    '##[group]Run for attempt in 1 2 3; do',
+    'E: Failed to fetch http://security.ubuntu.com/ubuntu/pool/main/b/bubblewrap.deb  503  Service Unavailable',
+    '##[warning]apt-get failed (attempt 1); again in 30 s',
+    'Setting up xvfb (2:21.1.12-1ubuntu1.5) ...',
+    '##[endgroup]',
+    '##[group]Run version=$(node -p "require(\'./package.json\').version")',
+    'Traceback (most recent call last):',
+    '  File "scripts/smoke_native.py", line 120, in <module>',
+    'RuntimeError: the window did not show',
+    '##[error]Process completed with exit code 1.')
+# The same recovered apt error, then a packaging refusal of ours (an error annotation).
+RECOVERED_THEN_REFUSAL = log(
+    '##[group]Run for attempt in 1 2 3; do',
+    'E: Failed to fetch http://mirror/x.deb  503  Service Unavailable',
+    '##[endgroup]',
+    '##[group]Run python3 scripts/package_linux.py --arch x64',
+    '##[error]Expected exactly one amd64 .deb for 0.7.124, found 0.',
+    '##[error]Process completed with exit code 1.')
+# A signing step with continue-on-error failed on the gallery, its retry passed; the job then
+# failed in a later step on the mirror: the failed step decides.
+EARLIER_ERROR_THEN_MIRROR = log(
+    '##[group]Run Azure/artifact-signing-action@c7ab',
+    '##[error]the build changed the source tree',
+    '##[endgroup]',
+    '##[group]Run sudo apt-get update',
+    'E: Failed to fetch http://mirror/x.deb  503  Service Unavailable',
+    '##[error]Process completed with exit code 100.')
 NOTHING = log('Something else went wrong', '##[error]Process completed with exit code 1.')
 
 
@@ -61,8 +90,13 @@ class Classify(unittest.TestCase):
 
     def test_our_own_failures_win_over_any_outside_noise(self):
         for name, text in (('test', TEST), ('guard', GUARD), ('compile', COMPILE), ('own check', OWN_CHECK),
-                           ('unknown', NOTHING)):
+                           ('unknown', NOTHING), ('recovered apt, then a traceback', RECOVERED_THEN_OURS),
+                           ('recovered apt, then a refusal', RECOVERED_THEN_REFUSAL)):
             self.assertEqual(classify(text)[0], 'ours', name)
+
+    def test_only_the_failed_step_decides(self):
+        self.assertEqual(classify(EARLIER_ERROR_THEN_MIRROR)[0], 'infrastructure')
+        self.assertIn('Traceback', classify(RECOVERED_THEN_OURS)[1])
 
     def test_an_unreadable_log_is_never_a_guess(self):
         self.assertEqual(classify(None), ('ours', 'the log could not be read'))

@@ -37,9 +37,11 @@ jobs:
           fi
   # SB-563 (M4-01): a run whose checks were skipped must never read as a passed nightly. The release
   # guard accepts the newest nightly run on the tagged commit when it concluded `success`, and a run
-  # whose test jobs were all skipped concluded `success`. The duplicate cancels itself instead: the
-  # guard then starts a full run on the tag. Should the cancel fail, this job fails: either way the
-  # run is not a success.
+  # whose test jobs were all skipped concluded `success`. The duplicate cancels itself instead.
+  # When it is the newest run on the tagged commit, the guard starts a full run on the tag, once per
+  # release run: a later duplicate cancelling on the same commit before that run is listed makes
+  # the guard refuse ("concluded cancelled"; re-run the release, passioncode-ai/.github#51).
+  # Should the cancel fail, this job fails: either way the run is not a success.
   duplicate:
     needs: clock
     if: needs.clock.outputs.run == 'false'

@@ -105,9 +105,17 @@ class Minisign(unittest.TestCase):
 
 
 class Feed(unittest.TestCase):
-    def run_check(self, documents, package=PACKAGE):
-        """feed_check.run against a feed that answers `documents` in turn (an exception is raised)."""
+    def run_check(self, documents, package=PACKAGE, releases=None, previous_key=None):
+        """feed_check.run against a feed that answers `documents` in turn (an exception is raised),
+        a release list (`releases`, default one older release) and that release's updater key
+        (`previous_key`, default the current one)."""
         answers, said, slept = list(documents), [], []
+        current_key = b64(public_file())
+        listed = releases if releases is not None else [
+            {'tag_name': TAG, 'draft': False, 'prerelease': False},
+            {'tag_name': 'v1.3.0-beta.1', 'draft': False, 'prerelease': True},
+            {'tag_name': 'v1.2.2', 'draft': False, 'prerelease': False},
+            {'tag_name': 'v1.2.1', 'draft': False, 'prerelease': False}]
 
         def get(url):
             if url.startswith(feed_check.FEED):
@@ -115,16 +123,41 @@ class Feed(unittest.TestCase):
                 if isinstance(answer, Exception):
                     raise answer
                 return json.dumps(answer).encode()
+            if url.startswith(f'{feed_check.API}/releases'):
+                return json.dumps(listed).encode()
+            if url.startswith(f'{feed_check.API}/contents/'):
+                self.assertTrue(url.endswith('?ref=v1.2.2'), url)
+                return json.dumps({'plugins': {'updater': {'pubkey': previous_key or current_key}}}).encode()
             return package
 
-        errors = feed_check.run(TAG, b64(public_file()), get=get, attempts=3, wait=7, sleep=slept.append, say=said.append)
+        errors = feed_check.run(TAG, current_key, get=get, attempts=3, wait=7, sleep=slept.append, say=said.append)
         return errors, said, slept
 
     def test_a_feed_that_serves_the_tag_with_a_verified_package_passes(self):
         errors, said, slept = self.run_check([feed()])
         self.assertEqual(errors, [])
         self.assertEqual(slept, [])
-        self.assertIn('verifies', said[-1])
+        self.assertTrue(any('verifies' in line for line in said), said)
+
+    def test_a_package_the_previous_release_cannot_verify_fails_the_check(self):
+        """SB-563 review N6: copies on the previous release verify with the key built into them."""
+        other = b64(public_file(seed=bytes(32)))
+        errors, _, _ = self.run_check([feed()], previous_key=other)
+        self.assertTrue(errors and 'v1.2.2' in errors[0] and 'does not match' in errors[0], errors)
+
+    def test_an_unchanged_key_and_a_first_release_pass(self):
+        errors, said, _ = self.run_check([feed()])
+        self.assertEqual(errors, [])
+        self.assertIn('the one v1.2.2 carries', said[-1])
+        errors, _, _ = self.run_check([feed()], releases=[{'tag_name': TAG, 'draft': False, 'prerelease': False}])
+        self.assertEqual(errors, [])
+
+    def test_the_previous_key_must_be_readable(self):
+        def broken(url):
+            raise OSError('HTTP Error 503: Service Unavailable')
+        self.assertIsNone(feed_check.previous_release(lambda url: b'[]', TAG))
+        with self.assertRaises(OSError):
+            feed_check.previous_release(broken, TAG)
 
     def test_the_previous_release_is_waited_out_then_refused(self):
         errors, said, slept = self.run_check([feed('1.2.2', 'v1.2.2'), feed()])

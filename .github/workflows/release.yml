@@ -95,11 +95,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "$REF_TYPE" != tag ]]; then echo "::error::run the release on a tag, not a $REF_TYPE"; exit 1; fi
-          # SB-563 (M4-09): the latest published release, so a tag not newer is refused now, not
-          # after every platform was built and signed. No release yet (404) compares with nothing.
-          if ! latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>"$RUNNER_TEMP/latest.err"); then
-            if grep -q "HTTP 404" "$RUNNER_TEMP/latest.err"; then latest=""; else cat "$RUNNER_TEMP/latest.err"; echo "::error::the latest release could not be read"; exit 1; fi
+          if [[ "$PUBLISH" != true ]]; then
+            # A rehearsal publishes nothing, so the latest release is not compared.
+            python scripts/release_preflight.py --tag "$TAG" --publish "$PUBLISH"
+            exit $?
           fi
+          # SB-563 (M4-09): the latest published release, so a tag not newer (or already published)
+          # is refused now, not after every platform was built and signed. No release yet (404)
+          # compares with nothing; any other failure is tried three times, and the last one's
+          # message (GitHub's HTTP status) goes into the error, so release-rerun.yml can tell a 5xx.
+          latest=""
+          for attempt in 1 2 3; do
+            if latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>"$RUNNER_TEMP/latest.err"); then break; fi
+            if grep -q "HTTP 404" "$RUNNER_TEMP/latest.err"; then latest=""; break; fi
+            cat "$RUNNER_TEMP/latest.err"
+            if [ "$attempt" = 3 ]; then echo "::error::the latest release could not be read: $(tail -n 1 "$RUNNER_TEMP/latest.err")"; exit 1; fi
+            sleep 20
+          done
           python scripts/release_preflight.py --tag "$TAG" --publish "$PUBLISH" --latest "$latest"
 
   macos:
@@ -606,7 +618,10 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
+      # The package is also verified with the updater key of the release before this one when
+      # that key differs: the copies running that release check with the key built into them.
       - name: The feed serves this tag, and its package verifies
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: python3 scripts/feed_check.py --tag "$TAG"

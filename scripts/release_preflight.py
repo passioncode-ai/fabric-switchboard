@@ -49,15 +49,17 @@ def core(tag):
 
 
 def not_newer(tag, latest):
-    """Why a published vX.Y.Z may not follow `latest`, or None. Matches release-publish.yml: a
-    prerelease (-beta, -alpha, -preview) never becomes latest, so it is not compared, and a tag equal
-    to latest (a run started again on a published tag) is left to the publish workflow, which
-    refuses to rewrite it."""
-    if not latest or '-' in tag or tag == latest:
+    """Why a published vX.Y.Z may not follow `latest`, or None. A prerelease (-beta, -alpha,
+    -preview) never becomes latest, as in release-publish.yml, so it is not compared. A tag equal
+    to latest is refused too: that version is already published, and a published release is never
+    rewritten (a run started again on it would build and sign for nothing)."""
+    if not latest or '-' in tag:
         return None
     new, current = core(tag), core(latest)
     if new is None or current is None or new > current:
         return None
+    if tag == latest or new == current:
+        return f'{tag} is already published (the latest release is {latest}); a published release is never rewritten, so cut a newer tag.'
     return (f'{tag} is not newer than the latest release {latest}; installed copies read their updates '
             f'from the latest release, so cut a newer tag.')
 

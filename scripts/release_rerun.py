@@ -6,10 +6,11 @@ completes with failure; never on a push or a pull request, and never a full suit
   python3 scripts/release_rerun.py --repo OWNER/NAME --run-id ID [--dry-run]
 
 The rule is narrow on purpose:
-  - only a run's first attempt is retried, so a release is retried at most once;
-  - every failed job's log must show an infrastructure failure (a package mirror, a registry or
-    the runner itself, the patterns in INFRASTRUCTURE) and none may show a failure of our own
-    (a test, a compile error, a refusal of the guard or of a check, the patterns in OURS);
+  - only a run's first attempt of a tag push is retried, so a release is retried at most once;
+  - in every failed job, the failed step's part of the log must show an infrastructure failure
+    (a package mirror, a registry or the runner itself, the patterns in INFRASTRUCTURE) and none
+    of ours (a test, a compile error, a traceback, a refusal of the guard or of a check, the
+    patterns in OURS); what earlier steps printed and recovered from does not count;
   - a job whose log cannot be read counts as ours: nothing is retried on a guess.
 Then `gh run rerun ID --failed` starts the failed jobs and the jobs that need them. Otherwise the
 run stays failed and the summary names the job and the line that decided it.
@@ -45,6 +46,7 @@ INFRASTRUCTURE = [
 OURS = [
     ('test', re.compile(r'test result: FAILED|^failures:$|panicked at ', re.MULTILINE)),
     ('compile', re.compile(r'^error(\[E\d+\])?: (could not compile|aborting due to)|^error\[E\d+\]:', re.MULTILINE)),
+    ('script', re.compile(r'^Traceback \(most recent call last\):', re.MULTILINE)),
 ]
 # How GitHub writes an error annotation into a raw job log, and the one every failed step adds.
 ANNOTATION = re.compile(r'^##\[error\](.*)$', re.MULTILINE)
@@ -61,16 +63,37 @@ def infrastructure(text: str) -> str | None:
     return None
 
 
+STEP_START = re.compile(r'^##\[group\]Run ', re.MULTILINE)
+
+
+def failed_section(text: str) -> str:
+    """The part of a raw job log that belongs to the step that failed the job.
+
+    A raw log marks each `run:` and `uses:` step with a `##[group]Run ...` line and the failure of
+    a step with an error annotation, so the failed step is the section from the last `##[group]Run`
+    before the job's last error annotation to that annotation. Earlier steps are left out: an apt
+    mirror that failed and recovered in the dependency step says nothing about a smoke check that
+    failed later. A failure before any step (setting up the job, downloading an action) is the
+    log up to the error; a log without an error annotation is read whole."""
+    errors = list(ANNOTATION.finditer(text))
+    if not errors:
+        return text
+    last = errors[-1]
+    starts = [m.start() for m in STEP_START.finditer(text, 0, last.start())]
+    return text[starts[-1] if starts else 0:last.end()]
+
+
 def classify(log: str | None) -> tuple[str, str]:
-    """('infrastructure', what) when the log shows only a transient outside failure, else
+    """('infrastructure', what) when the failed step shows only a transient outside failure, else
     ('ours', why): a failure of our own, or nothing recognised (no guess is retried).
 
-    A failed test or compile error anywhere decides `ours`. So does every error annotation
-    (`##[error]`, which `::error::` writes) that is neither the step's exit code nor an outside
-    failure: a refusal of the guard, the preflight, a signature check or the feed check is ours."""
+    Only the failed step's section counts (`failed_section`). In it, a failed test, a compile error
+    or a Python traceback decides `ours`; so does every error annotation (`##[error]`, which
+    `::error::` writes) that is neither the step's exit code nor an outside failure: a refusal of
+    the guard, the preflight, a signature check or the feed check is ours."""
     if log is None:
         return 'ours', 'the log could not be read'
-    text = TIMESTAMP.sub('', COLOUR.sub('', log))
+    text = failed_section(TIMESTAMP.sub('', COLOUR.sub('', log)))
     for name, pattern in OURS:
         found = pattern.search(text)
         if found:
@@ -82,7 +105,7 @@ def classify(log: str | None) -> tuple[str, str]:
     what = infrastructure(text)
     if what:
         return 'infrastructure', what
-    return 'ours', 'no infrastructure failure recognised in the log'
+    return 'ours', 'no infrastructure failure recognised in the failed step'
 
 
 def decide(run: dict, jobs: list[dict], logs: dict) -> tuple[bool, list[str]]:

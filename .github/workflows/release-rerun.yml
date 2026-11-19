@@ -2,7 +2,8 @@
 # Ubuntu mirror answering 503 (v0.7.122), a registry, the runner. A test, a compile error, a
 # refusal of the guard or of a check, a timeout, a log that cannot be read: nothing is retried.
 #
-# It starts only when a `release` run on a tag completes with failure, reruns only that run's
+# It starts only when a `release` run started by a tag push completes with failure (a dispatched
+# run, a rehearsal or a prerelease, is left alone), reruns only that run's
 # failed jobs (and the jobs that need them) with `gh run rerun --failed`, and only on the run's
 # first attempt. It is not a push or pull request trigger and dispatches no suite
 # (AGENTS.md: hosted full checks run nightly). The decision and its reason per failed job are in
@@ -26,6 +27,7 @@ jobs:
     if: >-
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.run_attempt == 1 &&
+      github.event.workflow_run.event == 'push' &&
       startsWith(github.event.workflow_run.head_branch, 'v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10

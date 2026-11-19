@@ -64,11 +64,15 @@ class Preflight(unittest.TestCase):
         self.assertIsNone(not_newer('v1.10.0', 'v1.9.9'))
         self.assertIsNotNone(not_newer('v1.9.9', 'v1.10.0'))
 
+    def test_a_repeated_tag_is_refused(self):
+        """The version is already published: a published release is never rewritten."""
+        errors = check('v1.2.3', VERSIONS, CHANGELOG, publish=True, latest='v1.2.3')
+        self.assertTrue(any('already published' in e for e in errors), errors)
+
     def test_the_latest_check_spares_what_the_publish_workflow_spares(self):
-        # No release yet, a rerun on the published tag itself, a prerelease and a rehearsal.
+        # No release yet, a prerelease and a rehearsal.
         self.assertEqual(check('v1.2.3', VERSIONS, CHANGELOG, publish=True, latest=''), [])
         self.assertEqual(check('v1.2.3', VERSIONS, CHANGELOG, publish=True, latest=None), [])
-        self.assertEqual(check('v1.2.3', VERSIONS, CHANGELOG, publish=True, latest='v1.2.3'), [])
         self.assertIsNone(not_newer('v1.2.3-beta.1', 'v1.2.4'))
         self.assertEqual(check('v1.2.3-rc.1', VERSIONS, '', publish=False, latest='v9.0.0'), [])
 

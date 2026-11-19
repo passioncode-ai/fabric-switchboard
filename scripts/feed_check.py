@@ -8,9 +8,10 @@ announces the tag's version (GitHub may serve the previous release for a short w
 publish), then requires every platform entry to name a file of this release, downloads one package
 (`windows-x86_64`, the smallest) from the URL the feed gives, and verifies it the way the app's
 updater does: the minisign signature from the feed against the public key in
-`src-tauri/tauri.conf.json`, then the version that signature names (`requireSignedVersion`). A
-release whose feed points elsewhere, or whose package does not verify, fails the run that
-published it instead of failing every installed copy in silence.
+`src-tauri/tauri.conf.json`, then the version that signature names (`requireSignedVersion`); and
+again with the updater key of the release before this one when that key differs, since the copies
+that take this update check it with the key built into them. A release whose feed points
+elsewhere, or whose package does not verify, fails the run that published it instead of failing every installed copy in silence.
 
 The signature is checked here, in the standard library only: Ed25519 as RFC 8032 section 5.1.7
 defines it (verification only needs public data) and minisign's two formats, `Ed` (the file signed
@@ -23,6 +24,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -35,6 +37,7 @@ from updater_artifacts import REPOSITORY, REQUIRED_TARGETS, TAG, download_url  #
 
 ROOT = Path(__file__).resolve().parents[1]
 FEED = f'https://github.com/{REPOSITORY}/releases/latest/download/latest.json'
+API = f'https://api.github.com/repos/{REPOSITORY}'
 VERIFIED_TARGET = 'windows-x86_64'
 USER_AGENT = 'fabric-switchboard-release-feed-check'
 
@@ -219,9 +222,37 @@ def verify_package(entry, data, public_key_b64, version):
 
 
 def fetch(url, timeout=120):
-    request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT, 'Cache-Control': 'no-cache'})
+    headers = {'User-Agent': USER_AGENT, 'Cache-Control': 'no-cache'}
+    token = os.environ.get('GITHUB_TOKEN')
+    if url.startswith(API):
+        headers['Accept'] = 'application/vnd.github.raw+json'
+        if token:  # the workflow's own token; only ever sent to GitHub's API
+            headers['Authorization'] = f'Bearer {token}'
+    request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=timeout) as answer:
         return answer.read()
+
+
+def previous_release(get, tag):
+    """The newest published, non-prerelease release older than `tag`, or None for the first one."""
+    current = TAG.match(tag)
+    older = []
+    for release in json.loads(get(f'{API}/releases?per_page=50')):
+        found = TAG.match(release.get('tag_name', ''))
+        if (found and not found.group(2) and not release.get('draft') and not release.get('prerelease')
+                and _numbers(found.group(1)) < _numbers(current.group(1))):
+            older.append((_numbers(found.group(1)), release['tag_name']))
+    return max(older)[1] if older else None
+
+
+def _numbers(version):
+    return tuple(int(part) for part in version.split('.'))
+
+
+def key_at(get, tag):
+    """The updater public key in `src-tauri/tauri.conf.json` at `tag`."""
+    config = json.loads(get(f'{API}/contents/src-tauri/tauri.conf.json?ref={tag}'))
+    return config['plugins']['updater']['pubkey']
 
 
 def run(tag, public_key_b64, *, get=fetch, attempts=20, wait=30.0, sleep=time.sleep, say=print):
@@ -257,6 +288,21 @@ def run(tag, public_key_b64, *, get=fetch, attempts=20, wait=30.0, sleep=time.sl
     except (ValueError, UnicodeDecodeError) as exc:
         return [f'{VERIFIED_TARGET}: {exc}']
     say(f'latest.json announces {version}; {VERIFIED_TARGET} ({len(package)} bytes) verifies: {comment}')
+    # The copies that will take this update run the previous release and verify with the key built
+    # into it. A key changed in this release would strand all of them: verify with theirs too.
+    try:
+        previous = previous_release(get, tag)
+        older_key = key_at(get, previous) if previous else None
+    except (OSError, ValueError, KeyError, urllib.error.URLError) as exc:
+        return [f'the previous release\'s updater key could not be read: {exc}']
+    if older_key and older_key != public_key_b64:
+        try:
+            verify_package(entry, package, older_key, version)
+        except (ValueError, UnicodeDecodeError) as exc:
+            return [f'{VERIFIED_TARGET}: copies on {previous} cannot install it, with the key built into them: {exc}']
+        say(f'{VERIFIED_TARGET} also verifies with the updater key of {previous}')
+    elif previous:
+        say(f'the updater key is the one {previous} carries')
     return []
 
 
