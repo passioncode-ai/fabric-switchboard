@@ -1092,7 +1092,8 @@ Claude Code hook that runs `node` failed with `node: command not found`.
   its `unset` line, `export PATH='<program folder>'"${PATH:+:$PATH}"':<the rest of the session
   PATH>'` (`launch::path_export`): the `PATH` the script was started with stays ahead of the login
   PATH (review round 1 of PR #838: a terminal's nvm, pyenv or mise shims are not shadowed by
-  `/usr/bin`), and the login PATH fills only the folders it lacks. The resume script
+  `/usr/bin`), and the login PATH is appended after it (a folder in both appears twice; lookup takes the
+  first). tcsh and csh take `-l` only alone, so they always fall back. The resume script
   (`duty::resume_script_for`) carries the same line.
 - No value but folder names enters a script. Windows is unchanged: a PowerShell script keeps the
   user `PATH` Windows gives it, and no login shell is asked.

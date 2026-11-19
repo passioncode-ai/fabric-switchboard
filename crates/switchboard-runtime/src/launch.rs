@@ -344,7 +344,7 @@ fn script_with(
     // SB-455: Terminal, a session host, `--in-place` and `launch --headless` run this script with
     // the PATH of whatever started it (launchd's short one for the app and `serve`, a terminal's
     // own for `--in-place`). That PATH stays first (a person's nvm, pyenv or mise shims win); the
-    // login PATH fills only what it lacks, so a hook finds `node` from Homebrew.
+    // login PATH comes after it, so a hook finds `node` from Homebrew.
     result.push_str(&path_export(program));
     for (key, value) in env {
         result.push_str(&format!("export {key}={}\n", quote(value)));
@@ -3768,8 +3768,8 @@ pub(crate) fn headless_path(program: &Path) -> std::ffi::OsString {
     session_path(program, crate::login_path::login_dirs().as_deref())
 }
 /// SB-455: a session script's `PATH` line (a launch script, a resume script): the program's own
-/// folder, then the `PATH` the script was started with, then the rest of `headless_path` for the
-/// folders that `PATH` lacks. The inherited `PATH` stays ahead of the login one, so a terminal's
+/// folder, then the `PATH` the script was started with, then the rest of `headless_path` after it
+/// (a folder already in that `PATH` may appear twice; lookup takes the first). The inherited `PATH` stays ahead of the login one, so a terminal's
 /// version-manager shims are not shadowed by `/usr/bin`.
 pub(crate) fn path_export(program: &Path) -> String {
     path_export_with(program, crate::login_path::login_dirs().as_deref())

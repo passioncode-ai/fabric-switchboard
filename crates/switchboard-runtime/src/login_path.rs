@@ -242,13 +242,15 @@ pub fn resolve(shell: &Path, timeout: Duration) -> Option<Vec<PathBuf>> {
     }
     // The shell exited, so its marker line, if it printed one, is in the pipe already. The reader
     // ends at once unless a child of the profile holds the pipe; then the last marker line handed
-    // over within a short wait is the answer.
+    // over within a short wait is the answer. The first line gets two seconds, so a reader thread
+    // the machine's load keeps off the processor is not taken for a missing answer.
     let mut answer = None;
-    let deadline = Instant::now() + Duration::from_millis(500);
+    let mut deadline = Instant::now() + Duration::from_secs(2);
     while let Ok(Out::Line(value)) =
         read.recv_timeout(deadline.saturating_duration_since(Instant::now()))
     {
         answer = Some(value);
+        deadline = Instant::now() + Duration::from_millis(500);
     }
     parse(&answer?)
 }
