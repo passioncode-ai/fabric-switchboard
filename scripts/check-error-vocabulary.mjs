@@ -53,6 +53,9 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // SB-518 (DEC-0032): monitor::probe's internal refusal when a provider hold began before its
+  // request; check_as answers it as USAGE_RATE_LIMITED, which src/adapter.ts shows verbatim.
+  "usage request not sent: provider held": 'SB-518: internal to monitor::check_as, mapped to the provider wait before any reply',
   // SB-403 (DEC-0025): answered only to another machine through `switchboard ssh-serve` or to the
   // CLI and MCP (a lease without --delegate); the window never sends these calls.
   "This computer holds no seat with that id that the calling machine delegated.": 'SB-403: ssh-serve only, answered to the delegating machine',
