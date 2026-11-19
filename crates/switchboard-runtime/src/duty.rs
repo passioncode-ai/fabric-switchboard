@@ -643,6 +643,13 @@ fn outcomes(lines: &[Value]) -> impl Iterator<Item = &Value> {
     let mut open: Vec<&Value> = Vec::new();
     let mut kept = Vec::new();
     for line in lines {
+        // A dispatched run's stop names no session or process; its lines are its pass's own.
+        if line["action"] == crate::dispatch::JOURNAL_ACTION {
+            if line["phase"] != "intent" {
+                kept.push(line);
+            }
+            continue;
+        }
         if line["phase"] == "intent" {
             open.retain(|o| o["session"] != line["session"]);
             open.push(line);
