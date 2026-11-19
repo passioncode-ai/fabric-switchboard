@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0034` (`DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0034` (`DEC-0032` is SB-518, smart usage checks; `DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -957,6 +957,77 @@ research notes); the ones still in force that the board cites are seeded below w
   of SB-452/SB-453: "the proxy should handle an upstream 429 with retry-after: a bounded wait and
   retry inside the proxy before any byte reached the client (a request that did no work, like
   DEC-0002's rule; never retry after bytes were sent)".
+
+### DEC-0032: Response headers count as quota checks, and each provider has a budget
+
+- **Date:** 2026-11-19
+- **Status:** Accepted (built on branch `sb-518-smart-usage`: SB-518). The number is the next one
+  free after DEC-0031; a pull request that lands first with the same number moves this one to the
+  next free.
+- **Context:** measured on 2026-11-19 with 32 enabled sign-ins in 5 groups: one pass every 30 s
+  checks at most 4 accounts, and since SB-310 (DEC-0008) every account of a group with switching
+  on was due every 180 s, about 640 checks an hour wanted against 480 possible, about 8 usage
+  calls a minute from one address. A switch needed a figure under 300 s old, so most switches came
+  after a refusal (25 before the limit against 66 after it on 2026-11-18). Every Claude answer
+  carries the account's five-hour and seven-day utilization in its headers, but they never pushed
+  the next check back, and each changed header was a metadata write with its fsync. A 429 on a
+  usage check held only the account it answered.
+- **Decision:** the `smart` mode, the default:
+  - A response's headers with both the five-hour and the seven-day window count as a check: the
+    next check from the usage endpoint is 180 s after the last such header, but never more than
+    `PASSIVE_CEILING_SECONDS` (30 minutes, before the spread below) after the endpoint's last answer in this process (a
+    header can lag, and it never carries the per-model windows). A partial header postpones
+    nothing; after a start nothing is postponed until the endpoint answered once. A header never
+    makes a per-model window fresher than the endpoint's answer it came with; the account in use
+    may switch on its header figures alone when they reach the threshold, never below it.
+  - An account that carries no traffic (neither a group's routed account nor the ordinary CLI's)
+    is checked on the idle cadence (600 s). Under the budget a pass serves the accounts that carry
+    traffic first, then those brought forward (near the limit, the pool's next account, after a
+    reset, a new sign-in), then the idle ones in turn, so the account in use keeps its 180 s
+    cadence and idle accounts wait longer than 600 s when the budget is short. A switch ranks the
+    candidates on their last known figure, of any age (it only orders: never measured comes last,
+    one last known full is never taken), and takes the one chosen only after one fresh check of
+    it, made before the pass decides (`Store::rotation_candidate_to_confirm`), at most once a
+    minute per provider. The account in use is held to its policy's age but never to less than
+    300 s, the real interval of its checks.
+  - Each provider has a budget: 2 checks a minute, a burst of 4, at most 2 on the network at
+    once; a person's check and a candidate's check may run up to 4 ahead, which the background
+    then waits out. A 429 on any usage check holds the whole provider for
+    `max(Retry-After, 900 s)` (the per-account floor, which `retry-after: 0` made necessary),
+    doubling on each 429 that follows up to an hour, a longer `Retry-After` kept whole; a success
+    ends the doubling. Kept in `usage-provider-holds.json`.
+  - Every schedule of 2 minutes or more falls due spread by ± 15 %, the same way each time for
+    one account and schedule.
+  - The near-limit minute (SB-106) counts from the last header when one came within the minute,
+    and the pool's next account is not pulled in while its own headers are that fresh.
+  - Header observations wait in memory and reach `accounts.json` at most once a minute and at the
+    drain.
+
+  The person may choose `timer` (0.7.121's fixed cadence of checks: every account of a switching
+  group every 180 s, headers postpone nothing, no budget beyond the provider's holds and 2 checks of one provider
+  on the network at once) or `on_demand` (no check
+  on a schedule; a switch's candidate and a person's check still ask). The mode governs the checks only: the account in use's 300 s floor and its switch on header figures hold in every mode. In `on_demand` a managed
+  Claude group's account in use is read from its answers' headers, so it still switches before the
+  limit; a Codex group (Switchboard reads no Codex headers) and native rotation of the ordinary
+  Claude Code have no such source and switch only on a limit. Nothing here touches a
+  session's request: DEC-0002's one move of a refused request and DEC-0031's wait stay as they are.
+- **Consequences / affects:** about 120 checks an hour per provider at most instead of up to 480;
+  while a 429 holds a provider, no candidate is checked, so its groups switch only on a limit or a
+  refusal (DEC-0002) until the hold ends; a new sign-in waits out the provider's hold too (the
+  per-account hold of SB-39 still starts afresh with a new credential); a 429 that comes more than
+  its last hold's length after that hold ended starts again from 900 s;
+  an account with traffic is read from its answers, the endpoint at least every 30 minutes. A
+  switch before the limit no longer waits for a refusal: the candidate is checked fresh within the
+  pass. An account whose per-model window is older than its policy's age reads as not fresh in
+  `switchboard_usage` while headers keep its five-hour and seven-day figures current. A person's
+  checks of one provider run 4 ahead of the bucket (up to 8 at once from a full one), then answer
+  that checks are paced. Moving a sign-in to another machine or calling it back proves it with a person's check:
+  while the provider is held or that check is paced, the proof fails and the move is undone as for
+  any unanswered proof, to be tried again once the hold ends (SB-519 may make it wait instead). Settings: CLI
+  `switchboard usage-mode`, MCP `switchboard_usage_mode`. `AGENTS.md` (Background monitor, Writes,
+  Idle budget), [CONTRACTS](CONTRACTS.md#smart-usage-checks-sb-518-dec-0032).
+- **Source:** plan 10 §H (target state, 2026-11-19 audit); the coordinator of SB-518 (plan review:
+  keep the 900 s floor, leave DEC-0002 untouched, add the person's mode).
 
 ### DEC-0033: Each machine is read every minute through its own Switchboard, its sessions and health with its accounts
 

@@ -12,13 +12,24 @@
 
 **Exact next task.** Review the `boot-resume` pull request and merge it once its gate reads EXIT 0 on the merged head; after the release, reply on thread a9844103 with DEC-0030's rule so Fabric Dashboards removes `ai.passioncode.resume-after-boot`.
 
-## 2026-11-19: release 0.7.123 (SB-450, SB-451, SB-507 boot resume; SB-508 live-session ledger; SB-510 watchdog)
+## 2026-11-19: release 0.7.123 (SB-450, SB-451, SB-507 boot resume; SB-508 live-session ledger; SB-510 watchdog; SB-518 smart usage checks)
 
 - **Done (merged to main):** sessions a computer restart cut in a turn are continued as themselves at the first pass after it (#836, DEC-0030, never a session closed on purpose, a board run or, with own sign-in off, one outside Switchboard's homes; at most six hours after the boot); launch records name their process's session (SB-451); a session seen live and cut by the restart is listed on the Sessions page with *Continue* (SB-508); a watchdog apart from the owner checks it every five minutes (SB-510, launchd or systemd user job installed by the installed app only).
+- **SB-518 (#856, DEC-0032):** a response's rate-limit headers count as a usage check, header writes are batched, checks get a budget per provider; leftovers in SB-519.
 - **Also:** the duplicate error-vocabulary key for the reasoning level removed; SB-557 holds the reviews' follow-ups.
 - **Ecosystem digest for PM agents:** agents base R33 O19 (D-83), `patterns/ecosystem-sync`, `org-administrator` 1.35.0; Kira is moving to publisher (thread 6f62a3e0), Anya reads (thread cdd02c37); the base's daily review bridges the daily digest until Kira publishes (item ib-20261119-3afd30b123).
 - **Checks run:** the Mac Studio gate on every merged head; two consecutive clean review rounds per PR; the release's Nightly on the tag.
-- **Exact next task:** #856 SB-518 smart usage checks (review rounds, merge); the teammate's seat once the Appvillis PM agent returns `user@host` and the group id (thread 04f5833c); check `switchboard machines list` reads `call: status` once 0.7.123 runs on both sides; then W10.4 to W10.8, SB-548, SB-519.
+- **Exact next task:** the teammate's seat once the Appvillis PM agent returns `user@host` and the group id (thread 04f5833c); check `switchboard machines list` reads `call: status` once 0.7.123 runs on both sides; then W10.4 to W10.8, SB-548, SB-519.
+
+## 2026-11-19: SB-518 smart usage checks (DEC-0032), on branch `sb-518-smart-usage`
+
+- **Asked.** Plan 10 §H (W10.3), coordinator of SB-518: headers count as checks, header writes batched, a budget per provider, a fresh candidate before a switch, the near-limit pull-in only when the last header is a minute old; plan review: keep the 900 s floor, leave DEC-0002 alone, a person-facing mode.
+- **Built.** `switchboard-core`: `observe_generation` postpones the next check on a complete header (`PASSIVE_CEILING_SECONDS` 1800 after the endpoint's last answer, memory-only `endpoint_seen` and `header_seen`), holds changed headers in memory (`flush_headers_if_older`), puts accounts with no traffic on the idle cadence, `UsageMode`; `rotation.rs`: `rotation_candidate_to_confirm`, `header_figure`, candidates ranked on their last known figure at any age, `monitor::order_due` (traffic first), `CURRENT_MAX_AGE_FLOOR_SECONDS` 300. `switchboard-runtime`: `usage_budget.rs` (bucket 2 a minute, burst 4, 2 in flight, debt 4 for people, provider hold `max(Retry-After, 900 s)` doubling to an hour in `usage-provider-holds.json`, jitter), `usage_mode.rs` (`<data>/usage-mode`), `monitor::choose_checks`, `confirm_candidates`, `check_candidate`. CLI `switchboard usage-mode`, MCP `switchboard_usage_mode`.
+- **Decisions.** A header never freshens a per-model window (the existing trap test stands); the account in use may switch on its header figures only at or over the threshold. The provider hold keeps the per-account 900 s floor. An account that only could be switched to is on the idle cadence; the switch checks it fresh first. DEC-0032 is the next number after DEC-0031.
+- **Checks.** See the PR (Studio gate, EXIT line).
+- **Not done.** SB-519: the :03/:33 sweep's source, 60 s spacing per account for people's checks, the group in the rotation log, usage lines in the journal, Codex headers, one machine owning a seat's checks.
+
+**Exact next task.** Review the SB-518 pull request and merge once its gate reads EXIT 0 on the merged head (renumber DEC-0032 if another pull request took it); after the release, measure an hour of `usage_check` lines on the operator's Mac (expected at most about 120 a provider) and the share of switches before a refusal; then SB-519.
 
 ## 2026-11-19: release 0.7.122 (SB-549, SB-550, SB-517) and the seat for a teammate's Mac
 

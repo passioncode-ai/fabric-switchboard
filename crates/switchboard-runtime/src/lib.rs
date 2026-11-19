@@ -88,7 +88,9 @@ pub mod suggest;
 pub mod targets;
 pub mod token_rotation;
 pub mod uninstall;
+mod usage_budget;
 mod usage_gate;
+pub mod usage_mode;
 pub mod vault_choice;
 pub mod vesta;
 pub mod walks;
@@ -209,6 +211,12 @@ pub enum Operation {
     OwnSignIn {
         #[serde(default)]
         on: Option<bool>,
+    },
+    /// SB-518 (DEC-0032): how quota figures are kept current (`smart`, `timer`, `on_demand`);
+    /// `mode` absent reads the setting.
+    UsageMode {
+        #[serde(default)]
+        mode: Option<String>,
     },
     /// SB-510: the watchdog: `on` sets the switch (and puts in or takes out the system job where
     /// this owner installed it), `run` runs one check now; neither reads the switch, the job and
@@ -1609,6 +1617,8 @@ impl Runtime {
         let limits = limits::LimitState::kept_in(root.join(limits::EVIDENCE_FILE), monitor::now());
         let statistics = statistics::Statistics::load(&root);
         let own_sign_in_off = own_sign_in::is_off(&root);
+        // SB-518 (DEC-0032): the person's usage mode, read once here and again when changed.
+        store.set_usage_mode(usage_mode::read(&root));
         Ok(Arc::new(Self {
             store,
             proxy,
@@ -4975,6 +4985,8 @@ pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Valu
         root.clone(),
         switchboard_core::open_vault(&root, false)?,
     )?);
+    // SB-518: a person's check from the offline CLI follows the person's usage mode too.
+    store.set_usage_mode(usage_mode::read(&root));
     execute(store, &root, None, from_outside(operation)).await
 }
 /// How long a command waits for the store when another process holds it (SB-181): an update
@@ -7678,6 +7690,14 @@ async fn execute(
             launch::clean_account(root, &id)?;
             store.remove_delegated(&id, &sender_key)?;
             Ok(json!({"removed": true}))
+        }
+        Operation::UsageMode { mode } => {
+            let value = match mode {
+                Some(mode) => usage_mode::set(root, &mode)?,
+                None => usage_mode::status(root),
+            };
+            store.set_usage_mode(usage_mode::read(root));
+            Ok(value)
         }
         Operation::Watchdog { on, run } => {
             let host = runtime.and_then(|r| r.watchdog_job.lock().ok().and_then(|h| h.clone()));
@@ -15004,6 +15024,14 @@ mod usage_gate_tests {
         while runtime.usage_gate.held(&a.id, monitor::now()) {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
+        // SB-518: the provider stays held for at least 900 s after the 429, whatever the
+        // account's own wait; this test is about the account's, so the provider's is ended here.
+        assert_eq!(
+            usage(&runtime, &a.id).await.unwrap_err(),
+            switchboard_proxy::USAGE_RATE_LIMITED
+        );
+        assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+        runtime.usage_gate.budget.succeeded(Provider::Claude);
         assert_eq!(usage(&runtime, &a.id).await.unwrap()["used_percent"], 42.0);
         assert_eq!(up.calls.load(Ordering::SeqCst), 2);
         assert!(
@@ -15077,6 +15105,13 @@ mod usage_gate_tests {
         let snapshot = runtime.store.snapshot().unwrap();
         assert!(snapshot.accounts[0].usage_health.is_none());
         up.status.store(200, Ordering::SeqCst);
+        // SB-518: the provider's own hold covers every sign-in from this address; once it is
+        // over, the new sign-in is checked though the old token's wait still runs.
+        assert_eq!(
+            usage(&runtime, &a.id).await.unwrap_err(),
+            switchboard_proxy::USAGE_RATE_LIMITED
+        );
+        runtime.usage_gate.budget.succeeded(Provider::Claude);
         assert_eq!(usage(&runtime, &a.id).await.unwrap()["used_percent"], 42.0);
         assert_eq!(up.calls.load(Ordering::SeqCst), 2);
     }
