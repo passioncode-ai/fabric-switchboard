@@ -265,6 +265,13 @@ fn the_session_commands_answer_as_recorded() {
         "duty": cli(&root, &home, &["duty"]),
         "capacity": cli(&root, &home, &["capacity"]),
         "recovery": cli(&root, &home, &["recovery"]),
+        // SB-423 (FD-316): only the open stops; only the named launches.
+        "recovery --open": cli(&root, &home, &["recovery", "--open"]),
+        "sessions --history --launch": cli(
+            &root,
+            &home,
+            &["sessions", "--history", "--launch", "golden-resume-ended", "--launch", "no-such-launch"],
+        ),
         "sessions continue (unknown)": cli(&root, &home, &["sessions", "continue", "no-such-session"]),
         "sessions restart status (none)": cli(&root, &home, &["sessions", "restart", "status"]),
         "monitor hold (past)": cli(&root, &home, &["monitor", "hold", "--session", "s", "--until", "1"]),
@@ -280,6 +287,15 @@ fn the_session_commands_answer_as_recorded() {
             ("switchboard_duty", json!({})),
             ("switchboard_capacity", json!({})),
             ("switchboard_recovery", json!({})),
+            ("switchboard_recovery", json!({"open": true})),
+            (
+                "switchboard_sessions",
+                json!({"history": true, "launch_ids": ["golden-resume-ended", "no-such-launch"]}),
+            ),
+            (
+                "switchboard_sessions",
+                json!({"launch_ids": ["golden-resume-ended"]}),
+            ),
             (
                 "switchboard_session_continue",
                 json!({"session_id": "no-such-session"}),

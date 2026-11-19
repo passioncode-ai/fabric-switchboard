@@ -260,6 +260,70 @@
       "tool": "switchboard_recovery"
     },
     {
+      "answer": "Start the desktop app or 'switchboard serve' before login or launch.",
+      "arguments": {
+        "open": true
+      },
+      "is_error": true,
+      "tool": "switchboard_recovery"
+    },
+    {
+      "answer": {
+        "launches": [
+          {
+            "agent": "claude-code",
+            "context_name": null,
+            "ended": {
+              "at": "<at>",
+              "exit_code": 0,
+              "kind": "exited"
+            },
+            "ended_at": "<ended_at>",
+            "home_dir": null,
+            "home_path": null,
+            "hosted": true,
+            "in_place": true,
+            "label": null,
+            "launch_id": "golden-resume-ended",
+            "launched_at": "<launched_at>",
+            "launched_by": {
+              "surface": "dashboards"
+            },
+            "mode": "resume",
+            "provider": "claude",
+            "provider_session_id": "resumed-session",
+            "started_at": null,
+            "state": "ended",
+            "working_directory": "<scratch>/home/work/app"
+          }
+        ],
+        "missing": [
+          "no-such-launch"
+        ],
+        "next_before": null,
+        "total": 1
+      },
+      "arguments": {
+        "history": true,
+        "launch_ids": [
+          "golden-resume-ended",
+          "no-such-launch"
+        ]
+      },
+      "is_error": false,
+      "tool": "switchboard_sessions"
+    },
+    {
+      "answer": "Give launch_ids with history: true.",
+      "arguments": {
+        "launch_ids": [
+          "golden-resume-ended"
+        ]
+      },
+      "is_error": true,
+      "tool": "switchboard_sessions"
+    },
+    {
       "answer": "Switchboard has no record of that session. Refresh the list, then retry.",
       "arguments": {
         "session_id": "no-such-session"
@@ -424,6 +488,15 @@
             "description": "One launch and its chain.",
             "type": "string"
           },
+          "launch_ids": {
+            "description": "With history: only these launches, each read by its id (no chain), with missing naming the ids that have no record.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array"
+          },
           "limit": {
             "description": "With history: at most this many launches (default 500).",
             "maximum": 500,
@@ -450,10 +523,15 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Sessions that stopped on a limit and the accounts ready for them to continue: each stop's mode and when to try again.",
+      "description": "Sessions that stopped on a limit and the accounts ready for them to continue: each stop's mode and when to try again. Each open stop names its launch_id and, from that launch's record, continued_as (where its work went: {kind: launch, id} or {kind: handover, id, launch_id}; null while nowhere). With open, only the stops still open (state waiting or claimed); the counts stay those of every stop.",
       "inputSchema": {
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "open": {
+            "description": "Only the stops still open: waiting or claimed.",
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "name": "switchboard_recovery",
