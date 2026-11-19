@@ -850,7 +850,8 @@ fn resume(root: &Path, session: &str, config: &Path, cwd: &str, prompt: bool) ->
     let Some(program) = crate::launch::find_program("claude") else {
         return "closed_no_claude";
     };
-    let bypass = crate::launch::bypass_args(root, switchboard_core::Provider::Claude, &[]);
+    // SB-515: the permission choice as Fabric Sessions asks it (D-7), the one answer it reads.
+    let bypass = crate::session_accounts::resume_flags(root);
     let script = resume_script_for(
         config,
         cwd,

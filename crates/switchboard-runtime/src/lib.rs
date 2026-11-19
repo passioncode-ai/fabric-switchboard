@@ -5452,6 +5452,8 @@ fn dispatch_remote(
     let start = remote_dispatch::Start {
         launch_id: &launch_id,
         provider,
+        // SB-515: the run's mode goes with it (before, only the record here kept it).
+        permissions,
         identity: &identity,
         request_body: &body,
         workflow: workflow_id,
