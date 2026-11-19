@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0035` (`DEC-0034` is SB-560, values only through restricted doors and loosenings only on fresh words; `DEC-0032` is SB-518, smart usage checks; `DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0034` (`DEC-0032` is SB-518, smart usage checks; `DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -709,7 +709,7 @@ research notes); the ones still in force that the board cites are seeded below w
 - **Status:** Accepted (built on branch `org-delegation`: SB-403 waves S2 to S4; the live run with a
   teammate's machine, S5, waits for that machine). Its sentence "a process holding the control
   token can, with the same trust as the person's own Keychain" is amended by
-  [DEC-0034](#dec-0034-a-value-leaves-switchboard-only-through-a-restricted-journalled-door-and-a-loosening-only-on-fresh-words)
+  [DEC-0035](#dec-0035-a-value-leaves-switchboard-only-through-a-restricted-journalled-door-and-a-loosening-only-on-fresh-words)
   for saved keys (SB-560); for a sign-in handed back it still holds until the signed call back.
 - **Context:** the operator wants a teammate's computer to use one of an organization's
   subscriptions in console sessions through Switchboard, without the teammate ever signing in with
@@ -1093,7 +1093,7 @@ research notes); the ones still in force that the board cites are seeded below w
   минуту через свитчборд а не через запросы напрямую к сессиям и на удаленный свитчборд в рамках
   организации то же самое».
 
-### DEC-0034: A value leaves Switchboard only through a restricted, journalled door, and a loosening only on fresh words
+### DEC-0035: A value leaves Switchboard only through a restricted, journalled door, and a loosening only on fresh words
 
 - **Date:** 2026-11-19
 - **Status:** Accepted (SB-560, W11.1 part 3 on branch `sb-560-doors`; the signed call back and

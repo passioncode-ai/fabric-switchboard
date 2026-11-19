@@ -892,7 +892,7 @@ switchboard agents key --service openrouter --dir /work/app --to-pipe   # the ke
 ```
 
 A command that prints a key (`agents key --service openrouter`, `agents anthropic key NAME`)
-answers since SB-560 (DEC-0034) only for the one-time ticket a launch wrote into its own session
+answers since SB-560 (DEC-0035) only for the one-time ticket a launch wrote into its own session
 script (`SWITCHBOARD_KEY_TICKET`, set for that command alone, ten minutes, once); any other caller
 is refused and nothing is printed, and each answer or refusal is a line in `value-doors.jsonl`.
 `--to-pipe` stays accepted for the scripts that name it. A script an earlier version wrote (Hermes
@@ -906,7 +906,7 @@ machine's key is the next part of SB-560.
 `machines trust` and `analytics on|off` run from the CLI only with the operator's words
 (`--operator-said`, `--said-at`, `--said-in`, as for a raised ceiling), checked and recorded in
 `spend.json`; so does `accounts update --force` and `accounts assign --force`. Words open an act only
-within a day of when they were said (DEC-0034). A first ceiling above $100 a day needs them too.
+within a day of when they were said (DEC-0035). A first ceiling above $100 a day needs them too.
 
 A session script names the key slot its start's spending check read (`--pool` or `--machine`),
 never its folder: a folder that joins another group between the launch and the script's first
