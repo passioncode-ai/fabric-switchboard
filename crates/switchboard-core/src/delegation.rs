@@ -73,7 +73,7 @@ pub struct Delegation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub purged_at: Option<i64>,
     /// When its sender called it back (W1.2, DEC-0027): switched off here, its tokens given back.
-    /// Cleared when the sender undoes the call back. Absent in records written by 0.7.123 or older,
+    /// Cleared when the sender undoes the call back. Absent in records written by 0.7.124 or older,
     /// whose call back only the journal remembers (`off::seat_called_back`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surrendered_at: Option<i64>,
@@ -123,10 +123,10 @@ pub fn lease_valid(hours: u32) -> bool {
     (1..=MAX_LEASE_HOURS).contains(&hours)
 }
 
-/// W1.2 review round 3 of PR #821: a seat called back by 0.7.123 or older has no `surrendered_at`; only
+/// W1.2 review round 3 of PR #821: a seat called back by 0.7.124 or older has no `surrendered_at`; only
 /// the journal (its newest 256 entries) remembers it. At `Store::open`, every such seat whose newest
 /// `delegation` entry is `surrendered` takes that entry's time, so the record outlives the journal.
-/// Review round 4 (P1-B): 0.7.123 and older let the person switch such a seat on again (*Enable*,
+/// Review round 4 (P1-B): 0.7.124 and older let the person switch such a seat on again (*Enable*,
 /// `accounts update --enabled true` or `--elsewhere false`); this version keeps a called-back seat
 /// off, so the same migration switches it off and drops its selections (journalled as an
 /// `account_updated`), and the store it writes is one `stays` accepts. Answers whether anything
@@ -1032,7 +1032,7 @@ mod tests {
         assert!(store.snapshot().unwrap().accounts[0].usable());
     }
 
-    /// W1.2 review round 3 of PR #821, SB-428 (i): a seat called back by 0.7.123 or older (no
+    /// W1.2 review round 3 of PR #821, SB-428 (i): a seat called back by 0.7.124 or older (no
     /// `surrendered_at`) takes its record from the journal at open, so the migration never reads
     /// it as turned off by the person once the journal rolls over.
     #[test]
@@ -1051,7 +1051,7 @@ mod tests {
             .unwrap();
         store.surrender_delegated(&a.id, KEY, false).unwrap();
         let mut s = store.snapshot().unwrap();
-        // As a call back by 0.7.123 or older left it: no record, only the journal.
+        // As a call back by 0.7.124 or older left it: no record, only the journal.
         s.delegated.get_mut(&a.id).unwrap().surrendered_at = None;
         let at = s
             .events
@@ -1078,7 +1078,7 @@ mod tests {
         assert!(!record_old_call_backs(&mut t));
     }
 
-    /// Review round 4 of PR #821 (P1-B, P2-3): a store 0.7.123 or older wrote with a called-back seat the
+    /// Review round 4 of PR #821 (P1-B, P2-3): a store 0.7.124 or older wrote with a called-back seat the
     /// person switched on again (no `surrendered_at`, the call back only in the journal) opens
     /// with the seat recorded as called back and switched off, in one write, and every later
     /// write about another account goes through.
@@ -1113,7 +1113,7 @@ mod tests {
             .unwrap();
         store.surrender_delegated(&seat.id, KEY, false).unwrap();
         drop(store);
-        // As 0.7.123 or older left it after the person's *Enable*: on, selected, no record.
+        // As 0.7.124 or older left it after the person's *Enable*: on, selected, no record.
         let file = root.path().join("accounts.json");
         let mut disk: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();

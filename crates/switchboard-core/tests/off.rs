@@ -236,7 +236,7 @@ fn turning_on_an_account_off_and_used_elsewhere_keeps_its_mark() {
 }
 
 /// 2026-11-19 audit M5-03: a store with an account turned off is written at version 17, which a
-/// 0.7.123 or older reader refuses as corrupt (it parses the whole file before its version). From
+/// 0.7.124 or older reader refuses as corrupt (it parses the whole file before its version). From
 /// this version on the version is read first: a file a later version wrote, with a field this
 /// reader does not know, is refused by its version, never as corrupt. The way back to an older
 /// version is restoring a backup there.

@@ -95,7 +95,7 @@ pub(crate) fn held_away(s: &Snapshot, id: &str) -> bool {
 }
 
 /// A seat another machine delegated here that its sender called back: its record says so
-/// (`Delegation::surrendered_at`, written since SB-418; 0.7.123 and older write none), or, for a record written before, the newest
+/// (`Delegation::surrendered_at`, written since SB-418; 0.7.124 and older write none), or, for a record written before, the newest
 /// journal entry about it is its call back while the journal still holds one.
 fn seat_called_back(s: &Snapshot, id: &str) -> bool {
     s.delegated.get(id).is_some_and(|d| {

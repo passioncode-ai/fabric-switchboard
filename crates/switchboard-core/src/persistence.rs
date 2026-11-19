@@ -27,7 +27,7 @@ struct VersionOnly {
 }
 /// 2026-11-19 audit M5-03: a file of a later version is refused by its version before the typed
 /// parse, whose unknown fields (`deny_unknown_fields`) would otherwise read it as corrupt: the
-/// person reads that a newer Switchboard wrote it. Readers of 0.7.123 and older lack this and
+/// person reads that a newer Switchboard wrote it. Readers of 0.7.124 and older lack this and
 /// report such a file as corrupt.
 fn refuse_later_version(bytes: &[u8]) -> Result<(), String> {
     match serde_json::from_slice::<VersionOnly>(bytes) {
@@ -70,7 +70,7 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // than treat a guest's sign-in as its own (send it on, give it to an agent, remove it).
     // Version 17 only while the person turned an account or a Kimi Code account off, a
     // delegated seat records its call back, or the journal holds such a turn (W1.2, DEC-0027): a
-    // 0.7.123 or older reader refuses the unknown field and action rather than read an account
+    // 0.7.124 or older reader refuses the unknown field and action rather than read an account
     // the person turned off as one it may turn on. It parses the whole file before the version,
     // so a file whose account, Kimi Code account or delegated seat carries the new field reads to
     // it as corrupt, and one with only the journal's turns as an unsupported version (from this

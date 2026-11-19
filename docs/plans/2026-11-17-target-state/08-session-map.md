@@ -107,7 +107,8 @@
    launch record's session id comes from the session itself. Dashboards' agent retires.
 5. **S5, one admission gate**: `capacity` adds host load and free disk to the pool cap and the board
    share; a start above them waits (`at_capacity`, with the reason) for every entry point; the
-   studio-agent's `load.json` is read as the host's input (SB-422).
+   studio-agent's `load.json` is read as the host's input (SB-461; the SB-422 cited here before was
+   never filed).
 6. **S6, saved launches** (SB-454, section 07).
 7. **S7, sessions and load feed for Observatory**: Switchboard writes `sessions-feed.json` (0600,
    per session and per host, no text a session wrote) and answers it read-only without the owner
@@ -126,7 +127,7 @@
 | 2 | Login `PATH` for every launch | Switchboard | SB-455 |
 | 3 | Reboot continuation and the session id | Switchboard; Dashboards retires its agent | SB-450, SB-451 |
 | 4 | Remote consoles through `launch --target` | Fabric Dashboards | board `51c3dcca` |
-| 5 | One admission gate with host load and disk | Switchboard; studio-agent feeds it | SB-422, SB-461 |
+| 5 | One admission gate with host load and disk | Switchboard; studio-agent feeds it | SB-461 |
 | 6 | Sessions and load feed, read without the owner | Switchboard | SB-446, SB-462 |
 | 7 | Observatory reads the feed: classification, `account_group`, history, findings, alerts | Project Observatory | board request |
 | 8 | Saved launches | Switchboard; Dashboards adds Run | SB-454 |

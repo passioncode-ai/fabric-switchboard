@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0034` (`DEC-0032` is SB-518, smart usage checks; `DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is SB-418, a person's off switch for an account, and `DEC-0028` SB-419, groups fed from the default group; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0038` (`DEC-0034` is held by open PR #871 (SB-561, one continuation module), `DEC-0035` by open PR #872 (SB-560, launch tickets and journalled doors), `DEC-0036` by open PR #874 (SB-573, access grants), `DEC-0037` by open PR #876 (SB-575, seats to a teammate through PassionCode.ai, no inbound connection); `DEC-0033` is SB-550, each machine read every minute through its own Switchboard; `DEC-0032` is SB-518, smart usage checks; `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0030` is SB-450, sessions continued after a restart; `DEC-0028` is SB-419, groups fed from the default group (#824); `DEC-0027` is SB-418, a person's off switch for an account; `DEC-0029` is held by open PR #832 (SB-421, named users of one Linux host at the proxy); `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -859,7 +859,7 @@ research notes); the ones still in force that the board cites are seeded below w
     or a call back stays the way home. An account not turned off by the person comes home on
     as before. A call back recorded on a seat is cleared only by the sender's undo; an extension
     that reaches the seat after its call back (the sender's pass reads its snapshot before up to
-    20 s of ssh) never revives it (review round 3), and a seat called back by 0.7.123 or older
+    20 s of ssh) never revives it (review round 3), and a seat called back by 0.7.124 or older
     (which record no call back on the seat) takes its record from the journal at the next open
     while the journal still holds the entry, and is switched off there if such a version let the
     person switch it on (review round 4). A seat state the
@@ -868,7 +868,7 @@ research notes); the ones still in force that the board cites are seeded below w
     `switchboard remote check` does not report the lapsed copy of a seat the person turned off
     as a fault.
   - A backup carries the off beside the accounts (`off`, old account id to `{since, by}`), so a
-    0.7.123 or older reader still restores them (off, as before); a restore saves each new account
+    0.7.124 or older reader still restores them (off, as before); a restore saves each new account
     in its backed-up state in the save's one publication. A backup from before carries none: an
     account it holds off for no reason it records (not used elsewhere, not on another machine) is
     restored as the person's off since the backup's time. Settings exports never carry it (they
@@ -878,7 +878,7 @@ research notes); the ones still in force that the board cites are seeded below w
     person's off. The code cannot tell the person's off from an older automatic one that left no
     record, so it takes the safe reading: nothing automatic may turn such an account on. Its time
     is the account's newest `account_updated` journal entry, else the time of the migration. The
-    store is written at schema version 17, which a 0.7.123 or older reader refuses as corrupt (it parses the file before its version; a reader from this release on names the version first, audit M5-03). The way back
+    store is written at schema version 17, which a 0.7.124 or older reader refuses as corrupt (it parses the file before its version; a reader from this release on names the version first, audit M5-03). The way back
     to such a version is restoring a backup there: the backup's accounts come back off, as before.
     A delegated seat's call back is recorded on its record (`Delegation.surrendered_at`, review
     round 1 of PR #821), so a journal that rolled over its 256 entries never turns a called-back
