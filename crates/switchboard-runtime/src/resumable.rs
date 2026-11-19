@@ -192,6 +192,8 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
             });
             crate::launches::record_resume(root, id, record, &how.by)?;
         }
+        // SB-509: an offer to continue it (Needs attention) is taken.
+        crate::session_watch::continued(root, session, now);
         crate::oplog::event(
             "session_continue",
             &[("outcome", crate::oplog::Field::Code("in_place"))],
@@ -201,6 +203,7 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
         );
     }
     crate::launch::start_terminal(&path).map_err(|_| NOT_STARTED)?;
+    crate::session_watch::continued(root, session, now);
     crate::oplog::event(
         "session_continue",
         &[("outcome", crate::oplog::Field::Code("started"))],

@@ -527,8 +527,8 @@ export function accountMatches(account: Pick<Account, 'id' | 'label' | 'external
   return words.every((word) => text.includes(word));
 }
 
-const ATTENTION_REASONS: AttentionReason[] = ['keychain_too_large', 'session_duplicate', 'session_stuck', 'session_gone', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question'];
-const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'open_capacity', 'move_tokens', 'none'];
+const ATTENTION_REASONS: AttentionReason[] = ['keychain_too_large', 'token_rotated', 'session_duplicate', 'session_stuck', 'session_gone', 'session_continuable', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question'];
+const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'continue_session', 'restart_wave', 'open_capacity', 'move_tokens', 'none'];
 /**
  * WF-3 (SB-365): the answer of the `attention` command, kept to the fields the window knows. An
  * answer that is not one (an older owner without the command, a malformed item) is an empty list
@@ -613,6 +613,10 @@ export function dispatchStopLineText(line: { reason: string; folder: string | nu
     ? t('Stopped a board run in {folder}: it reached its deadline.', { folder })
     : t('Stopped a board run in {folder} at your request.', { folder });
 }
+/** SB-509: a board run given more time at its deadline because its log still grew. */
+export function dispatchExtendLineText(folder: string): string {
+  return t('Gave a board run in {folder} ten more minutes: it still writes its log.', { folder });
+}
 /** SB-417: the board's share when the person sets none: a quarter of the limit rounded up, never more than the limit (core `capacity::default_board_share`). */
 export function defaultBoardShare(limit: number): number {
   if (!Number.isInteger(limit) || limit < 1) return 1;
@@ -636,6 +640,8 @@ export function attentionReasonText(reason: AttentionReason): string {
     case 'session_duplicate': return t('One session runs in two processes. Close the quiet copy so they do not work over each other.');
     case 'session_stuck': return t('A board run has been quiet for 30 minutes. Look at it, or stop it.');
     case 'session_gone': return t("A board run's process is gone, but its end was not recorded. Stop the run to record it.");
+    case 'session_continuable': return t("A session's process ended without its end being recorded. Its history is here: continue it as the same session.");
+    case 'token_rotated': return t("The proxy's token changed when its port was taken, so sessions started before it are refused. Restart them.");
     case 'dispatch_refused': return t("Board runs are waiting: this computer's session limit refused them, and none has started since.");
     case 'sign_in': return t('Its sign-in ended. Sign in again to use it and see its usage.');
     case 'seat_ended': return t('Its seat in the organization ended. Sign in again if the seat was given back.');
@@ -657,6 +663,8 @@ export function attentionActionLabel(window: AttentionWindow): string {
     case 'open_sessions': return t('Open sessions');
     case 'close_copy': return t('Close the quiet copy');
     case 'dispatch_stop': return t('Stop the run');
+    case 'continue_session': return t('Continue');
+    case 'restart_wave': return t('Restart sessions…');
     case 'open_capacity': return t('Open the session limit');
     case 'move_tokens': return t('Move to Pay-per-token keys');
     // SB-420: the fix is in Claude Code; no button.

@@ -609,13 +609,19 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         let (root, launch) = (start.root.to_owned(), start.launch_id.to_owned());
         std::thread::spawn(move || {
             let check = (idle / 4).clamp(Duration::from_millis(100), Duration::from_secs(30));
+            // SB-506: after a session was kept because it still works, the next look at its
+            // processes waits a duty check's interval; the cheap look at the terminal goes on.
+            let mut kept_until: Option<std::time::Instant> = None;
             loop {
                 std::thread::sleep(check);
                 let inner = session.lock();
                 if inner.exit.is_some() {
                     return;
                 }
-                if inner.viewers.is_empty() && inner.last_activity.elapsed() >= idle {
+                if inner.viewers.is_empty()
+                    && inner.last_activity.elapsed() >= idle
+                    && kept_until.is_none_or(|t| std::time::Instant::now() >= t)
+                {
                     drop(inner);
                     // SB-396 D3: a session stopped on a limit waits for an account; its host
                     // continues it, so its window is not closed under it.
@@ -630,7 +636,26 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                                 now - idle.as_secs() as i64,
                             )
                     });
-                    if stopped {
+                    // SB-506: nor one the duty officer would keep: the same idle rule
+                    // (`duty::finished`) over its processes, its transcripts and background
+                    // agents, its own commands and the launches it started. A session no live
+                    // Claude Code process holds (another agent) keeps the terminal's rule alone.
+                    let works = !stopped
+                        && id.as_deref().is_some_and(|s| {
+                            crate::duty::session_finished(&root, s, now, idle.as_secs() as i64)
+                                == Some(false)
+                        });
+                    if works {
+                        kept_until = Some(
+                            std::time::Instant::now()
+                                + Duration::from_secs(crate::duty::CHECK_SECONDS as u64),
+                        );
+                        crate::oplog::event(
+                            "session_host_idle",
+                            &[("result", crate::oplog::Field::Code("kept_working"))],
+                        );
+                    }
+                    if stopped || works {
                         continue;
                     }
                     session.end("idle");

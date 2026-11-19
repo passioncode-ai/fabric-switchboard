@@ -56,6 +56,12 @@ pub const DEFAULT_TIMEOUT_MINUTES: u32 = 60;
 pub const MAX_TIMEOUT_MINUTES: u32 = 1440;
 pub const TIMEOUT_INVALID: &str = "Give the time limit in whole minutes, from 1 to 1440.";
 pub const NOT_A_DISPATCH: &str = "This launch was not started by switchboard dispatch.";
+/// SB-509: a run whose log was written this recently at its deadline is still working: its
+/// deadline moves this far on, never past `EXTEND_LIMIT` times its own limit from its start.
+pub const EXTEND_SECONDS: i64 = 600;
+pub const EXTEND_LIMIT: i64 = 3;
+/// SB-509: a deadline moved on, in the duty officer's journal (`duty.jsonl`).
+pub const EXTEND_ACTION: &str = "dispatch_extend";
 /// A stop's SIGTERM gets this long before SIGKILL.
 const STOP_GRACE: Duration = Duration::from_secs(5);
 /// The runs this owner watches for their time limit, `<data>/dispatches.json` (0600): launch ids
@@ -768,6 +774,12 @@ pub(crate) fn sweep(root: &Path, now: i64, analytics: Option<&Analytics>) {
             continue;
         }
         if now >= l.deadline {
+            // SB-509: a run that still writes its log is given more time, up to its hard limit.
+            let written = crate::session_watch::log_written_at(root, &record);
+            if let Some(until) = extension(&record, written, now) {
+                extend(root, &record, &l.launch_id, until, now);
+                continue;
+            }
             let outcome = stop(root, &l.launch_id, TIMED_OUT, now, analytics);
             crate::oplog::event(
                 "dispatch_timeout",
@@ -780,9 +792,71 @@ pub(crate) fn sweep(root: &Path, now: i64, analytics: Option<&Analytics>) {
     }
 }
 
+/// SB-509: the new deadline of a run past its own when its log (`launches/logs/<id>.log`) was
+/// written in the last `EXTEND_SECONDS`: `EXTEND_SECONDS` on, capped at `EXTEND_LIMIT` times its
+/// limit from its start; none when the log is quiet or the cap is reached. Pure, for tests.
+pub fn extension(record: &Value, written: Option<i64>, now: i64) -> Option<i64> {
+    let dispatch = &record["dispatch"];
+    let first = dispatch["deadline"].as_i64()?;
+    let limit = dispatch["timeout_minutes"]
+        .as_i64()
+        .map(|m| m * 60)
+        .or_else(|| record["launched_at"].as_i64().map(|t| first - t))
+        .filter(|l| *l > 0)?;
+    let start = record["launched_at"].as_i64().unwrap_or(first - limit);
+    let cap = start + EXTEND_LIMIT * limit;
+    let written = written?;
+    (now - written < EXTEND_SECONDS && now < cap).then(|| (now + EXTEND_SECONDS).min(cap))
+}
+
+/// SB-509: moves a run's deadline to `until`: the watched list, its launch record
+/// (`dispatch.extended_until` and `dispatch.extensions`) and the duty officer's journal.
+fn extend(root: &Path, record: &Value, id: &str, until: i64, now: i64) {
+    live_add(root, id, until);
+    let extensions = crate::launches::extend_dispatch(root, id, until);
+    crate::duty::journal_line(
+        root,
+        json!({
+            "at": now, "action": EXTEND_ACTION, "reason": "log_written", "by": "duty",
+            "outcome": "extended", "launch_id": id, "folder": record["working_directory"],
+            "deadline": record["dispatch"]["deadline"], "extended_until": until,
+            "extensions": extensions,
+        }),
+    );
+    crate::oplog::event(
+        "dispatch_extended",
+        &[("result", crate::oplog::Field::Code("log_written"))],
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_run_past_its_deadline_is_extended_while_its_log_grows_up_to_three_times_its_limit() {
+        // SB-509: an hour's limit from 1000: deadline 4600, hard limit 1000 + 3 hours.
+        let record = json!({"launched_at": 1000,
+            "dispatch": {"deadline": 4600, "timeout_minutes": 60}});
+        let cap = 1000 + 3 * 3600;
+        // Written a minute ago at the deadline: ten more minutes.
+        assert_eq!(extension(&record, Some(4540), 4600), Some(4600 + 600));
+        // Quiet for ten minutes or more, or never written: stopped.
+        assert_eq!(extension(&record, Some(4000), 4600), None);
+        assert_eq!(extension(&record, None, 4600), None);
+        // Near the hard limit the extension stops there, and at it nothing more is given.
+        assert_eq!(extension(&record, Some(cap - 100), cap - 60), Some(cap));
+        assert_eq!(extension(&record, Some(cap - 1), cap), None);
+        // A record from before `timeout_minutes` takes its limit from its first deadline.
+        let older = json!({"launched_at": 1000, "dispatch": {"deadline": 2800}});
+        assert_eq!(extension(&older, Some(2790), 2800), Some(3400));
+        assert_eq!(
+            extension(&older, Some(1000 + 3 * 1800 - 5), 1000 + 3 * 1800),
+            None
+        );
+        // No deadline recorded: nothing to extend.
+        assert_eq!(extension(&json!({"dispatch": {}}), Some(10), 10), None);
+    }
 
     #[test]
     fn every_refusal_has_its_own_plain_sentence() {
@@ -1452,7 +1526,8 @@ mod runs {
     #[tokio::test]
     async fn a_run_that_still_writes_its_log_is_stopped_at_its_deadline_and_not_before() {
         // SB-407: an hour's limit; a run writing its log meanwhile is never stopped before it,
-        // and is stopped at it.
+        // and is stopped at it once its log has been quiet. SB-509: one that wrote its log in the
+        // last ten minutes is given ten more first.
         let b = bench(true).await;
         let mut long = dispatch(b.folder.path(), Permissions::Ask);
         if let Operation::Launched { inner, .. } = &mut long {
@@ -1489,10 +1564,30 @@ mod runs {
             );
         }
         assert!(journal(b.root.path()).is_empty());
+        // SB-509: written a minute before the deadline: the deadline moves ten minutes on.
+        let stamp = |at: i64| {
+            std::fs::File::options()
+                .write(true)
+                .open(&log)
+                .unwrap()
+                .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(at as u64))
+                .unwrap();
+        };
+        stamp(due - 60);
         sweep(b.root.path(), due, None);
         let record = crate::launches::get(b.root.path(), &id).unwrap();
+        assert!(record["ended"].is_null(), "stopped while its log grows");
+        assert_eq!(record["dispatch"]["extensions"], 1);
+        assert_eq!(record["dispatch"]["extended_until"], due + EXTEND_SECONDS);
+        assert_eq!(live_read(b.root.path())[0].deadline, due + EXTEND_SECONDS);
+        let extended = &journal(b.root.path())[0];
+        assert_eq!(extended["action"], EXTEND_ACTION);
+        assert_eq!(extended["extended_until"], due + EXTEND_SECONDS);
+        // Quiet since: stopped at the moved deadline.
+        sweep(b.root.path(), due + EXTEND_SECONDS, None);
+        let record = crate::launches::get(b.root.path(), &id).unwrap();
         assert_eq!(record["ended"]["kind"], TIMED_OUT);
-        assert_eq!(journal(b.root.path())[1]["reason"], "deadline");
+        assert_eq!(journal(b.root.path())[2]["reason"], "deadline");
     }
 
     #[tokio::test]

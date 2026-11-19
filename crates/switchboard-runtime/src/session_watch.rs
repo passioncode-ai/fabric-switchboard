@@ -148,6 +148,9 @@ pub fn findings(
                     "kind": GONE, "launch_id": id, "folder": record["working_directory"],
                     "since": record["last_turn_at"].as_i64().unwrap_or(started),
                     "surface": surface(record), "task": task(record), "dispatch": dispatched,
+                    // SB-509: the session it ran, which `offer_continuations` may offer.
+                    "session_id": record["provider_session_id"],
+                    "provider": record["provider"],
                 }));
             }
             None => {}
@@ -343,7 +346,7 @@ fn read(root: &Path, now: i64) -> Read {
 }
 
 /// SB-407: when a dispatched run's log (`launches/logs/<id>.log`) was last written; a stat only.
-fn log_written_at(root: &Path, record: &Value) -> Option<i64> {
+pub(crate) fn log_written_at(root: &Path, record: &Value) -> Option<i64> {
     let id = record["launch_id"].as_str()?;
     if !crate::launches::valid_id(id) {
         return None;
@@ -495,6 +498,7 @@ fn watch(root: &Path, now: i64) {
     let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
     let mut found = findings(&rows, &records, &pairs, now, table_read(&scan));
     describe_duplicates(root, &mut found);
+    offer_continuations(root, &mut found, &pairs, now);
     let before = last_keys(root);
     for f in &found {
         if !before.contains(&key(f)) {
@@ -513,6 +517,149 @@ fn watch(root: &Path, now: i64) {
     // findings are compared, not their keys.
     if found != last(root) {
         let bytes = serde_json::to_vec(&json!({"at": now, "findings": found})).unwrap_or_default();
+        let _ = switchboard_core::private_fs::private_write(&root.join(FILE), &bytes);
+    }
+}
+
+/// SB-509: who was offered the continuation of a gone launch's session, `<data>/continue-offers.json`
+/// (0600, session ids, launch ids and times): each session is offered once, and never again once
+/// it was continued (by the person, or by anything that runs it again).
+pub const OFFERS_FILE: &str = "continue-offers.json";
+/// An offer is kept this long after it was made, past the watch's window.
+const OFFERS_KEPT: i64 = 7 * 24 * 3600;
+
+fn offers_read(root: &Path) -> serde_json::Map<String, Value> {
+    switchboard_core::private_fs::read_private(&root.join(OFFERS_FILE), 256 * 1024)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn offers_write(root: &Path, offers: &serde_json::Map<String, Value>) {
+    let path = root.join(OFFERS_FILE);
+    if offers.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    if let Ok(bytes) = serde_json::to_vec(offers) {
+        let _ = switchboard_core::private_fs::private_write(&path, &bytes);
+    }
+}
+
+/// SB-509: marks gone launches whose Claude Code session can be continued as itself (its folder
+/// and its transcript are here, no process holds it) `continuable`, once per session: an offer
+/// is recorded when first made, and a session continued since (live now) is taken and never
+/// offered again. Nothing is continued here: Needs attention offers it to the person. Pure but
+/// for its reads, so `offers` is the state before and after.
+pub fn offer(
+    found: &mut [Value],
+    offers: &mut serde_json::Map<String, Value>,
+    live: &HashSet<&str>,
+    can_continue: impl Fn(&str) -> bool,
+    now: i64,
+) {
+    for f in found
+        .iter_mut()
+        .filter(|f| f["kind"] == GONE && f["dispatch"] != true)
+    {
+        let Some(session) = f["session_id"].as_str().map(str::to_owned) else {
+            continue;
+        };
+        if f["provider"].as_str().is_some_and(|p| p != "claude") {
+            continue;
+        }
+        let entry = offers.get(&session).cloned();
+        if entry.as_ref().is_some_and(|e| !e["taken_at"].is_null()) {
+            continue;
+        }
+        if live.contains(session.as_str()) {
+            // Continued since, by the person or a host: the offer is over.
+            if let Some(entry) = entry {
+                offers.insert(
+                    session,
+                    json!({"launch_id": entry["launch_id"], "offered_at": entry["offered_at"],
+                        "taken_at": now}),
+                );
+            }
+            continue;
+        }
+        if !can_continue(&session) {
+            continue;
+        }
+        f["continuable"] = true.into();
+        if entry.is_none() {
+            offers.insert(
+                session,
+                json!({"launch_id": f["launch_id"], "offered_at": now, "taken_at": null}),
+            );
+        }
+    }
+    offers.retain(|_, e| {
+        e["offered_at"]
+            .as_i64()
+            .or_else(|| e["taken_at"].as_i64())
+            .is_some_and(|t| now - t < OFFERS_KEPT)
+    });
+}
+
+fn offer_continuations(root: &Path, found: &mut [Value], pairs: &[(String, u32)], now: i64) {
+    let gone = found
+        .iter()
+        .any(|f| f["kind"] == GONE && f["dispatch"] != true && f["session_id"].is_string());
+    if !gone && std::fs::symlink_metadata(root.join(OFFERS_FILE)).is_err() {
+        return;
+    }
+    let mut offers = offers_read(root);
+    let before = offers.clone();
+    let live: HashSet<&str> = pairs.iter().map(|(s, _)| s.as_str()).collect();
+    offer(
+        found,
+        &mut offers,
+        &live,
+        |session| {
+            crate::launches::valid_id(session)
+                && crate::resumable::locate(root, session, now).is_some_and(|(config, cwd)| {
+                    Path::new(&cwd).is_dir()
+                        && crate::resumable::transcript(&config, &cwd, session).is_file()
+                })
+        },
+        now,
+    );
+    if offers != before {
+        offers_write(root, &offers);
+    }
+}
+
+/// SB-509: a session continued from Needs attention (or `sessions continue`) is taken: it is never
+/// offered again, and leaves the kept watch at once.
+pub fn continued(root: &Path, session: &str, now: i64) {
+    let mut offers = offers_read(root);
+    if let Some(entry) = offers.get_mut(session) {
+        if entry["taken_at"].is_null() {
+            entry["taken_at"] = now.into();
+            offers_write(root, &offers);
+        }
+    }
+    let Some(mut kept) = std::fs::read(root.join(FILE))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    else {
+        return;
+    };
+    let Some(list) = kept["findings"].as_array_mut() else {
+        return;
+    };
+    let mut changed = false;
+    for f in list
+        .iter_mut()
+        .filter(|f| f["session_id"] == session && f["continuable"] == true)
+    {
+        f["continuable"] = false.into();
+        changed = true;
+    }
+    if changed {
+        let bytes = serde_json::to_vec(&kept).unwrap_or_default();
         let _ = switchboard_core::private_fs::private_write(&root.join(FILE), &bytes);
     }
 }
@@ -761,5 +908,67 @@ mod tests {
         assert_eq!(tree["launches"][0]["launch_id"], "L-child");
         assert_eq!(tree["launches"][0]["state"], "running");
         assert_eq!(tree["launches"][1]["state"], "ended");
+    }
+
+    #[test]
+    fn a_gone_session_with_its_history_is_offered_once_and_never_after_it_was_continued() {
+        // SB-509: a gone launch of a Claude Code session whose history is here is offered for
+        // continuation; a board run, another agent, one with no session or no history is not.
+        let gone = |id: &str, session: Option<&str>, provider: &str, dispatch: bool| {
+            json!({"kind": GONE, "launch_id": id, "session_id": session, "provider": provider,
+                "dispatch": dispatch})
+        };
+        let mut found = vec![
+            gone("L-1", Some("s-1"), "claude", false),
+            gone("L-2", Some("s-2"), "claude", true),
+            gone("L-3", Some("s-3"), "codex", false),
+            gone("L-4", None, "claude", false),
+            gone("L-5", Some("s-5"), "claude", false),
+        ];
+        let mut offers = serde_json::Map::new();
+        let none = HashSet::new();
+        let history = |s: &str| s != "s-5";
+        offer(&mut found, &mut offers, &none, history, 1000);
+        let offered: Vec<&str> = found
+            .iter()
+            .filter(|f| f["continuable"] == true)
+            .map(|f| f["launch_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(offered, ["L-1"]);
+        assert_eq!(offers["s-1"]["offered_at"], 1000);
+        // The next minute: still offered, with its first time kept.
+        let mut again = vec![gone("L-1", Some("s-1"), "claude", false)];
+        offer(&mut again, &mut offers, &none, history, 1060);
+        assert_eq!(again[0]["continuable"], true);
+        assert_eq!(offers["s-1"]["offered_at"], 1000);
+        // Continued: it runs, the offer is taken, and a later gone launch of it is not offered.
+        let live: HashSet<&str> = ["s-1"].into();
+        let mut running = vec![gone("L-1", Some("s-1"), "claude", false)];
+        offer(&mut running, &mut offers, &live, history, 1120);
+        assert!(running[0]["continuable"].is_null());
+        assert_eq!(offers["s-1"]["taken_at"], 1120);
+        let mut later = vec![gone("L-6", Some("s-1"), "claude", false)];
+        offer(&mut later, &mut offers, &none, history, 1180);
+        assert!(later[0]["continuable"].is_null(), "offered once");
+        // Offers older than a week are forgotten.
+        offer(&mut [], &mut offers, &none, history, 1000 + OFFERS_KEPT);
+        assert!(offers.is_empty());
+    }
+
+    #[test]
+    fn continuing_from_needs_attention_takes_the_offer_and_clears_the_kept_finding() {
+        let root = tempfile::tempdir().unwrap();
+        let mut offers = serde_json::Map::new();
+        offers.insert(
+            "s-1".into(),
+            json!({"launch_id": "L-1", "offered_at": 10, "taken_at": null}),
+        );
+        offers_write(root.path(), &offers);
+        let kept = json!({"at": 10, "findings": [
+            {"kind": GONE, "launch_id": "L-1", "session_id": "s-1", "continuable": true}]});
+        std::fs::write(root.path().join(FILE), kept.to_string()).unwrap();
+        continued(root.path(), "s-1", 20);
+        assert_eq!(offers_read(root.path())["s-1"]["taken_at"], 20);
+        assert_eq!(last(root.path())[0]["continuable"], false);
     }
 }

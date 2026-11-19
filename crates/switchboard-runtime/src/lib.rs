@@ -83,6 +83,7 @@ mod statistics;
 pub mod stop_spool;
 pub mod suggest;
 pub mod targets;
+pub mod token_rotation;
 pub mod uninstall;
 mod usage_gate;
 pub mod vault_choice;
@@ -3588,6 +3589,8 @@ async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, Stri
             "proxy_rotated",
             &[("reason", oplog::Field::Code("port_taken"))],
         );
+        // SB-509: the sessions started before it keep the old token; Needs attention lists them.
+        token_rotation::record(root, monitor::now());
     }
     let salts = read_pool_salts(root);
     proxy.set_pool_salts(salts.clone());
@@ -5532,6 +5535,8 @@ fn attention_report(
         // SB-417: the board starts waiting since the pool last admitted one, with no cutoff.
         refusals: dispatch_refusals::waiting(root).as_ref(),
         too_large: &item_size::read(root),
+        // SB-509: read only while the proxy's token changed and sessions may be left on the old.
+        rotated: token_rotation::sessions(root, &snapshot).as_ref(),
         now,
     }))
 }
