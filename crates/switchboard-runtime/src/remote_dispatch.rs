@@ -128,8 +128,9 @@ FABRIC_DISPATCH_PROMPT_FILE first and do what it says: it holds this session's i
 /// non-interactive form (as a dispatch here, `launch::headless_args`): `claude -p` and `codex
 /// exec` (Codex reads `-p` as `--profile`). The run's `--permissions` travels as the agent's own
 /// mode, which the target's `launch` keeps instead of adding its own: `all` skips every prompt,
-/// `ask` names the agent's asking mode (Claude Code `--permission-mode manual`, Codex
-/// `approval_policy="on-request"`), so the target's person's choice cannot widen it.
+/// `ask` names the agent's restricted mode (Claude Code `--permission-mode manual`; Codex
+/// `approval_policy="never"` in its default sandbox, since nobody answers an approval in `exec`),
+/// so the target's person's choice cannot widen it.
 pub fn agent_args(provider: Provider, permissions: Permissions) -> &'static [&'static str] {
     match (provider, permissions) {
         (Provider::Claude, Permissions::All) => &["--dangerously-skip-permissions", "-p"],
@@ -137,7 +138,7 @@ pub fn agent_args(provider: Provider, permissions: Permissions) -> &'static [&'s
         (Provider::Codex, Permissions::All) => {
             &["exec", "--dangerously-bypass-approvals-and-sandbox"]
         }
-        (Provider::Codex, Permissions::Ask) => &["exec", "-c", "approval_policy=\"on-request\""],
+        (Provider::Codex, Permissions::Ask) => &["exec", "-c", "approval_policy=\"never\""],
     }
 }
 
@@ -598,7 +599,7 @@ exit 3\n",
         );
         assert_eq!(
             agent(Provider::Codex, Permissions::Ask),
-            "'exec' '-c' 'approval_policy=\"on-request\"'"
+            "'exec' '-c' 'approval_policy=\"never\"'"
         );
         // The target's own launch adds nothing over the mode the run names.
         let root = tempfile::tempdir().unwrap();
