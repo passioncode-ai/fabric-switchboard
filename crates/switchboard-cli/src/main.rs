@@ -201,6 +201,14 @@ enum Command {
         #[command(subcommand)]
         command: Option<OwnSignInCmd>,
     },
+    /// Other accounts of this computer the proxy serves (Linux, and macOS before 27). By default the proxy
+    /// closes every connection from another account; a user named here may use one group's
+    /// accounts as Claude Code, only with its own capability, which Switchboard writes into a
+    /// settings file and never prints.
+    Proxy {
+        #[command(subcommand)]
+        command: ProxyCmd,
+    },
     /// How quota figures are kept current: smart (the default: response headers first, the
     /// usage endpoint when a figure decides something, two checks a minute per provider), timer
     /// (a fixed three-minute cadence for every account of a switching group) or on-demand (only
@@ -1156,6 +1164,43 @@ enum CapacityCmd {
     Clear,
 }
 
+#[derive(Subcommand)]
+enum ProxyCmd {
+    /// Let this account of the computer use one group's accounts through the proxy. Allowing an
+    /// account already listed changes its group and folders and keeps its capability.
+    AllowUser {
+        /// The account's user name or uid.
+        user: String,
+        /// The group (id or name) whose accounts it may use.
+        #[arg(long)]
+        group: String,
+        /// A folder it works in, for statistics (absolute; repeat for more).
+        #[arg(long = "folder")]
+        folders: Vec<PathBuf>,
+        /// Write the account's Claude Code settings file here (absolute): the proxy's address and
+        /// the account's capability, owned by you, mode 0640 with the account's group when you
+        /// may set it, else 0600 with the sudo line that hands it over.
+        #[arg(long)]
+        write_settings: Option<PathBuf>,
+    },
+    /// Take the account off the list: its connections are closed from the next one, and its
+    /// capability is refused at once.
+    DisallowUser {
+        /// The account's user name or uid.
+        user: String,
+    },
+    /// The accounts the proxy serves, with their groups, folders and settings files.
+    Users,
+    /// Give the account a new capability: the old one is refused at once, and the settings file
+    /// Switchboard wrote for it is written again.
+    RotateUser {
+        /// The account's user name or uid.
+        user: String,
+        /// Write the settings file here instead of where it was written before.
+        #[arg(long)]
+        write_settings: Option<PathBuf>,
+    },
+}
 #[derive(Subcommand)]
 enum UsageModeCmd {
     /// Response headers first, the usage endpoint when a figure decides something (the default).
@@ -3122,6 +3167,60 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::OwnSignIn { command } => Operation::OwnSignIn {
             on: command.as_ref().map(|c| matches!(c, OwnSignInCmd::On)),
         },
+        Command::Proxy { command } => {
+            // Paths are made absolute here: the owner runs in another folder.
+            let absolute = |path: &PathBuf| -> Result<String, String> {
+                let path = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    std::env::current_dir()
+                        .map_err(|_| "Current folder unavailable. Give an absolute path.")?
+                        .join(path)
+                };
+                Ok(path.display().to_string())
+            };
+            let users =
+                |action: &str,
+                 user: Option<&String>,
+                 group: Option<&String>,
+                 folders: Vec<String>,
+                 write_settings: Option<String>| Operation::ProxyUsers {
+                    action: Some(action.into()),
+                    user: user.cloned(),
+                    group: group.cloned(),
+                    folders,
+                    write_settings,
+                    by: Some("cli".into()),
+                };
+            match command {
+                ProxyCmd::Users => users("list", None, None, Vec::new(), None),
+                ProxyCmd::AllowUser {
+                    user,
+                    group,
+                    folders,
+                    write_settings,
+                } => users(
+                    "allow",
+                    Some(user),
+                    Some(group),
+                    folders.iter().map(absolute).collect::<Result<_, _>>()?,
+                    write_settings.as_ref().map(absolute).transpose()?,
+                ),
+                ProxyCmd::DisallowUser { user } => {
+                    users("disallow", Some(user), None, Vec::new(), None)
+                }
+                ProxyCmd::RotateUser {
+                    user,
+                    write_settings,
+                } => users(
+                    "rotate",
+                    Some(user),
+                    None,
+                    Vec::new(),
+                    write_settings.as_ref().map(absolute).transpose()?,
+                ),
+            }
+        }
         Command::Watchdog { command, .. } => Operation::Watchdog {
             on: command.as_ref().map(|c| matches!(c, WatchdogCmd::On)),
             run: false,
@@ -6255,7 +6354,74 @@ fn print_result(value: &Value, cli: &Cli) {
             }
         }
         Command::Capacity { .. } => print_capacity(value),
+        Command::Proxy { .. } => print_proxy_users(value),
         _ => print_value(value, false),
+    }
+}
+/// `switchboard proxy ...` as text: who is served and how the settings file was written; never
+/// a capability, which no answer carries.
+fn print_proxy_users(value: &Value) {
+    let text = |v: &Value| v.as_str().unwrap_or_default().to_owned();
+    let line = |user: &Value| {
+        let name = user["name"].as_str().map_or_else(
+            || format!("uid {}", user["uid"]),
+            |n| format!("{n} (uid {})", user["uid"]),
+        );
+        let group = user["group_name"]
+            .as_str()
+            .or(user["group"].as_str())
+            .unwrap_or_default();
+        let folders = user["folders"]
+            .as_array()
+            .map(|f| {
+                f.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        if folders.is_empty() {
+            format!("{name}: group {group}")
+        } else {
+            format!("{name}: group {group}, folders {folders}")
+        }
+    };
+    if let Some(users) = value["users"].as_array() {
+        if users.is_empty() {
+            println!("The proxy serves no other users of this computer.");
+        }
+        for user in users {
+            println!("{}", line(user));
+        }
+        return;
+    }
+    if value["removed"].is_object() {
+        println!("Disallowed: {}.", line(&value["removed"]));
+        return;
+    }
+    if value["rotated"] == true {
+        println!(
+            "New capability for {}. The old one is refused.",
+            line(&value["user"])
+        );
+    } else if value["user"].is_object() {
+        println!("Allowed: {}.", line(&value["user"]));
+    }
+    let file = &value["settings_file"];
+    if let Some(path) = file["path"].as_str() {
+        println!("Settings file: {path} (mode {}).", text(&file["mode"]));
+        if let Some(command) = file["install_command"].as_str() {
+            println!("You may not give it to the user's group. Hand it over with:\n  {command}");
+            println!(
+                "Then run claude there with --settings {}.",
+                text(&file["installed_path"])
+            );
+        } else {
+            println!("Run claude as that user with --settings {path}.");
+        }
+    }
+    if let Some(error) = value["settings_error"].as_str() {
+        println!("The settings file was not written again: {error}");
     }
 }
 /// `switchboard capacity` as text.
@@ -6867,6 +7033,10 @@ mod mcp_parity {
         ("usage-mode on-demand", Tool("switchboard_usage_mode")),
         ("own-sign-in on", Tool("switchboard_own_sign_in")),
         ("own-sign-in off", Tool("switchboard_own_sign_in")),
+        ("proxy allow-user", Tool("switchboard_proxy_users")),
+        ("proxy disallow-user", Tool("switchboard_proxy_users")),
+        ("proxy users", Tool("switchboard_proxy_users")),
+        ("proxy rotate-user", Tool("switchboard_proxy_users")),
         ("watchdog on", Tool("switchboard_watchdog")),
         ("watchdog off", Tool("switchboard_watchdog")),
         (

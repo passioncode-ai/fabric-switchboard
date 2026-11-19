@@ -46,6 +46,8 @@ Core implementer: crates/switchboard-core only. UI implementer: src/, index.html
 
 A separate loopback control server dispatches typed metadata/account operations, usage and native login/launch. Commands cannot query credentials. It authenticates before decoding a bounded body, denies browser Origins and wrong Host, and has no arbitrary URL/proxy primitive. CLI must not fall back to writing an already owned Store when a live control call is refused.
 
+Peer account (2026-11-19 audit M3-13, with SB-421): the control listener answers a connection only when its peer runs as the owner's own account, as the proxy does since SB-273: `control::ControlHandle::start` wraps its listener in `switchboard_proxy::peer::OwnUser` with nobody named (`Users::none`), so another account's connection is closed before a byte of it is read, on a host where other users run agents (DEC-0029) as anywhere; the 0600 descriptor is no longer the only barrier. On Windows the control listener checks no peer (security round 3): the token-user comparison of SB-274 needs `OpenProcessToken` on the client, which an owner that is not elevated cannot do to an elevated client, so the owner's own command in an administrator terminal would be shut out; there the descriptor's ACL and the token stay the barrier, as before. Root is another account: `sudo switchboard` against a `serve` that runs as another user no longer reaches it and falls back offline. Test `control::tests::the_control_listener_closes_another_accounts_connection`.
+
 Version skew (2026-10-08, found by fabric-dashboards FD-25): an update installs a newer bundle (CLI included) while the earlier owner keeps running from a temporary copy until it restarts, so the CLI can send an operation the owner cannot decode. Since 0.6.12 the identity answer (`GET /v1/hello`) carries the owner's version in the `x-switchboard-version` header (a header, because an earlier client refuses unknown fields in the `{proof}` body). A 400 then reads `CONTROL_OWNER_OLDER` (restart Switchboard to finish its update) when the owner is older or sends no version, `CONTROL_OWNER_NEWER` when the CLI is older, the plain refusal when both match; 429 reads `CONTROL_BUSY`. Every refusal of the listener is logged as `control_refused` with its status and a code (`unsafe_request`, `unauthorized`, `busy`, `too_large`, `body_timeout`, `unknown_operation`), never the request (`a_malformed_request_is_named_by_which_side_is_older`, `the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew`). A request the owner took 5 s or longer to answer is logged as `control_slow` with the operation's tag and the milliseconds, never its arguments (SB-174, `an_operation_kind_is_its_tag_and_never_its_arguments`; a launch from outside the window, which arrives wrapped as `launched`, is tagged by what it launches, `launch` or `continue`, SB-220), so a client's stall can be told apart from a wait on the way to the owner. Since 0.7.0 it also carries `lock_ms`, the milliseconds the request waited in all for the store's metadata lock, when it took that lock at all (H-2): the store tells its observer each take (`Store::observe_lock_waits`, zero when the lock was free), and the control handler adds the takes of the request's own task, its blocking sections included, not those of tasks it spawns (`a_slow_request_names_how_long_it_waited_for_the_stores_lock`, `an_operation_counts_the_time_it_waited_for_the_stores_lock`, `the_lock_observer_is_told_each_take_and_how_long_it_waited`). A `control_slow` with a large `lock_ms` is a wait behind the store's metadata lock; one with a small `lock_ms` is time spent elsewhere (the owner transaction, the store's credential lock, which a credential writer holds across its Keychain calls and `lock_ms` does not count, the Keychain, the machine). A credential read of a second or more is logged by the next background pass as `vault_slow` with the slowest read's milliseconds; since 0.6.81 such a read no longer holds the account metadata, so `snapshot()` and every read built on it (recovery, hand-overs, agents) answer while it runs (SB-185, `a_slow_credential_read_does_not_hold_the_metadata`).
 
 Windows protection is an OS implementation behind the same Vault/Store contract; build success does not certify provider login or screen-reader behavior. macOS signing uses an existing Developer ID private key locally without export. Notary acceptance remains a separate receipt.
@@ -99,7 +101,7 @@ Behaviour and decisions: [PLAN-0.4](PLAN-0.4.md). Code: `crates/switchboard-core
 - **Statistics (SB-145, SB-147).** The proxy counts each relayed request under `day\taccount\tpool\tclient\tfolder` (`switchboard_proxy::stats`: UTC day, account id, pool, client family from `user-agent` such as `claude-code`, `codex`, `opencode`, `hermes`, else `other`, and the group folder the request came from, empty when unknown; a 0.6.52 key without the folder still reads): `requests`, `ok`, `limited`, `failed`, and `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` as the provider reported them in its own response. The folder (SB-147) is the folder whose own capability the request presented, else the deepest group folder holding the folder the request names (`stats::folder_hint`: the newest Codex `<cwd>`, or Claude Code's `Working directory:` line in the body's first MiB; a byte scan, nothing of the body kept), else that named folder itself (SB-157: a session outside every group, or an agent Switchboard launched on a key), which the statistics resolve through Git to the repository whose checkout holds it (`ProjectIndex::with_strays`). The owner passes every group folder with its pool (`ProxyHandle::set_stat_folders`) wherever it sets the folders' capabilities. A 429 that moved (SB-98) counts once on the refusing account; a network failure counts as failed. `ProxyHandle::take_statistics()` hands the counts over and clears them. The owner adds them to `statistics.json` (0600, `{version: 1, tallies}`, 90 days, at most 50 000 rows) every pass, writing at most every 15 min and at stop; an unreadable file starts empty. `Statistics { days? }` (1 to 90, default 30; read fast path, offline reads the file) answers `{days, from, to, since, total, groups[{pool, name}], projects[{project, name, groups[{pool, name}]}], accounts[{account_id, label, provider, kind}], agents[{agent}], routes[group, project, project_name, account and agent], by_day[{day, groups[{pool, requests, tokens}]}]}`, each row with the counts, busiest first, and `switching` (WF-5.3, SB-367: `digest::switching_shares` over the daily operations digests of the last seven closed UTC days: `days` counted, `rotations`, `rotations_failed`, `automatic_switch_failed_share` (`rotation` failed over every outcome), `limit_stops` (`recovery_hook` ok), `limit_stops_resumed` (`recovery_continued` ok), `limit_stop_resumed_share`; a share with nothing to divide is null, never 0; test `digest::tests::switching_shares_read_the_closed_days_and_say_null_when_nothing_happened`). A project (`statistics::ProjectIndex`, built from `roots::tree` per group) is a repository with all its checkouts, keyed by its `origin` identity, or a folder outside Git keyed by its path (DEC-0089 AT-6, AT-7, AT-15); `project: ""` holds requests that named no folder. Not counted: an off-project Codex request passed through on the person's own sign-in (SB-143), and anything that does not go through the proxy. No prompt, answer or header value is kept; folder paths stay in this file on this computer.
 - Only `Owner::native` reads the ordinary CLIs' sign-in; `Owner::start` (tests, smoke) reports current accounts as unavailable.
 - `switchboard mcp [--read-only]`: stdio JSON-RPC 2.0 per the tool table in PLAN-0.4. Tool failures are results with `isError: true`; protocol faults are JSON-RPC errors (-32700 parse/oversize > 1 MiB, -32600 invalid, -32601 method, -32602 unknown tool or `arguments` not an object).
-- **MCP arguments, read forms and refusals (SB-517).** Every `tools/call` is checked against the tool's `inputSchema` before its handler runs (`mcp::validate`: `type`, `required`, `additionalProperties: false`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength`, `items`, `minItems`, `maxItems`; `every_schema_stays_inside_the_checked_keywords` keeps every schema inside that set). A fault answers `isError: true` with `structuredContent.error = {code: "invalid_arguments", field, message}` and runs nothing. A `decision` stays the four fields `spend::Decision` reads (`by`, `instruction`, `at`, `source`; the runtime denies any other), so the schema check and the runtime refuse the same bodies. Fifteen write tools have a read form (`mcp::READ_FORMS`, `switchboard_usage_mode` since SB-518; `mcp::writes` decides per call from the fields given): a read-only server lists them with read annotations and a sentence saying so, and answers that form. A write tool, or a write form, on a read-only server answers `isError: true` with `error.code` `read_only` instead of "Unknown tool.". The full server lists and annotates every tool as before. `switchboard_launch_keys` only reads and is listed as a read. A tool that would answer a refusal as data (`{state: "refused", reason}`, as `remote_dispatch::start` and a dispatch at capacity answer the CLI) answers an MCP caller `isError: true` with `error.code` its `reason`; no tool returns that shape yet (dispatch has no MCP tool, SB-482), so the mapping guards the tools to come, and the CLI's JSON is unchanged. The window's *Remove* of a Kimi Code account and of the OpenRouter key have tools: `switchboard_kimi_remove {id}` (`Operation::KimiRemove`) and `switchboard_openrouter_remove {pool?, decision?}` (`Operation::AgentKeyRemove`, `by: mcp`, wrapped in the operator's words when given), both annotated `destructiveHint` and `idempotentHint` and answering `{removed}`. Calls wait out a held store lock for up to 8 s, asking the owner first (`STORE_WAIT`, SB-181).
+- **MCP arguments, read forms and refusals (SB-517).** Every `tools/call` is checked against the tool's `inputSchema` before its handler runs (`mcp::validate`: `type`, `required`, `additionalProperties: false`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength`, `items`, `minItems`, `maxItems`; `every_schema_stays_inside_the_checked_keywords` keeps every schema inside that set). A fault answers `isError: true` with `structuredContent.error = {code: "invalid_arguments", field, message}` and runs nothing. A `decision` stays the four fields `spend::Decision` reads (`by`, `instruction`, `at`, `source`; the runtime denies any other), so the schema check and the runtime refuse the same bodies. Sixteen write tools have a read form (`mcp::READ_FORMS`, `switchboard_usage_mode` since SB-518, `switchboard_proxy_users` since SB-421; `mcp::writes` decides per call from the fields given): a read-only server lists them with read annotations and a sentence saying so, and answers that form. A write tool, or a write form, on a read-only server answers `isError: true` with `error.code` `read_only` instead of "Unknown tool.". The full server lists and annotates every tool as before. `switchboard_launch_keys` only reads and is listed as a read. A tool that would answer a refusal as data (`{state: "refused", reason}`, as `remote_dispatch::start` and a dispatch at capacity answer the CLI) answers an MCP caller `isError: true` with `error.code` its `reason`; no tool returns that shape yet (dispatch has no MCP tool, SB-482), so the mapping guards the tools to come, and the CLI's JSON is unchanged. The window's *Remove* of a Kimi Code account and of the OpenRouter key have tools: `switchboard_kimi_remove {id}` (`Operation::KimiRemove`) and `switchboard_openrouter_remove {pool?, decision?}` (`Operation::AgentKeyRemove`, `by: mcp`, wrapped in the operator's words when given), both annotated `destructiveHint` and `idempotentHint` and answering `{removed}`. Calls wait out a held store lock for up to 8 s, asking the owner first (`STORE_WAIT`, SB-181).
 - Desktop: `agent_setup() -> { cli_path, bundled_cli, linked_cli, can_link, commands }`; `link_cli()` creates `~/.local/bin/switchboard` → bundled CLI and never replaces a file or a foreign link. The macOS build embeds the signed CLI at `Contents/MacOS/switchboard`, byte-identical to the archived CLI.
 
 ## Other agents (0.6)
@@ -2959,7 +2961,9 @@ data folder, Keychain items, log and login item are that user's own.
   connections are counted and logged by the next statistics pass as
   `proxy_refused_foreign_user` with `count`
   (`the_listener_serves_this_account_and_closes_a_peer_of_another`; the record layout is read back
-  from a live connection by `a_connection_from_this_account_reads_back_as_this_account`).
+  from a live connection by `a_connection_from_this_account_reads_back_as_this_account`). The one
+  exception is an account the person named with `proxy allow-user` (SB-421, DEC-0029, the next
+  section): its connection is let in and served only with its own capability.
 - **A folder both users work in.** Claude Code reads one `.claude/settings.local.json` for every
   session in a folder, so it can carry one user's route only. The user who owns the folder, its
   `.claude` folder or the settings file keeps it: another user's owner neither reads nor writes
@@ -2971,6 +2975,135 @@ data folder, Keychain items, log and login item are that user's own.
   or through their own Switchboard when they launch them from it.
 - **Not proved yet.** A run with two real users on one Mac (both owners, a shared folder, the
   terminal hook) is an operator-assisted acceptance task.
+
+## Named users of one host (SB-421, DEC-0029, 2026-11-18)
+
+An organization's Linux VM runs `switchboard serve` as one user (a systemd service) and its agents
+as users of their own (`agent-a`, `agent-b`), each starting `claude -p` against a group's
+subscriptions. SB-273 closes their connections, and the agents' key never reaches a subscription
+(a third-party agent). The person names such an account explicitly; nothing else changes.
+
+- **The list.** `<data>/proxy-users.json` (0600, written by rename, removed when empty;
+  `switchboard_proxy::users`): `{version: 1, users: [{uid, name, pool, folders, salt, added_at,
+  added_by, settings, settings_sha256, group_created_at}]}`. `added_by` is the surface (`cli`, `mcp`, `window`);
+  `settings` is the settings file Switchboard wrote for the account and `settings_sha256` the
+  digest of the bytes it wrote there last; `salt` is part of its capability and no secret
+  (the capability needs the session token too). Root (uid 0), a pool id that is not one, a salt
+  that is not 64 hex digits and a relative folder are never listed (`root_and_malformed_rows_are_never_listed`).
+  At most 256 accounts. An unreadable file lets nobody in (`the_view_follows_the_file_and_fails_closed`).
+- **Admission.** The listener (`peer::OwnUser`) reads the connection's owner as before; an owner that
+  is another account is let in only while that uid is listed (`peer::admit`, `Admission::Named`),
+  and the connection carries the uid (`peer::Conn`, axum `ConnectInfo`). The list is read again
+  whenever its length, modification time or inode changed (`users::Users::current`), so allowing
+  and disallowing take effect at the next connection, with no owner restart
+  (`a_named_accounts_connection_is_let_in_and_marked_with_its_uid`,
+  `only_a_named_account_or_this_one_is_admitted`). The file is never read on the request path
+  (2026-11-19 audit M5-11): a request's handler reads the list as last read
+  (`users::Users::find_cached`); the accept loop reads the file on a blocking thread before it
+  admits a named connection, the owner reads it again after each change it saves
+  (`ProxyHandle::reload_users`, so a disallow or a rotation reaches every open connection at once),
+  and while the list names anyone the proxy reads it again every `users::REFRESH` (2 s: a stat,
+  and a read only when it changed), so a change made by hand reaches open connections within that
+  (`disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_closed`). The accept loop
+  still admits one connection at a time and asks the password database for a named uid's name
+  each time (SB-456, open). The file is read one reader at a time outside the cache's lock, so a request never waits on a read and reads land in the order they ran (security round 2); on Linux the socket table is read from `/proc/self/net/tcp{,6}` first, which a systemd unit hardened with `ProcSubset=pid` still shows, else `/proc/net`. A uid listed with a name is admitted only while
+  the password database still gives the uid that name: a uid handed to a new account is refused
+  (security round 1 P2-4, `a_listed_uid_is_admitted_only_under_its_recorded_name`).
+  The owner is the one socket whose local address and port are the peer's and whose foreign ones
+  are ours, on every system (security round 1 P2-1: ports alone let another user bind
+  `127.0.0.2:<proxy port>`, or reuse a source port on another address, and be named as this
+  account or a named one): Linux reads both `/proc/net/tcp` tables as one and refuses when two
+  live rows for the pair disagree, macOS reads the addresses of `xtcpcb64` (`inp_vflag` at 96, the
+  foreign and local unions at 100 and 116) and of `socket_fdinfo` (288, 296, 312; offsets read with
+  `offsetof` from the macOS 27.2 SDK), Windows the address columns of its table
+  (`a_proc_net_tcp_row_matches_by_both_addresses_and_disagreement_is_nobodys`,
+  `a_pcb_record_matches_by_both_addresses_and_ports_and_disagreement_is_nobodys`,
+  `this_processs_own_connection_is_found_in_the_pcb_list_by_its_address_pair`). An accepted
+  socket whose own address cannot be read admits nobody (P2-5,
+  `a_socket_whose_address_cannot_be_read_admits_nobody`). Windows never names one (`users::Users::none`):
+  SB-274 compares the peer's SID with the owner's and has no uid to list. macOS 27 lets an
+  unprivileged process read only its own account's sockets (SB-330), so there another account's
+  connection still reads as nobody's and is closed: the feature serves Linux hosts (and macOS
+  before 27, which lists every socket's owner).
+- **One change at a time (security round 2, P2-1).** Every change of the list (allow,
+  disallow, rotate, and a removed group's entries) holds `<data>/proxy-users.lock` (0600) from its
+  read to its write, so two calls at once (the window, MCP, the CLI) never lose a disallow or a
+  rotation to an older read (`a_change_of_the_list_waits_for_the_one_in_progress`).
+- **Its group, the one made then (P2-2).** An entry keeps when its group was made
+  (`group_created_at`, from `Project::created_at`; none for the default group). Removing a group
+  takes its entries off the list (`proxy_users::forget_group`,
+  `a_group_removed_takes_its_named_users_with_it`), and a request is served only while the group
+  that holds the id is the one made then (`Store::pool_created_at`), else 403 `NAMED_USER_GONE`:
+  a group made later with the same name never serves a user allowed for the old one
+  (`a_later_group_with_the_same_id_never_serves_a_named_account`).
+- **Its capability.** `users::user_token(token, pool, uid, salt)`: SHA-256 of
+  `switchboard-user:<pool>:<uid>:<salt>:<session token>`, 64 hex. From a named account's connection
+  the relay compares only that value (as the bearer or `X-Switchboard-Capability`, in constant
+  time) and only on `/claude/<its pool>/v1/...`: the session token, the agents' key, a group's or a
+  folder's capability and another account's or group's user capability are refused with 401
+  `NAMED_USER_CAPABILITY`; its own capability on another group, on Codex or on `/codex/_auto` with
+  403 `NAMED_USER_GROUP`; a listed group that is the pay-per-token group or a machine group (a
+  list edited by hand), or a store that cannot be read, with 403 `NAMED_USER_KIND` before any key
+  is read (M5-09, `a_hand_edited_list_never_lends_the_pay_per_token_group`), and so is a request
+  whose group would answer it with an API-key account (one outside the pay-per-token group): a
+  named user spends only a group's subscriptions (security round 2); its
+  `x-switchboard-launch-group` header is ignored, since its sessions are not Switchboard's
+  launches; an account taken off the list while its connection stayed open with 401
+  `NAMED_USER_REFUSED` (`a_named_account_is_served_only_with_its_own_capability_on_its_group`,
+  `disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_closed`). An admitted request
+  is official: a Claude Code session, so a subscription account serves it, SB-98's one move to the
+  next account applies, and the group's switch and ceiling hold as for any request.
+- **Counts.** Its statistics go to its group with client `claude-code` and the deepest of its own
+  folders that holds the folder the request names (else its first; `stats::key`). The proxy counts
+  each account's requests (`take_user_requests`), and the statistics pass logs
+  `proxy_user_requests` with `uid` and `count`: numbers only.
+- **The settings file.** `proxy allow-user ... --write-settings <path>` (and `rotate-user`) write
+  `{"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:<port>/claude/<pool>", "ANTHROPIC_AUTH_TOKEN":
+  <capability>}}` as a new file renamed over the path: owned by the service account, mode 0640 with
+  the named account's primary group only when that group is the account's own private group (named
+  as the account, with no member but it and the service account) and the service account may set
+  it, else 0600; an account that could not be looked up gets 0600 and no group (security round 1
+  P2-2, P2-3). Security round 1 P1-2: the folders are opened one at a time from `/` through
+  `openat` with `O_NOFOLLOW`, each owned by root or the service account and writable by no one
+  else (a sticky folder such as `/tmp` excepted), and the file is created and renamed through that
+  folder handle (`renameat`), so no folder can be swapped for a link under it; a file already at
+  the path is replaced only when it is the service account's regular file with one link holding
+  exactly the bytes recorded at the last write (`settings_sha256`); a link there, another
+  account's file, a file Switchboard did not write or one changed since are refused, so a rewrite
+  (rotation, the SB-269 port move) never lands on the service account's own `authorized_keys` or
+  shell files (`a_settings_file_replaces_only_its_own_bytes_and_never_passes_a_link_or_an_open_folder`,
+  `a_settings_file_holds_the_address_and_is_never_world_readable`). With 0600 the answer carries
+  `install_command` (security round 1 P1-1): `sudo cat <file> | sudo -u <user> sh -c 'umask 077;
+  mkdir -p <home>/.claude && cat > <home>/.claude/switchboard-settings.json'`, so the copy is
+  written as the user, never as root under a path the user controls, and the line carries no
+  secret (`installed_path`; `the_hand_over_line_writes_as_the_user_and_carries_no_secret`).
+  Allowing a listed user for another group writes its recorded file again (P2-6,
+  `a_new_group_rewrites_the_recorded_settings_file`); a uid whose name changed is refused for
+  allow and rotate and its file left alone (`a_reused_uid_is_refused_and_its_file_left_alone`). No answer, log line or list
+  carries the capability (`allow_rotate_and_disallow_keep_the_capability_out_of_every_answer_and_file`).
+  The address comes from the running owner, else `proxy.json`; with neither the call is refused and
+  nothing is listed. When the proxy starts on another port or token (SB-269), every recorded file is
+  written again and `proxy_user_settings_repointed` logs how many were and were not (a copy handed
+  over with sudo belongs to the user and is not; run `rotate-user` and hand it over again).
+- **Surfaces.** CLI `proxy allow-user <name|uid> --group <group> [--folder <abs>]...
+  [--write-settings <abs>]`, `proxy disallow-user`, `proxy users`, `proxy rotate-user
+  [--write-settings <abs>]`; MCP `switchboard_proxy_users` (`action` list, allow, disallow,
+  rotate; the list form is a read form a read-only server answers, `mcp::READ_FORMS`, and the
+  tool is annotated `destructiveHint: true`, `idempotentHint: false` because disallow revokes and
+  rotate issues a new capability each time, M5-10). `allow` refuses the pay-per-token group
+  (`TOKENS_GROUP`: its API keys spend per request, DEC-0023) and a machine group, by its id or
+  its machine's name (`MACHINE_GROUP`, DEC-0013), and lists nothing
+  (`the_pay_per_token_group_and_a_machine_group_are_never_allowed`); a group switched off is
+  accepted and serves its named users nothing until it is on again, as for any request; the window's Settings → *Other users of this computer* lists the accounts and disallows
+  one (Tauri `proxy_users`, list and disallow only). `Operation::ProxyUsers` runs outside the store
+  transaction: it writes only its own file and the settings file. Every surface refuses on Windows.
+- **Proved and not yet.** The gate plays the other account with synthetic uids (`start_as` with
+  `Me::Uid(own + 1)`). A Linux container run (2026-11-18, PR #832) used real users: `serve` as
+  `svc`, `agent-a` named with its file at `svc:agent-a 0640`, which `agent-b` cannot read; `agent-a`
+  with its capability reached route selection (409, no account in the group), a wrong one 401,
+  another group 403; `agent-b` was closed; after `rotate-user` the old capability read 401 and the
+  new one 409; after `disallow-user` `agent-a` was closed. `claude -p` on a real subscription on the
+  organization's VM is an operator-assisted acceptance task.
 
 ## Headless sign-in (SB-256 N1, 2026-11-05)
 

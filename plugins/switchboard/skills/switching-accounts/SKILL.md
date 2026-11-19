@@ -117,7 +117,7 @@ first write call, or when a result field is unclear.
 
 - **Only the read tools are listed**: the server runs `--read-only` (an isolated
   session gets that set, since a route change cannot reach it). The 39 read tools and the
-  read form of 15 write tools answer; a change is refused with `error.code` `read_only`.
+  read form of 16 write tools answer; a change is refused with `error.code` `read_only`.
   Report reads; for a change, tell the operator which tool is refused and why. Do not
   work around it.
 - **`error.code` `invalid_arguments`**: the arguments do not match the tool's schema;

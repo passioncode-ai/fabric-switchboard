@@ -191,6 +191,8 @@ export interface Adapter {
   duty(change?: { on?: boolean; run?: boolean } | null): Promise<DutyStatus>;
   /** SB-403 S3: whether Switchboard reads or changes the person's own Claude Code and Codex sign-in here; `on` changes it. */
   ownSignIn(on?: boolean | null): Promise<OwnSignIn>;
+  /** SB-421: other accounts of this computer the proxy serves; the window lists them and disallows one. */
+  proxyUsers(action?: 'list' | 'disallow' | null, user?: string | null): Promise<ProxyUsers>;
   /** SB-450 (DEC-0030): whether the sessions a restart of this computer cut are continued; `on` changes it. */
   bootResume(on?: boolean | null): Promise<BootResumeStatus>;
   repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;
@@ -376,6 +378,9 @@ export interface SessionsEverywhere { here: SessionRows; machines: MachineSessio
 /** SB-378: `switchboard capacity`, this computer's cap on working coding sessions. */
 /** SB-403 S3 (DEC-0025): the person's own sign-in, read and changed by Switchboard or off limits. */
 export interface OwnSignIn { own_sign_in: 'on' | 'off'; on: boolean }
+/** SB-421 (DEC-0029): one account of this computer the proxy serves, never its capability. */
+export interface ProxyUser { uid: number; name: string | null; group: string; group_name: string | null; folders: string[]; added_at: number; added_by: string; settings: string | null }
+export interface ProxyUsers { users?: ProxyUser[]; removed?: ProxyUser }
 /** SB-450 (DEC-0030): one outcome of continuing a session a restart cut. */
 export interface BootResumeLine { at: number; boot: number; /** Absent on `too_late`, which names no session. */ session?: string; folder?: string; outcome: 'continued' | 'failed' | 'interrupted' | 'at_capacity' | 'over_limit' | 'too_late' | string; new_launch_id?: string; reason?: string }
 /** SB-450 (DEC-0030): continuing the sessions a restart of this computer cut. */

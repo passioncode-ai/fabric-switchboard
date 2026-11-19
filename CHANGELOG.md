@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Agents that run as other users of the same Linux host can use a group's accounts through Switchboard's proxy, as Claude Code on its subscriptions: `switchboard proxy allow-user <user> --group <group> --write-settings <file>` (MCP `switchboard_proxy_users`) names the user and writes its Claude Code settings file, and `proxy users`, `proxy rotate-user` and `proxy disallow-user` list, renew and remove it, at once. A named user is served only with its own capability for its one group; nothing else it presents gets in, and every other user is still refused (SB-421, DEC-0029). Settings → *Other users of this computer* lists them and disallows one. `allow-user` refuses the pay-per-token group and another machine's group, and the control listener now answers only the account Switchboard runs as. macOS before 27 and Linux; Windows refuses.
 - The app's threads get the 16 MiB stack the command line has run on since 0.6.61 (SB-558): the threads of its async runtime on every system, and its main thread on Windows, where it was 1 MiB. The Windows test steps give each test thread the same. The nightly checks of 0.7.123 failed on Windows on Arm when one test overflowed its 2 MiB thread.
 
 ## 0.7.123

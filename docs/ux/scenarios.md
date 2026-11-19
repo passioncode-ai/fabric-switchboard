@@ -111,6 +111,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-103 | Keep Switchboard away from my own sign-in on a teammate's computer | draft |
 | SCN-104 | Keep a group supplied from the default group, by priority | draft |
 | SCN-105 | Have my sessions go on after the computer restarts | draft |
+| SCN-106 | Let agents that run as other users of this host use a group's subscriptions | draft |
 ### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -2308,3 +2309,26 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** runtime `boot_resume::tests::*`, `resumable::tests::a_session_a_launch_began_to_continue_a_moment_ago_is_not_continued_again`; `tests/mcp.rs` (tool list). No walk in the installed app yet; design pass B NOT_RUN.
 **Product:** unobserved
 **Traces:** SB-450, DEC-0030, SCN-096
+
+### SCN-106: Let agents that run as other users of this host use a group's subscriptions
+**Persona:** P-01
+**Goal:** On an organization's Linux VM, Switchboard runs as one user and agents run as users of their own; each agent user runs `claude -p` on one group's subscriptions, and no other user of the host gets in (SB-421, DEC-0029).
+**Preconditions:** `switchboard serve` runs as a service user; the group exists; the service user is a member of each agent user's primary group (else step 2 hands the file over with sudo).
+**Entry point:** an agent or the person in Terminal: `switchboard proxy allow-user <user> --group <group> --write-settings <file>`, MCP `switchboard_proxy_users` with `action: "allow"`. The window: Settings → *Other users of this computer*.
+**Steps:**
+1. `switchboard proxy allow-user agent-a --group team --folder /srv/agents/a --write-settings /var/lib/switchboard-users/agent-a.json` → “Allowed: agent-a (uid …): group team, folders /srv/agents/a.” and “Settings file: … (mode 0640).”
+2. When the service user may not give the file to the user's group, the file stays 0600 and the answer prints the line that copies it as `agent-a` (`sudo cat ... | sudo -u agent-a sh -c '...'`) and the path to use instead.
+3. As `agent-a`: `claude --settings <file> -p "..."` runs on the group's subscription; its requests count in the group.
+4. Open Settings → *Other users of this computer* → “Agents that run as other users of this computer can use one group's accounts as Claude Code. …” and one row “agent-a: group team” with *Disallow*.
+5. *Disallow* → “agent-a can no longer use Switchboard's proxy.”; the agent's next request and connection are refused.
+**Alt paths:** `proxy rotate-user agent-a` gives a new capability and writes the file again; the old one is refused at once. An unnamed user, root, this service user itself, another group's route and every other key or capability are refused. On Windows every surface answers “Serving other users of this computer works on macOS and Linux only. …”.
+**Expected result:** the agent users run Claude Code on the group's subscriptions with no sign-in of their own, nothing prints their capability, and the person removes one at once.
+**UI elements:** the Settings section, its rows, *Disallow* and its notice.
+**States covered:** reading, none, listed, disallowed, unreadable list, not supported (Windows).
+**Errors & recovery:** an unreadable list lets nobody in and says to restore or remove `proxy-users.json`; a list that cannot be saved names the data folder.
+**Status:** draft
+**Meaning:** board request c3dfcc4e (an organization's VM, 2026-11-18).
+**Copy:** checked with Copylot, register ui, en-US and ru-RU; report ids in [strings](../brand/strings.md#other-users-of-this-computer-scn-106-sb-421-dec-0029).
+**Coverage:** `tests::a_named_account_is_served_only_with_its_own_capability_on_its_group`, `tests::disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_closed`, `peer::tests::a_named_accounts_connection_is_let_in_and_marked_with_its_uid`, `proxy_users::tests::*`. No walk on a multi-user VM yet.
+**Product:** unobserved
+**Traces:** SB-421, DEC-0029, SB-273, SB-330

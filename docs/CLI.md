@@ -351,6 +351,35 @@ by hand (a shell, `nohup … &`, `setsid -f`, cron `@reboot`, a unit that runs i
 `update_restart unsupervised` once and keeps running on the old program until you restart it; an inherited
 `INVOCATION_ID` or init as the parent does not count.
 
+### Agents that run as other users of the same host (SB-421, DEC-0029)
+
+On an organization's Linux VM where `switchboard serve` runs as one user and agents run as users of
+their own, the proxy closes every connection from another user (SB-273). Name each agent user,
+with the one group whose accounts it may use (Linux, and macOS before 27, where another account's socket can be read, SB-459; Windows refuses):
+
+```sh
+switchboard proxy allow-user agent-a --group team --folder /srv/agents/a \
+  --write-settings /srv/agents/a/claude-settings.json   # lists it and writes its settings file
+switchboard proxy users                                 # who is served, in which group, and their files
+switchboard proxy rotate-user agent-a                   # a new capability, the file written again
+switchboard proxy disallow-user agent-a                 # off the list at once
+```
+
+From then on that user's connections are let in and served only with its own capability, for that
+group's Claude Code route: a subscription serves it, and its requests count in the group. The
+session token, the agents' key and every group's or folder's capability are refused from it. The
+settings file holds the proxy's address and the capability (`ANTHROPIC_BASE_URL`,
+`ANTHROPIC_AUTH_TOKEN`); no command prints the capability. Switchboard writes it as its own file,
+mode 0640 when the user's primary group is its own private group and you are a member of it, else
+0600, and then prints the line that hands a copy to the user, written as that user (`sudo cat
+<file> | sudo -u agent-a sh -c 'umask 077; mkdir -p ... && cat > ...'`). Every folder on the way
+must belong to root or the service account and be writable by no one else, none may be a link
+(give `/private/var/...`, not `/var/...`, on macOS), and a file already there is replaced only when
+it holds exactly what Switchboard wrote there last. The agent runs
+`claude --settings /srv/agents/a/claude-settings.json -p "..."`. The list is
+`<data>/proxy-users.json` (0600, no secret). A systemd example is in
+[MOVING.md](MOVING.md#several-users-on-one-linux-host).
+
 ## Uninstall
 
 ```sh
@@ -401,11 +430,11 @@ Version 0.4 serves Switchboard to coding agents over the Model Context Protocol 
 
 ```sh
 switchboard mcp               # stdio server: status, accounts, usage, switch, project rules
-switchboard mcp --read-only   # the 39 read tools and 15 read forms; usage refresh shows the stored observation
+switchboard mcp --read-only   # the 39 read tools and 16 read forms; usage refresh shows the stored observation
 switchboard --data-dir /path/to/app-data mcp
 ```
 
-`switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`; clients asking for `2025-11-25` (MCP Inspector 2.9.0, the TypeScript SDK 1.32.0 and client 2.3.0, the Python SDK 2.3.0) accept `2025-06-18` and work: [matrix](runs/2026-10-04-sb-43-mcp-matrix/README.md), `scripts/mcp_compat.py`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and launch is not exposed; `switchboard_login` and `switchboard_kimi_login` begin a sign-in that the person finishes. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. The server lists 98 tools; `--read-only` lists the 39 that only read and the 15 write tools that also have a read form (`switchboard_capacity`, `switchboard_duty`, `switchboard_balance` and the others the tool reference names), annotated as reads and answering only that form; a call that changes something there is refused with `isError: true` and `error.code` `read_only` (SB-517; before, a write tool answered "Unknown tool."). Every call is checked against its tool's schema before it runs, and a fault is refused with `error.code` `invalid_arguments` and the `field` it names (the tool reference has one section per tool, and `every_mcp_tool_is_in_the_skill_reference` fails when one is missing). A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set. Both also get the Fabric project board (`fabric`) when the operator registered it in that provider's user scope (SB-20).
+`switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`; clients asking for `2025-11-25` (MCP Inspector 2.9.0, the TypeScript SDK 1.32.0 and client 2.3.0, the Python SDK 2.3.0) accept `2025-06-18` and work: [matrix](runs/2026-10-04-sb-43-mcp-matrix/README.md), `scripts/mcp_compat.py`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and launch is not exposed; `switchboard_login` and `switchboard_kimi_login` begin a sign-in that the person finishes. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. The server lists 99 tools; `--read-only` lists the 39 that only read and the 16 write tools that also have a read form (`switchboard_capacity`, `switchboard_duty`, `switchboard_balance` and the others the tool reference names), annotated as reads and answering only that form; a call that changes something there is refused with `isError: true` and `error.code` `read_only` (SB-517; before, a write tool answered "Unknown tool."). Every call is checked against its tool's schema before it runs, and a fault is refused with `error.code` `invalid_arguments` and the `field` it names (the tool reference has one section per tool, and `every_mcp_tool_is_in_the_skill_reference` fails when one is missing). A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set. Both also get the Fabric project board (`fabric`) when the operator registered it in that provider's user scope (SB-20).
 
 A project reserves its accounts to its folders and their subfolders. A project has no folder limit; all projects together hold at most 1024 folders, and no folder may sit inside another project's (`a_project_has_no_folder_limit_and_all_projects_hold_1024`).
 

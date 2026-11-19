@@ -12,18 +12,18 @@ group's id is its `pool` (`default` is the default group). **Automatic switching
 names and fields call rotation. Say group and automatic switching to the person.
 
 `switchboard mcp --read-only` lists the 39 tools that only read (every tool under
-[Read tools](#read-tools)) and, since SB-517, the 15 write tools that also have a read form:
+[Read tools](#read-tools)) and, since SB-517, the 16 write tools that also have a read form:
 `switchboard_capacity`, `switchboard_own_sign_in`, `switchboard_boot_resume` (without `on`),
 `switchboard_duty` (a dry run included), `switchboard_watchdog` (without `on` or `run`),
 `switchboard_app` (`updates` and `login_item` without `enabled`), `switchboard_analytics`,
 `switchboard_balance`, `switchboard_feed`, `switchboard_anthropic_keys`,
 `switchboard_codex_route`, `switchboard_project_sources`, `switchboard_machine_set` (`keys`, and
-`adopt` without `apply`), `switchboard_login` (`status`, `pending`) and `switchboard_usage_mode`
-(without `mode`). There they are annotated
+`adopt` without `apply`), `switchboard_login` (`status`, `pending`), `switchboard_usage_mode`
+(without `mode`) and `switchboard_proxy_users` (`list`, or no `action`). There they are annotated
 as reads and answer only that form: a call with a field that changes something, or any other
 write tool, is refused with `isError: true` and `structuredContent.error.code` `read_only`, never
 as an unknown tool. A session Switchboard launches in isolated mode gets that set. The server
-lists 98 tools; each has a section below.
+lists 99 tools; each has a section below.
 
 Since SB-517 every call is checked against its tool's `inputSchema` before it runs (types,
 `required`, `enum`, `minimum` and `maximum`, `minLength` and `maxLength`, list items and size,
@@ -913,6 +913,34 @@ renewed in it, a launch copies no MCP sign-in out of the ordinary home's credent
 session duty officer looks only at sessions in Switchboard's own homes. Claude Desktop is outside
 Switchboard either way. Without `on` it reads `{own_sign_in: "on" | "off", on}`; `on` changes it, only
 when the operator asks. Kept in `<data>/own-sign-in`.
+
+### `switchboard_proxy_users`: `action?`, `user?`, `group?`, `folders?`, `write_settings?`
+
+Other accounts of this computer that may use one group's accounts through Switchboard's proxy
+(SB-421, DEC-0029): an organization's Linux host where Switchboard runs as one user under systemd
+and agents run as users of their own (`agent-a`, `agent-b`). By default the proxy closes every
+connection from another account (SB-273). `action: "list"` (the default) reads `{users: [{uid,
+name, group, group_name, folders, added_at, added_by, settings}]}`. `allow` (`user`: a name or uid;
+`group`: an id or name; `folders`: absolute, used for statistics; `write_settings`: an absolute
+path) lists the account; from then on its connection is let in and served only with its own
+capability for that group, as Claude Code (a subscription serves it). The session token, the
+agents' key and every group's or folder's capability are refused from it, and so are another
+group's route and Codex. `write_settings` writes its Claude Code settings file there
+(`ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`, the capability), owned by this account, mode
+0640 with the user's primary group when this account may set it, else 0600 with
+`settings_file.install_command`, a `sudo cat ... | sudo -u <user> sh -c '...'` line a person
+runs to hand it over as the user (the folders on the way must belong to root or the service
+account and no link may be among them; a file there is replaced only when it holds what
+Switchboard wrote there last); run
+`claude --settings <file> -p ...` as that user. No answer carries the capability. `disallow` takes
+the account off the list and `rotate` gives it a new capability (and writes the recorded file
+again): both at once. `allow` refuses the pay-per-token group (its API keys spend per request,
+DEC-0023) and a machine group (its accounts work on another machine, DEC-0013), by id or name. The
+list form (`list`, or no `action`) is a read: a read-only server answers it; `disallow` and
+`rotate` cannot be taken back and asking twice differs from asking once, so the tool is annotated
+`destructiveHint: true`, `idempotentHint: false`. Linux, and macOS before 27 (macOS 27 hides another account's sockets, SB-459); Windows answers that it is
+not supported. Changing it only when the operator asks. Kept in `<data>/proxy-users.json` (0600,
+no secret).
 
 ### `switchboard_usage_mode`: `mode?`
 

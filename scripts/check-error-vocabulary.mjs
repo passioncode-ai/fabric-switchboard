@@ -53,6 +53,31 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  "A folder on the way to the settings file is a link, or an account other than root and the one Switchboard runs as may write to it. Name a path whose folders only those two can change.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "The file at that path is not the one Switchboard wrote there last, or it changed since. Remove it or name another path.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "The account this uid was allowed for is gone or has another name now. Disallow it, then allow the account again.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "Give the settings file as an absolute path.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "The settings file's folder does not exist. Create it, then retry.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "The settings file could not be written there. Check the folder's permissions, then retry.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "A file Switchboard did not write is at that path (a link, a folder or another account's file). Remove it or name another path.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "Switchboard's proxy has not started on this computer yet, so the settings file cannot name its address. Start Switchboard (switchboard serve), then retry.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "Name the group whose accounts this user may use.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "No group has that id or name.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  // 2026-11-19 audit M5-09: allow refuses the pay-per-token and machine groups (CLI and MCP only).
+  "The pay-per-token group's keys serve only Switchboard's own sessions. Name a group whose accounts are subscriptions.": 'M5-09: allow is CLI and MCP only; the window lists and disallows by uid',
+  "That group holds another machine's accounts, which serve nothing on this computer. Name a group of this computer.": 'M5-09: allow is CLI and MCP only; the window lists and disallows by uid',
+  "Give each folder as an absolute path.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "Name the account: its user name or uid.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "No account of this computer has that name or uid.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "That is the account Switchboard runs as: its sessions are served already.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "Switchboard never serves the root account's processes.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "The proxy serves at most 256 other users.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "This account of the computer may not use Switchboard's proxy now. Ask the person who runs Switchboard to allow it with switchboard proxy allow-user.": 'SB-421: an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
+  "This account may use Switchboard's proxy only with its own capability. Use the settings file Switchboard wrote for it.": 'SB-421: an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
+  "This account may use only the Claude Code route of the group it was allowed for.": 'SB-421: an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
+  "Another user of this computer is served only by a group's subscriptions, never by an API key or another machine's accounts.": 'M5-09 (SB-421): an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
+  "The group this account was allowed for is gone. Ask the person who runs Switchboard to allow it again with switchboard proxy allow-user.": 'SB-421 security round 2 (P2-2): an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
+  "Unknown action: use list, allow, disallow or rotate.": 'SB-421: the window sends only list and disallow; a CLI or MCP typo',
   // SB-518 (DEC-0032): monitor::probe's internal refusal when a provider hold began before its
   // request; check_as answers it as USAGE_RATE_LIMITED, which src/adapter.ts shows verbatim.
   "usage request not sent: provider held": 'SB-518: internal to monitor::check_as, mapped to the provider wait before any reply',

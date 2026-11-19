@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0034` (`DEC-0032` is SB-518, smart usage checks; `DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0034` (`DEC-0032` is SB-518, smart usage checks; `DEC-0029` is SB-421, named users of one host reaching the proxy, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -877,6 +877,51 @@ research notes); the ones still in force that the board cites are seeded below w
   связано … Те, которые выбывают, они уходят в дефолтную папку отстаиваться … аккаунты, которые
   скоро станут активными, наперед мы подготавливаем … У папок типа есть свой приоритет»); design
   target-state `06-default-feed.md`.
+
+### DEC-0029: Another user of the host reaches the proxy only by name, with its own capability for one group
+
+- **Date:** 2026-11-18
+- **Status:** Accepted (SB-421, branch `proxy-named-users`)
+- **Context:** board request c3dfcc4e: an organization's Linux VM runs `switchboard serve` as one
+  user under systemd and its agents as users of their own, each starting `claude -p` against a
+  group's subscriptions. The proxy closes every connection from another user (SB-273, the port
+  norm), and a relay under the service user presenting the agents' key is refused for a
+  subscription, as it must be: that key means a third-party agent.
+- **Decision:**
+  - The person names each such user explicitly, by uid, with the one group whose accounts it may
+    use (`proxy allow-user`, MCP `switchboard_proxy_users`; `<data>/proxy-users.json`, 0600, no
+    secret). Nobody else changes: an unnamed user is still closed before a byte is read, and root
+    is never named.
+  - A named user is served only with a capability derived for it: SHA-256 over its group, its uid,
+    a salt of its own and the session token. From its connection nothing else is compared: not the
+    session token, not the agents' key, not a group's or folder's capability, not another user's.
+    Only its group's Claude Code route serves it. With that capability its requests are Claude
+    Code's (a subscription serves them, SB-98 applies), counted in its group.
+  - Allowing, disallowing and rotating take effect at the next connection and request: the proxy
+    reads the list again whenever the file changed, and the salt makes a rotated capability
+    worthless at once.
+  - The capability reaches the user as a Claude Code settings file the person names, written by
+    the service user and never printed: 0640 with the user's primary group when the service user
+    may set it and that group is the user's own private group, else 0600 with a line that copies
+    it as the user (`sudo -u`), never as root into a path the user controls. It is written through
+    a handle on folders that only root and the service user can change, and replaces only the bytes
+    Switchboard wrote there last (security round 1 of PR #832). It is rewritten when
+    the proxy's port or token changes.
+  - Only where the proxy can name the peer's account by uid: Linux, and macOS before 27. Windows
+    refuses every call (SB-274 compares SIDs and has no uid to name); macOS 27 hides other
+    accounts' sockets (SB-330), so there a named user is still closed.
+- **Alternatives:** a relay under the service user (refused: it would need the session token or a
+  folder capability in another user's hands, and the proxy could no longer tell who asked); the
+  agents' key for subscriptions (refused: the provider allows a subscription only in its own client);
+  a Unix socket per user (more code in every client; Claude Code speaks HTTP to a base URL).
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#named-users-of-one-host-sb-421-dec-0029-2026-11-18),
+  [CLI](CLI.md), [MOVING](MOVING.md#several-users-on-one-linux-host),
+  `crates/switchboard-proxy/src/users.rs`, `peer.rs` (`admit`, `Conn`), `lib.rs` (`named_user`),
+  `crates/switchboard-runtime/src/proxy_users.rs`, [AGENTS.md lifecycle](../AGENTS.md#lifecycle)
+  (`proxy-users.json`), the skill's tool reference.
+- **Source:** board request c3dfcc4e, 2026-11-18; decided by the implementing agent under the
+  operator's standing delegation (`~/.claude/CLAUDE.md`, "Act, then report"), recorded in this
+  change.
 
 ### DEC-0030: The sessions a restart of this computer cut are continued once, hosted
 

@@ -63,6 +63,22 @@ pub struct ControlHandle {
 }
 impl ControlHandle {
     pub async fn start(runtime: Arc<Runtime>) -> Result<Self, String> {
+        // Security round 3: on Windows the peer's token user is read with `OpenProcessToken`,
+        // which a process that is not elevated cannot do to an elevated client, so the owner's
+        // own command in an administrator terminal would be shut out. There the descriptor's ACL
+        // and the token stay the barrier, as before; macOS and Linux compare the uid.
+        let me = if cfg!(windows) {
+            switchboard_proxy::peer::Me::Unchecked
+        } else {
+            switchboard_proxy::peer::me()
+        };
+        Self::start_as(runtime, me).await
+    }
+    /// M3-13: `start` answering only peers that run as `me` (a test plays another account).
+    pub(crate) async fn start_as(
+        runtime: Arc<Runtime>,
+        me: switchboard_proxy::peer::Me,
+    ) -> Result<Self, String> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(|_| "Control listener unavailable.")?;
@@ -91,6 +107,15 @@ impl ControlHandle {
             .route("/v1/control", post(handle))
             .route("/v1/hello", get(hello))
             .with_state(state);
+        // 2026-11-19 audit M3-13: as the proxy does (SB-273), a connection is answered only when
+        // its peer runs as this account (`peer::OwnUser` with nobody named): on a host where
+        // other users run agents (DEC-0029) the 0600 descriptor is no longer the only barrier.
+        let listener = switchboard_proxy::peer::OwnUser {
+            inner: listener,
+            me,
+            refused: Arc::default(),
+            users: Arc::new(switchboard_proxy::users::Users::none()),
+        };
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
         });
@@ -1199,6 +1224,31 @@ mod tests {
             .unwrap();
         let desc = serde_json::from_slice(&std::fs::read(tmp.path().join(FILE)).unwrap()).unwrap();
         (tmp, owner, desc)
+    }
+    /// 2026-11-19 audit M3-13: the control listener answers only peers that run as its own
+    /// account, as the proxy does (SB-273): a listener playing another account (`own + 1`) closes
+    /// this process's connection before any request is read, and the owner's own still answers.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test]
+    async fn the_control_listener_closes_another_accounts_connection() {
+        let (tmp, owner, own) = fixture().await;
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let hello =
+            |address: std::net::SocketAddr| client.get(format!("http://{address}/v1/hello")).send();
+        assert!(hello(own.address).await.is_ok());
+        let me = switchboard_proxy::peer::own_uid().unwrap();
+        let other = ControlHandle::start_as(
+            owner.runtime.clone(),
+            switchboard_proxy::peer::Me::Uid(me.wrapping_add(1)),
+        )
+        .await
+        .unwrap();
+        let theirs: Descriptor =
+            serde_json::from_slice(&std::fs::read(tmp.path().join(FILE)).unwrap()).unwrap();
+        assert_ne!(theirs.address, own.address);
+        assert!(hello(theirs.address).await.is_err());
+        other.close().await;
+        owner.shutdown(Duration::from_secs(8)).await;
     }
     #[tokio::test]
     async fn live_owner_accepts_mutation_and_never_returns_secret() {

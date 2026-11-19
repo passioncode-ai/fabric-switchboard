@@ -173,6 +173,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
     assert_eq!(
         destructive,
         [
+            "switchboard_proxy_users",
             "switchboard_session_close_copy",
             "switchboard_dispatch_stop",
             "switchboard_session_end",
@@ -194,6 +195,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_usage",
             "switchboard_capacity",
             "switchboard_own_sign_in",
+            "switchboard_proxy_users",
             "switchboard_usage_mode",
             "switchboard_boot_resume",
             "switchboard_duty",
@@ -499,6 +501,8 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         "switchboard_anthropic_keys",
         "switchboard_launch_keys",
         "switchboard_codex_route",
+        // M5-10: the named users' list.
+        "switchboard_proxy_users",
     ] {
         assert!(
             read_names.contains(&name),
@@ -524,6 +528,10 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         ),
         ("switchboard_balance", json!({"add": ["default"]})),
         ("switchboard_feed", json!({"pool": "default", "on": true})),
+        (
+            "switchboard_proxy_users",
+            json!({"action": "disallow", "user": "agent-a"}),
+        ),
     ] {
         let reply = reader.request("tools/call", json!({"name": name, "arguments": arguments}));
         assert_eq!(reply["result"]["isError"], true, "{name}: {reply}");

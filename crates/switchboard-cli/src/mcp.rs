@@ -139,6 +139,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account; within 60 seconds of its last check it returns that observation with a note, and after a 429 on any check of that provider it is refused for at least 15 minutes (longer when the provider asks), and in the smart and on_demand modes as paced past the provider's budget of two checks a minute with a reserve of up to eight; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. A read-only server never asks and shows the stored observation. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_capacity","title":"Session pool","description":"This computer's cap on live coding sessions: cap (null when none), used (live Claude Code and Codex sessions doing work, managed or not: a Claude Code session counts by its own transcript and status, so one quiet for 30 minutes outside a turn is not counted, nor one on a limit stop or on a wait of its own (a wake-up, a monitor, a cron job, a hold); a process with no session file counts by its folder), free, at_capacity, total, quiet, on_limit_stop and on_waits (not counted), degraded when the process table could not be read. board_share (null without a cap) is how many board runs may run whatever the cap holds: a dispatch, or launch --hosted --surface fabric, starts while used is under the cap or board_used (board runs live now, and admitted ones not yet recorded: pending) is under board_share; board_share_set says the person set it (else a quarter of the cap, rounded up); board_admitted says a board run would start now. switchboard dispatch answers state refused with reason at_capacity (and used, cap, board_used, board_share) when neither holds, and any other launch --hosted is refused at the cap: a wait, not a failed run; ask again when a session ends. waiting counts the board runs refused since the pool last admitted one; refused_waiting (null when none) has count, since (the first), last_at, newest_request and freed (a session ended since), with no time cutoff; refused_last_hour (null when none) keeps the last hour's count and per_hour. switchboard_attention lists the waiting ones as one dispatch_refused item. cap sets the cap (1 to 500), board sets the board's share (0 to the cap; with cap or on the cap already set), board_default: true goes back to the default share, and cap alone keeps a share set before, clamped to the cap (board_share_clamped says so); clear removes both and takes neither; without any, reads only. Setting or clearing it only when the operator asks.","inputSchema":{"type":"object","properties":{"cap":{"type":"integer","minimum":1,"maximum":500},"board":{"type":"integer","minimum":0,"maximum":500},"board_default":{"type":"boolean"},"clear":{"type":"boolean"}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_own_sign_in","title":"Own sign-in","description":"Whether Switchboard reads or changes the person's own Claude Code and Codex sign-in on this computer. Off on a teammate's computer that serves only seats an organization delegated to it: the background no longer reads that sign-in, nothing is captured, imported, activated or renewed in it, a launch copies no MCP sign-in out of it, and the session duty officer leaves the person's own sessions alone. Claude Desktop is outside Switchboard either way. on true or false changes it, only when the operator asks; without on, the setting (own_sign_in: on or off).","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"}},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_proxy_users","title":"Other users the proxy serves","description":"Other accounts of this computer (an organization's Linux host where agents run as their own users) that may use one group's accounts through Switchboard's proxy, as Claude Code, so a subscription serves them. By default the proxy closes every connection from another account. action list (the default) answers users: uid, name, group, group_name, folders, added_at, added_by and settings (the settings file written for it). allow (user: name or uid; group: id or name; folders: absolute, for statistics; write_settings: an absolute path) lists the account; from then on a connection from it is let in and served only with its own capability, for that group: never the session token, the agents' key or a group's or folder's capability. write_settings writes its Claude Code settings file there (the proxy's address and the capability as ANTHROPIC_AUTH_TOKEN), owned by this account, mode 0640 with the user's group when this account may set it, else 0600 and settings_file.install_command, the sudo line a person runs to hand it over. No answer ever carries the capability. disallow takes it off the list at once; rotate gives it a new capability at once and writes the recorded settings file again. Linux, and macOS before 27 (macOS 27 hides another account's sockets); Windows refuses. Changing it only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["list","allow","disallow","rotate"]},"user":{"type":"string","minLength":1},"group":{"type":"string","minLength":1},"folders":{"type":"array","items":{"type":"string"},"maxItems":64},"write_settings":{"type":"string","minLength":1}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_usage_mode","title":"Usage check mode","description":"How quota figures are kept current on this computer. smart (the default): a response's rate-limit headers with both the five-hour and the seven-day window count as a check, so while requests flow the usage endpoint is asked about once every 30 minutes per account (sooner near the limit or after a pause); an account that carries no traffic is checked every 10 minutes; a switch checks its candidate fresh first; every provider has a budget of 2 checks a minute (a burst of 4, at most 2 at once), and a 429 on any usage check holds the whole provider for at least 15 minutes, doubling on repeats up to an hour. timer: the fixed cadence of 0.7.121 (every account of a switching group every 3 minutes, headers postpone nothing, no budget beyond the provider's own waits and 2 checks of one provider at once). on_demand: no check on a schedule; only a switch's candidate and a person's check ask the provider. mode changes it, only when the operator asks; without mode, the setting (usage_mode).","inputSchema":{"type":"object","properties":{"mode":{"type":"string","enum":["smart","timer","on_demand"]}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_boot_resume","title":"Continue sessions after a restart","description":"After this computer restarts, Switchboard continues the Claude Code sessions the restart cut, each as itself (claude --resume with a prompt to go on) in a session host of its own, so Fabric Dashboards and other machines attach to it by its launch id. A session is continued when Switchboard launched it, it was running at Switchboard's last look before the restart, the restart cut it in a turn (its transcript written after its last turn ended, in the two hours before the restart and not since, its last words not the person's /exit), no end was recorded (or one by the shutdown's signal), nobody closed it on purpose (the person, the duty officer or a session host), it is not a dispatched board run, and no process, session host or later launch holds it; with the person's own sign-in off, only sessions in Switchboard's own homes; a first pass more than six hours after the restart continues nothing (too_late); at most five after one restart, newest first, inside the session pool. Each continuation is journalled (its intent, then its outcome) and never repeated, after a quit or a second start included. On unless the operator turns it off. Answers settings (on), boot_time, last_look (the boot, the sessions seen then and when its owner stopped), window_minutes, max_per_boot and recent (the newest outcomes: continued with new_launch_id, failed, interrupted, at_capacity, over_limit, too_late). on true or false changes it, only when the operator asks.","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_duty","title":"Session duty officer","description":"The session duty officer: every five minutes it looks at each live interactive Claude Code session on this computer (not Fabric Dashboards' consoles, not claude -p runs) and never ends one before it finished. Finished: idle for idle_minutes (default 60, never under 65 so a session waiting for a wake-up it set itself is kept), its transcript and its background agents' transcripts unwritten as long, none of its own commands (Bash tool shells, background ones included) and no session it launched itself still running: closed. A session the person took up again after such a close is never closed as finished again. Stalled: busy with its status unchanged and its transcript unwritten for stuck_minutes (45), its process tree using no CPU since the previous check, and no command of its own running (or one running three times stuck_minutes without CPU): closed and resumed in a new Terminal window with claude --resume and a prompt to continue. A session waiting for the person's answer is left alone, nothing is restarted for its age, and of two copies of one session only a finished copy is closed. At most three actions a check and three restarts of one session in six hours. Answers settings, due (what a check would do now), recent (its last actions), watched, waiting_for_person and running_commands. on, stuck_minutes, idle_minutes and run (check now) change it (waiting_minutes and max_age_hours are kept for older settings and unused); dry_run lists without acting.","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"},"stuck_minutes":{"type":"integer","minimum":10,"maximum":1440},"waiting_minutes":{"type":"integer","minimum":10,"maximum":1440},"idle_minutes":{"type":"integer","minimum":10,"maximum":1440},"max_age_hours":{"type":"integer","minimum":1,"maximum":72},"run":{"type":"boolean"},"dry_run":{"type":"boolean"}},"additionalProperties":false}})),
@@ -239,6 +240,10 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         tool["annotations"] = if write && STOPS_PROCESSES.contains(&name.as_str()) {
             // Review round 1: a tool that ends a process cannot be taken back.
             json!({"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false})
+        } else if write && REVOKES.contains(&name.as_str()) {
+            // M5-10: takes someone's access away (disallow) or issues a new capability each time
+            // (rotate): neither is taken back, and asking twice is not the same as asking once.
+            json!({"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false})
         } else if write && DELETES.contains(&name.as_str()) {
             // SB-517: a deletion cannot be taken back; asking twice removes nothing more.
             json!({"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false})
@@ -259,13 +264,17 @@ const STOPS_PROCESSES: [&str; 3] = [
     "switchboard_session_end",
 ];
 
+/// 2026-11-19 audit M5-10: the tools whose write form revokes access or issues a new secret
+/// (`switchboard_proxy_users` disallow and rotate).
+const REVOKES: [&str; 1] = ["switchboard_proxy_users"];
+
 /// SB-517: the tools that delete what cannot be restored (the window's Remove buttons).
 const DELETES: [&str; 2] = ["switchboard_kimi_remove", "switchboard_openrouter_remove"];
 
 /// SB-517: the write tools that also have a read form. Called without the fields that change
 /// something they only read, so a read-only server lists them and answers that form
 /// ([`writes`] decides per call); the full server lists them as before.
-pub(crate) const READ_FORMS: [&str; 15] = [
+pub(crate) const READ_FORMS: [&str; 16] = [
     "switchboard_capacity",
     "switchboard_own_sign_in",
     "switchboard_boot_resume",
@@ -282,6 +291,8 @@ pub(crate) const READ_FORMS: [&str; 15] = [
     "switchboard_login",
     // SB-518: without `mode`, the setting.
     "switchboard_usage_mode",
+    // SB-421 (M5-10): `list`, or no `action`, reads the named users.
+    "switchboard_proxy_users",
 ];
 
 /// SB-517: whether this call of `name` changes something. A tool without a read form answers
@@ -327,6 +338,7 @@ pub(crate) fn writes(name: &str, write: bool, args: &Map<String, Value>) -> bool
             _ => true,
         },
         "switchboard_login" => !matches!(action, Some("status" | "pending")),
+        "switchboard_proxy_users" => !matches!(action, None | Some("list")),
         _ => true,
     }
 }
@@ -1883,6 +1895,27 @@ impl Server {
                 })
                 .await
             }
+            "switchboard_proxy_users" => {
+                let text = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_owned);
+                self.call(Operation::ProxyUsers {
+                    action: text("action"),
+                    user: text("user"),
+                    group: text("group"),
+                    folders: args
+                        .get("folders")
+                        .and_then(Value::as_array)
+                        .map(|f| {
+                            f.iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_owned)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    write_settings: text("write_settings"),
+                    by: Some("mcp".into()),
+                })
+                .await
+            }
             "switchboard_boot_resume" => {
                 self.call(Operation::BootResume {
                     on: args.get("on").and_then(Value::as_bool),
@@ -3194,6 +3227,12 @@ mod checks {
         ));
         assert!(!w("switchboard_login", json!({"action": "pending"})));
         assert!(w("switchboard_login", json!({"action": "begin"})));
+        // M5-10: the named users' list reads; allow, disallow and rotate change it.
+        assert!(!w("switchboard_proxy_users", json!({})));
+        assert!(!w("switchboard_proxy_users", json!({"action": "list"})));
+        for action in ["allow", "disallow", "rotate"] {
+            assert!(w("switchboard_proxy_users", json!({"action": action})));
+        }
         // A read tool and a tool with no read form keep their one flag.
         assert!(!w("switchboard_launch_keys", json!({"agent": "hermes"})));
         assert!(w("switchboard_switch", json!({})));
@@ -3230,6 +3269,13 @@ mod checks {
             .find(|t| t["name"] == "switchboard_capacity")
             .unwrap();
         assert_eq!(capacity["annotations"]["readOnlyHint"], false);
+        // M5-10: disallow revokes and rotate issues a new capability each time.
+        let users = full
+            .iter()
+            .find(|t| t["name"] == "switchboard_proxy_users")
+            .unwrap();
+        assert_eq!(users["annotations"]["destructiveHint"], true);
+        assert_eq!(users["annotations"]["idempotentHint"], false);
     }
 
     #[test]
