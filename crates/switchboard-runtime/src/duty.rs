@@ -971,7 +971,7 @@ fn act_on(root: &Path, s: &Seen, act: Act) -> &'static str {
     // SB-561 (S1.2): the account is checked before the session is stopped: a resume it would
     // refuse leaves the session as it is.
     match prepare(root, s, prompt, None, duty_script(root, &s.session)) {
-        Prepared::Refused(why) => return why,
+        Prepared::Refused(why) => why,
         Prepared::Ready(path, resume) => {
             if !stop(s.pid) {
                 return "still_running";

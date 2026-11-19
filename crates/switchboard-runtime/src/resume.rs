@@ -236,10 +236,7 @@ pub fn mode_for(root: &Path, record: Option<&Value>, live: Option<&str>) -> Stri
     match record {
         Some(r) => match r["permissions"].as_str().filter(|m| valid_mode(m)) {
             Some(mode) => mode.to_owned(),
-            None => mode_of_args(
-                "claude-code",
-                crate::session_accounts::resume_flags(root).into_iter(),
-            ),
+            None => mode_of_args("claude-code", crate::session_accounts::resume_flags(root)),
         },
         None => DEFAULT.to_owned(),
     }
