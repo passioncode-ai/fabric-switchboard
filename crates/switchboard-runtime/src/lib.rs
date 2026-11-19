@@ -8031,6 +8031,24 @@ async fn execute(
             } else {
                 Ok(())
             };
+            // The check here renewed the sign-in it brought, so the copy there is spent: when the
+            // provider then named no account (it did not answer), giving it back would leave no
+            // working copy anywhere. It is kept and said; another account's sign-in never is.
+            let renewed = store
+                .stored_credential(&id)
+                .ok()
+                .and_then(|c| c.refresh_token)
+                != taken.token;
+            let identity = match identity {
+                Err(account_send::RECALL_IDENTITY_UNKNOWN) if renewed => {
+                    oplog::event(
+                        "recall_identity",
+                        &[("result", oplog::Field::Code("unverified"))],
+                    );
+                    Ok(())
+                }
+                other => other,
+            };
             if identity.is_err() {
                 if let (Some(before), Some(provider)) =
                     (held_before.as_ref(), local_provider(&store, &id))
