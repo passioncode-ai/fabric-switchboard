@@ -2,13 +2,13 @@
 design: 2026-11-19-seat-relay
 row: SB-575
 decision: DEC-0037
-status: design (docs only); the build waits on PassionCode.ai (Vesta), board thread 14da4917
+status: design (docs only); keys and membership from Vesta (thread 14da4917, answered: directory only); the seat mailbox asked of passioncode-platform
 ---
 
 # A seat for a teammate's computer through PassionCode.ai (SB-575, DEC-0037)
 
-Entry point for the next agent: this file, then section 14 (what Vesta must provide) and
-section 16 (the build in waves). Decision: [DEC-0037](../../DECISIONS.md#dec-0037-a-teammates-computer-gets-a-seat-through-passioncodeai-never-through-the-operators-network).
+Entry point for the next agent: this file, then section 14 (what Vesta provides and what the
+seat mailbox must guarantee) and section 16 (the build in waves). Decision: [DEC-0037](../../DECISIONS.md#dec-0037-a-teammates-computer-gets-a-seat-through-passioncodeai-never-through-the-operators-network).
 Board row: [SB-575](../../evidence/backlog.md).
 
 ## 1. What was asked
@@ -35,7 +35,9 @@ Goals:
 
 - G1. No inbound connection to either machine and no shared network: both Switchboards only connect
   outward, over HTTPS, to PassionCode.ai.
-- G2. PassionCode.ai carries the messages and never reads a credential or a usage figure.
+- G2. PassionCode.ai carries the messages and never reads a credential or a usage figure. The key
+  directory and the carrier are two services: Vesta vouches for keys and membership and stores no
+  message; the seat mailbox stores ciphertext only and vouches for nothing.
 - G3. The seat on the teammate's computer behaves exactly as a DEC-0025 guest: one group, never
   moved on, lent, given to an agent or made the ordinary sign-in; a lease extended by the sender;
   switched off past it, credential kept 30 days, then removed; called back only by its sender.
@@ -58,9 +60,10 @@ Non-goals:
 
 | Party | Holds | Talks to |
 |---|---|---|
-| Sender device | an administrator's Switchboard; the subscription; the organization's group | Vesta only |
-| Recipient device | a member's Switchboard; the guest seat once accepted | Vesta only |
-| Vesta (PassionCode.ai) | the device registry, one mailbox per device, the audit log | both, as a server; reaches neither |
+| Sender device | an administrator's Switchboard; the subscription; the organization's group | Vesta and the seat mailbox, outward only |
+| Recipient device | a member's Switchboard; the guest seat once accepted | Vesta and the seat mailbox, outward only |
+| Vesta (PassionCode.ai identity) | the per-person device registry with each device's public keys, signed membership (organization, person, role) | both, as a server; reaches neither; stores and relays no message (its ADR-0005 dropped relays) |
+| The seat mailbox (passioncode-platform, recommended in section 14) | one inbox per registered device, ciphertext only, until acknowledged or expired; delivery receipts; the audit rows | both, as a server; reaches neither |
 | The provider | the subscription's sign-in | each Switchboard, as today |
 
 The administrator and the member are roles in the organization on PassionCode.ai
@@ -76,10 +79,12 @@ that exists today, Switchboard makes one device identity for this data folder:
 - The private keys go to the OS vault (`Store::put_secret`: Keychain, DPAPI, Secret Service), each
   as one item, never on disk in clear and never in a backup. `<data>/device.json` (0600) keeps the
   vault item ids, the public keys, the device id Vesta returned, the registration state and times.
-- Registration: Switchboard asks Vesta for a challenge, signs it with the signing key and sends
-  both public keys, the platform, the app version and a label the person typed or confirmed
-  (`POST /v1/devices`, names are proposals for Vesta, section 14). Vesta answers a `deviceId`. The
-  OAuth grant needs a new scope beyond `me.organizations` (open question Q1).
+- Registration in Vesta's per-person device registry (`/devices`, the one people's devices
+  already use, Ed25519 or P-256 from a CSR): Switchboard writes this computer's X25519 encryption
+  key and its Ed25519 signing key, bound to the person's device record, with the `switchboard` app
+  token, proving possession of the signing key over a challenge; Vesta answers the `deviceId`.
+  Administrators see their people's devices (`vesta_devices_list`). The exact fields and the scope
+  the `switchboard` token needs for the write are Vesta's (open question V1).
 - The device key is separate from the settings signing key (SB-272) and from ssh keys: one key, one
   purpose. The device record may carry the settings signer's public key, signed by the device key,
   so a later bundle can be tied to the device; nothing in this design depends on it.
@@ -90,15 +95,20 @@ that exists today, Switchboard makes one device identity for this data folder:
 - Disconnect (`org disconnect`) revokes the device at Vesta first; a failed revoke keeps the
   connection, as today's disconnect keeps the token rather than orphaning it.
 
-Registration states, answered by `device status` and in `onboard --status`: `registered`,
+Registration states, answered by `device status` and in `onboard --status` (they are about Vesta;
+the seat mailbox has states of its own, section 11): `registered`,
 `not_registered`, `scope_missing` (an older grant; connect again), `revoked`, `key_changed`
 (Vesta lists keys for this device id other than ours), `unreachable` (Vesta did not answer; never
 read as `not_registered`).
 
 ## 5. Pinning the other side's key
 
-Vesta lists the devices of an organization's members with their public keys and roles. A list from
-a server is a claim, so each side pins:
+Vesta lists the devices of an organization's members with their public keys, and issues signed
+membership: a statement of organization, person, role, the device's key fingerprints and an expiry,
+signed by Vesta's published key. Each side checks the other's membership statement (fetched from
+Vesta, and attached to the first envelope of a thread) offline against Vesta's key, so the seat
+mailbox cannot invent a member or an administrator. A list from a server is still a claim, so each
+side also pins:
 
 - The recipient pins the sender's device signing key at the first offer it accepts. The accept
   step shows the key's short fingerprint (eight groups of four hex digits) and the organization and
@@ -132,8 +142,10 @@ One JSON object per message, at most 64 KiB encoded (open question Q6).
 }
 ```
 
-- `kind` is one of five (section 7). Vesta needs `org`, `from`, `to`, `kind`, `thread`, `id` and
-  `expires_at` in clear to route, authorize and expire; everything about the seat is in `ct`.
+- `kind` is one of five (section 7). The seat mailbox needs `org`, `from`, `to`, `kind`, `thread`,
+  `id` and `expires_at` in clear to route, authorize and expire; everything about the seat is in
+  `ct`. The first envelope of a thread from each side also carries that side's membership
+  statement (section 5) in clear: it is signed by Vesta and holds no secret.
 - Encryption: HPKE (RFC 9180) base mode, DHKEM(X25519, HKDF-SHA256), HKDF-SHA256,
   ChaCha20-Poly1305, to the recipient's X25519 key. The associated data is the canonical encoding
   (RFC 8785) of every header field except `ct` and `sig`, so a header changed in transit fails to
@@ -144,7 +156,7 @@ One JSON object per message, at most 64 KiB encoded (open question Q6).
   the header: a signed envelope cannot be re-addressed.
 - `seq` counts per (`from`, `to`) pair, strictly increasing, kept in `<data>/relay.json`; gaps are
   allowed (a message may expire unread).
-- `id` is a random UUID, also the idempotency key at Vesta: a submit whose answer was lost is sent
+- `id` is a random UUID, also the idempotency key at the seat mailbox: a submit whose answer was lost is sent
   again with the same bytes (section 11).
 
 ## 7. Kinds and who may send them
@@ -157,8 +169,9 @@ One JSON object per message, at most 64 KiB encoded (open question Q6).
 | `seat.recall` | the sender of that thread | its recipient | a reason code | 7 days |
 | `seat.surrender` | the recipient of that thread | its sender only | the live credential (the recipient's renewals rotate the refresh token), or `declined` or `removed` with no credential | 7 days |
 
-- Vesta enforces the From and To columns: a `seat.offer`, `lease.extend` or `seat.recall` only from
-  a device whose person holds the administrator role in `org` to a device of a member of `org`; a
+- The seat mailbox enforces the From and To columns, from Vesta's signed membership and device
+  list: a `seat.offer`, `lease.extend` or `seat.recall` only from a device whose person holds the
+  administrator role in `org` to a device of a member of `org`; a
   `usage.report` or `seat.surrender` only along a thread that an offer opened, back to that offer's
   sender. Anything else is refused at submit.
 - Each Switchboard checks the same rules again on receipt, and more: the thread's sender key is the
@@ -181,7 +194,7 @@ A recipient refuses, and logs `relay_refused {code}`:
   as the older one);
 - a signature, a payload copy or a pinned key that does not match.
 
-Vesta refuses a second submit of an `id` with other bytes and answers the stored receipt for the
+The seat mailbox refuses a second submit of an `id` with other bytes and answers the stored receipt for the
 same bytes. A sender submits nothing newer to a device while an older envelope to it is
 `outcome_unknown`: it sends that one again first, so a lost answer never puts a pair's `seq` out of
 order.
@@ -211,8 +224,8 @@ The owner sets, at delivery, how much of the subscription the seat may use, and 
 Switchboard enforces it. This is what keeps a shared subscription from being spent by one guest.
 
 - The offer carries `ceiling`: a percentage per provider window, at least the 5-hour and the
-  weekly window (for example 80 % of the 5-hour window and 70 % of the week, the figures chosen for
-  the first teammate seat), and `rotation`: `last_resort` or `normal`. The window and the CLI ask
+  weekly window (80 % of the 5-hour window and 70 % of the week for the first teammate seat, approved by
+  the operator and relayed in announcement de0ba93c, 2026-11-19), and `rotation`: `last_resort` or `normal`. The window and the CLI ask
   for both when offering; `last_resort` is the default.
 - `last_resort`: in its group the seat is chosen, by hand or by automatic switching, only when no
   other account of that group has room under its own limits. The teammate's own subscriptions in
@@ -240,43 +253,46 @@ program on the other computer, so nothing in this design depends on where it is 
 
 ## 10. Polling, cadence and backoff
 
-- Both sides fetch their inbox over HTTPS (`GET` with a cursor, section 14). Cadence: every 60
+- Both sides fetch their inbox from the seat mailbox over HTTPS (`GET` with a cursor, section 14). Cadence: every 60
   seconds while this device has a live thread, an offer waiting either way, or a recall or
   surrender in flight; every 15 minutes otherwise (to see a new offer); and at once on *Check now*,
   `relay check`, or MCP.
 - After a failed fetch: 60 s, 2 min, 4 min, 8 min, 15 min, then every 15 min, each with up to 20 %
-  jitter; `Retry-After` from Vesta wins when longer. The first fetch that works resets it.
+  jitter; `Retry-After` from the mailbox wins when longer. The first fetch that works resets it.
 - Fetching acknowledges nothing: a message is acknowledged after it was applied and the store
   published, so a crash between fetch and apply fetches it again and the `id` check makes the
   second apply a no-op.
 - The fetch runs in a spawned task outside the owner transaction (as the Vesta read does today),
-  never once the drain began, and only while PassionCode.ai is connected. The idle budget gains one
+  never once the drain began, and only while PassionCode.ai is connected. Vesta's device list and
+  membership statements are read at most every 6 hours (as today's organization read), at a thread's
+  first envelope, and when a check fails. The idle budget gains one
   HTTPS request every 15 minutes on a computer with a registered device and no thread.
 - Long-poll or server-sent events would cut the minute's delay; this design works without them
-  (open question Q5).
+  (open question M5).
 
 ## 11. Failure and unknown states
 
 Every state below is typed; the CLI, MCP and the window show the same words.
 
 Sender, per seat thread: `offered` (submitted, no answer), `active`, `declined`, `quiet` (no
-`usage.report` for 15 minutes), `unreachable` (Vesta did not answer the last three fetches),
+`usage.report` for 15 minutes), `unreachable` (the seat mailbox did not answer the last three fetches),
 `recall_sent`, `recalled` (the surrender with its credential arrived and the provider check passed),
 `expired` (the offer passed its expiry with no answer; the recipient never accepts an offer past
 its expiry and then drops the credential it held, so the account comes back here ten minutes after
 the expiry, past the clock tolerance, and only after a fetch that worked found no report for the
 thread), `outcome_unknown` (a submit whose answer
-was lost: the same bytes are sent again until Vesta answers; until then the account stays marked
+was lost: the same bytes are sent again until the mailbox answers; until then the account stays marked
 elsewhere and Needs attention names it).
 
 Recipient, per guest seat: `pending` (an offer waits for the person), `active`, `off_lease`,
-`removed`, `surrender_sent`, `outcome_unknown`. An accepted seat is used only once Vesta took its
-first `usage.report` (`active`) before the offer's expiry. An accept that did not reach Vesta in
+`removed`, `surrender_sent`, `outcome_unknown`. An accepted seat is used only once the mailbox took its
+first `usage.report` (`active`) before the offer's expiry. An accept that did not reach the mailbox in
 time is dropped; one whose answer was lost stays off and is never used until a `lease.extend` on
 its thread arrives, and without one it lapses with the offer's lease and its credential is removed,
 so the sender's copy stays the only one in use.
 
-Device: the registration states of section 4. Inbox: `ok`, `empty` only after a fetch that worked,
+Device: the registration states of section 4; membership: `valid`, `expired`, `not_member`,
+`unknown` (Vesta not read). Inbox: `ok`, `empty` only after a fetch that worked,
 `unknown` after one that failed. A failed fetch never clears a seat, never ends a lease early and
 never reads as "no offers".
 
@@ -323,15 +339,15 @@ lands: `device.status`, `device.register`, `device.trust`, `device.rotate`, `sea
 
 | Class | What it could do | What stops or bounds it |
 |---|---|---|
-| The relay is read or run by someone else | see who offered what kind to whom and when; drop or delay messages | payloads are end-to-end encrypted and signed; a dropped `lease.extend` lapses the seat (fails closed); a dropped recall is resent and the provider sign-out remains |
-| The relay inserts or swaps a device key | address an offer to a device it controls, or forge a sender | first-use pinning with fingerprints shown to both people; a changed key stops all traffic until a person confirms it |
+| The seat mailbox is read or run by someone else | see who offered what kind to whom and when; drop or delay messages | it holds no key and no membership authority; payloads are end-to-end encrypted and signed; a dropped `lease.extend` lapses the seat (fails closed); a dropped recall is resent and the provider sign-out remains |
+| The directory (Vesta) inserts or swaps a device key | address an offer to a device it controls, or forge a sender | keys and messages come from two services, so one alone cannot both swap a key and deliver; first-use pinning with fingerprints shown to both people; a changed key stops all traffic until a person confirms it |
 | Replay of an old message | re-extend a lease, re-offer a seat, re-run a recall | `id`, per-pair `seq`, expiry, payload copies of the header (section 8) |
 | Re-addressing a signed envelope | deliver one person's offer to another device | the recipient id is inside the signature and inside the payload |
 | A member's device is compromised | read a seat's credential once its offer was delivered | the same as DEC-0025: the provider sign-out ends every copy; only seats offered to that device are exposed |
-| An administrator's device is compromised | offer the organization's seats, recall them | Vesta's role check limits it to that organization; the audit log shows every offer; revoking the device at Vesta stops it |
-| A member leaves the organization | keep using a seat | Vesta refuses the thread's messages once the membership ends; the lease lapses within its length; the credential is removed 30 days later; the provider sign-out ends it at once |
+| An administrator's device is compromised | offer the organization's seats, recall them | Vesta's signed membership limits it to that organization; the mailbox's audit rows show every offer; revoking the device at Vesta stops it |
+| A member leaves the organization | keep using a seat | the membership statement expires and is not renewed, so the mailbox and the receiving Switchboard refuse the thread's messages; the lease lapses within its length; the credential is removed 30 days later; the provider sign-out ends it at once |
 | A guest spends the shared subscription | use the organization's seat up | the owner's ceiling per window, enforced before any request reaches the provider; `last_resort` keeps the teammate's own accounts first; the owner sees the figures and lowers the ceiling or calls the seat back |
-| Flooding a mailbox | exhaust a device's inbox or the owner's time | Vesta rate limits per sender device and per organization; the recipient caps envelopes per fetch and their size |
+| Flooding a mailbox | exhaust a device's inbox or the owner's time | the mailbox rate limits per sender device and per organization; the recipient caps envelopes per fetch and their size |
 | A version downgrade | make a side accept a weaker format | `v` is signed; an unknown version is refused, never read as an older one |
 | Clock skew | expire messages early or late | five minutes of tolerance; order comes from `seq`, not the clock |
 | Secrets in logs or Git | leak a credential or a key | logs carry codes, ids and counts only; a planted-token test covers the relay's log lines and errors |
@@ -339,43 +355,93 @@ lands: `device.status`, `device.register`, `device.trust`, `device.rotate`, `sea
 What this design does not change: anyone who can read a person's Keychain on their own computer can
 read the seat on it. The operator's network is never part of the path.
 
-## 14. What Vesta must provide
+## 14. What Vesta provides and what the seat mailbox must guarantee
 
-Asked on the board: project `passioncode-vesta`, thread 14da4917, message 446daca9 (2026-11-19).
-The names below are proposals; Vesta's answer decides them.
+### 14.1 Vesta: key directory and membership attestation
 
-1. **Device registry.** Register a device under the person's grant and organization membership with
-   proof of possession of the signing key; list an organization's member devices with public keys,
-   role and state; revoke (the person for their own device, an administrator for any device of the
-   organization); rotate keys, the new set signed by the old signing key.
-2. **Mailbox API.** Submit an envelope, idempotent by `id`; fetch a device's inbox from a cursor;
-   acknowledge processed envelopes; envelopes kept until acknowledged or expired.
-3. **Authorization.** The From and To rules of section 7, checked at submit against the current
-   role and membership; a refused submit answers a typed code.
-4. **Retention.** Envelopes deleted at acknowledgement or expiry, at most 7 days; nothing of an
-   envelope kept afterwards but the audit row.
-5. **Audit log.** One row per submit, fetch, acknowledgement, expiry and refusal: kind, sender and
-   recipient device, thread, time, size, outcome; never payload. Readable by the organization's
+Asked on 2026-11-19 (project `passioncode-vesta`, thread 14da4917, message 446daca9); Vesta answered
+(message d6656231): it will not store or relay envelopes (its ADR-0005 dropped relays, and its
+vision rules out a subscription pool). It provides, and this design takes (option a, approved by
+the operator, relayed in announcement de0ba93c):
+
+1. **Per-person device registry.** Devices are already registered with Ed25519 or P-256 keys from a
+   CSR; administrators see their people's devices (`/devices`, `vesta_devices_list`).
+2. **Switchboard's keys on the person's device.** A new X25519 public key, and Switchboard's Ed25519
+   key when it differs from the device's, bound to the person's computer, written with the
+   `switchboard` app token.
+3. **Signed membership.** A statement of organization, person, role and device keys with an expiry,
+   signed by Vesta, which both Switchboards and the seat mailbox check without asking Vesta again.
+
+Vesta never sees a credential, a private key, a usage figure, a group or folder name, an account
+label, the provider account's e-mail or a session's content, and holds no message.
+
+### 14.2 The seat mailbox: candidates
+
+Envelopes travel through a store-and-forward channel that is not Vesta. Two candidates:
+
+| | passioncode-platform (the hosting backend) | The Fabric board hub |
+|---|---|---|
+| Who can reach it | any PassionCode.ai member, from their own computer, with their own identity | Projects of the operator's estate; a teammate's computer would have to be admitted to that estate's board |
+| Unit of authorization | can be the device and the organization role, checked against Vesta's signed membership | the Project and its grants; no organization role, no device |
+| What a participant sees | only its own inbox | the estate's directory of Projects and capabilities (the directory listing shows every Project) |
+| Retention | can be built to delete on acknowledgement or expiry | messages stay in their thread as history; requests expire after 7 days but are kept |
+| Size | set by this ask (64 KiB proposed) | 64 KiB a message |
+| Receipts | to be built (stored, fetched, acknowledged) | submit receipts; read marks per Project |
+| Fit with DEC-0037 | an organization service outside the operator's estate | would bring a teammate's computer into the operator's estate, the kind of access DEC-0037 refuses |
+
+**Recommendation: passioncode-platform.** The board hub is the operator's agents' channel inside
+one estate; admitting a teammate's device there repeats, at a smaller scale, the exposure DEC-0037
+removed, and its units (Projects, threads kept as history) fit neither device-level authorization
+nor deletion at acknowledgement. The hosting backend serves organizations and their members by
+design and can be held to the guarantees below. The ask is filed on the board: project
+`passioncode-platform` (fd8b81cf), capability `change.request`, see the backlog row SB-575 for the
+message id.
+
+### 14.3 What the seat mailbox must guarantee
+
+1. **Authorization from Vesta's statements.** A request is signed by the device's Ed25519 key from
+   Vesta's directory. A `seat.offer`, `lease.extend` or `seat.recall` is taken only from a device
+   whose person holds the administrator role in the envelope's organization, to a device of a
+   member of the same organization; a `usage.report` or `seat.surrender` only along a thread an offer
+   opened, back to that offer's sender. A membership that ended or expired refuses the thread. Each
+   refusal is a typed code.
+2. **No plaintext.** It stores and forwards the envelope as given; it never holds a decryption key
+   and never needs one. Nothing in its logs or metrics carries `ct`.
+3. **Size and rate limits.** At most 64 KiB an envelope, a bounded inbox per device (for example 256
+   envelopes), rate limits per sender device and per organization, answered with `Retry-After`.
+4. **Retention.** An envelope is deleted when its recipient acknowledges it or when it expires, and
+   never kept longer than 7 days; nothing of it is kept afterwards but the audit row.
+5. **Idempotent submit.** By envelope `id`: the same bytes answer the stored receipt, other bytes
+   under the same `id` are refused.
+6. **Delivery receipts.** The sender reads, per envelope, `stored`, `fetched` and `acknowledged`
+   with times, or `expired`; a receipt it cannot read is `unknown`, never `delivered`.
+7. **Audit rows.** One row per submit, fetch, acknowledgement, expiry and refusal (kind, sender and
+   recipient device, thread, time, size, outcome; never payload), readable by the organization's
    administrators, and the rows about a device by its person.
+8. **Outbound only.** Both sides reach it over HTTPS; it never connects to a member's computer.
 
-Vesta never sees: a credential, a private key, a usage figure, a group or folder name, an account
-label or the provider account's e-mail, a session's content.
+## 15. Open questions
 
-## 15. Open questions for Vesta
+For Vesta:
 
-- Q1. The OAuth scope for devices and the relay (one scope, or `devices` and `relay` apart), and
-  whether an existing `me.organizations` grant can be widened without a new consent.
-- Q2. Is a device registered per person and organization, or per person across organizations?
-- Q3. Which role may send `seat.offer`: any administrator, or a separate permission an
-  administrator grants?
-- Q4. Does Vesta revoke a member's devices and refuse their threads when the membership ends, and
-  does it tell the sender (an envelope of its own, or a state in the device list)?
-- Q5. Fetch only, long-poll or server-sent events; the rate limits per device and organization.
-- Q6. The envelope size limit (64 KiB proposed) and the inbox size limit.
-- Q7. Retention of the audit log, and whether it is exported to the organization.
-- Q8. Can Vesta keep an append-only, publicly verifiable log of device keys, so a swapped key is
-  detectable beyond first-use pinning?
-- Q9. API versioning and the error vocabulary (typed codes, `Retry-After`).
+- V1. The exact fields of the X25519 and Ed25519 write, and the scope the `switchboard` app token
+  needs for it; whether one consent covers it.
+- V2. The format of the signed membership statement, its lifetime, Vesta's published verification
+  key and how that key rotates.
+- V3. Does a membership statement end, or get refused, as soon as a member leaves the organization,
+  and is a device revoked at the same time?
+- V4. Can the device directory be an append-only, verifiable log, so a swapped key is detectable
+  beyond first-use pinning?
+
+For the seat mailbox (passioncode-platform):
+
+- M1. Request authentication: a signature by the device key per request, or a token derived from
+  Vesta's statement; how it checks Vesta's statements.
+- M2. The API (submit, fetch from a cursor, acknowledge, receipts), versioning and the error
+  vocabulary.
+- M3. The limits: envelope size, inbox size, rates.
+- M4. Audit row retention and who reads it.
+- M5. Fetch only, long-poll or server-sent events.
 
 ## 16. Migration from ssh delegation
 
@@ -388,10 +454,12 @@ label or the provider account's e-mail, a session's content.
   [CLI.md](../../CLI.md); the MCP description of `switchboard_account_send` says the other machine
   is one of the operator's own.
 - The build (SB-575 waves):
-  - W1 device identity at connect, registration states, pinning and fingerprints (needs Q1, Q2).
-  - W2 the envelope library: seal, open, sign, check, replay state, with its tests (no Vesta needed).
-  - W3 the relay client against Vesta's mailbox (needs section 14 items 2 to 4), the cadence and
-    the failure states.
+  - W1 device identity at connect: keys written to Vesta's registry, membership statements,
+    registration states, pinning and fingerprints (needs V1, V2).
+  - W2 the envelope library: seal, open, sign, check, replay state, with its tests (needs no
+    service).
+  - W3 the relay client against the seat mailbox (needs section 14.3 and M1 to M3), the cadence,
+    receipts and the failure states.
   - W4 the seat flow: offer, accept into a group, extend, report, recall, surrender, decline,
     expiry, on the guest rules that exist today; the usage ceiling and the last-resort place
     (section 9a).
@@ -414,17 +482,18 @@ label or the provider account's e-mail, a session's content.
 - Keys: private keys are written only through the vault (a test that greps the data folder after
   registration finds no key bytes); a changed key in the device list stops sending and receiving
   until trusted.
-- Flow against an in-process fake Vesta: offer, accept into a chosen group, usage report, lease
+- Flow against an in-process fake Vesta (directory and statements) and a fake seat mailbox: offer, accept into a chosen group, usage report, lease
   extended, recall, surrender with the credential, provider check, account home; decline; an
   unanswered offer expires and the account comes home; a lease that lapses switches the seat off
   and the next extension turns it on; 30 days later the credential is removed.
-- Failures: Vesta unreachable reads `unreachable`, never an empty inbox; a submit whose answer is
+- Failures: the mailbox unreachable reads `unreachable`, never an empty inbox; Vesta unreachable
+  reads membership `unknown`, and nothing is offered or accepted on it; a submit whose answer is
   lost is resent with the same bytes and ends `recalled` once; a crash between fetch and apply
   applies the message once.
 - Authorization on receipt: a `usage.report` from a device that is not the thread's recipient, a
   `seat.recall` from a device that is not the thread's sender, a second `seat.offer` on a live
   thread are refused.
-- The fake Vesta asserts that no stored row contains the planted credential, label, folder or
+- The fake mailbox asserts that no stored row contains the planted credential, label, folder or
   e-mail; the relay's log lines pass the planted-identifier test of [ANALYTICS.md](../../ANALYTICS.md).
 - Ceiling: a request at or above the ceiling of any window is refused locally with `SEAT_CEILING`
   and never reaches the provider (a fake provider counts calls); a seat with unknown usage is not
