@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.125
+
 - The Sessions page hands sessions to Fabric (SB-580, Fabric's `fabric-session-links/1`): *New session…* opens Fabric's launch in a group's repository, *Open in Fabric* asks Fabric to continue a Claude Code session there, *Open* shows a session in Fabric, and *Open terminal* opens a shell in a session's folder, here or on another machine over ssh. Fabric asks you before it starts or moves anything; Switchboard never starts a session in Fabric itself.
 - `sessions --rows` answers callers that ask at the same moment from one read (SB-580). Fabric, Fabric Dashboards, the window and agents read it every few seconds; under load ten calls side by side took 8 to 9.7 s each where one took 0.2 s, past Fabric's 10 s deadline, which ended the call with a signal. A read now runs once at a time and its answer serves the next three seconds, unless a session was ended, closed, continued or restarted meanwhile.
 
