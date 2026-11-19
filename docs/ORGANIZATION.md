@@ -194,8 +194,9 @@ folders and never moves it on, lends it, gives it to an agent or makes it the or
 The teammate runs `claude` (or `codex`) in one of the group's folders; the request goes through
 Switchboard to the delegated seat.
 
-The lease keeps it honest: each read of the teammate's computer (every 15 minutes) extends it to
-48 hours ahead. If the administrator's computer cannot reach it for that long (and the teammate's
+The lease keeps it honest: the administrator's computer reads the teammate's every minute (its seats, and
+that group's sessions as ids and codes, SB-550) and extends the lease every 15 minutes to 48 hours
+ahead. If the administrator's computer cannot reach it for that long (and the teammate's
 Switchboard has run 15 minutes past it), the seat there is switched off and no longer renewed, but
 its sign-in is kept: the next read turns it on again, and a call back still takes the live
 sign-in. Thirty days after the lease ran out, the sign-in there is removed.

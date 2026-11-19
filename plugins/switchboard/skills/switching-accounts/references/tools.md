@@ -12,9 +12,9 @@ group's id is its `pool` (`default` is the default group). **Automatic switching
 names and fields call rotation. Say group and automatic switching to the person.
 
 `switchboard mcp --read-only` lists the 39 tools that only read (every tool under
-[Read tools](#read-tools)) and, since SB-517, the 13 write tools that also have a read form:
-`switchboard_capacity`, `switchboard_own_sign_in`, `switchboard_duty` (a dry run included),
-`switchboard_watchdog` (without `on` or `run`),
+[Read tools](#read-tools)) and, since SB-517, the 14 write tools that also have a read form:
+`switchboard_capacity`, `switchboard_own_sign_in`, `switchboard_boot_resume` (without `on`),
+`switchboard_duty` (a dry run included), `switchboard_watchdog` (without `on` or `run`),
 `switchboard_app` (`updates` and `login_item` without `enabled`), `switchboard_analytics`,
 `switchboard_balance`, `switchboard_feed`, `switchboard_anthropic_keys`,
 `switchboard_codex_route`, `switchboard_project_sources`, `switchboard_machine_set` (`keys`, and
@@ -22,7 +22,7 @@ names and fields call rotation. Say group and automatic switching to the person.
 as reads and answer only that form: a call with a field that changes something, or any other
 write tool, is refused with `isError: true` and `structuredContent.error.code` `read_only`, never
 as an unknown tool. A session Switchboard launches in isolated mode gets that set. The server
-lists 95 tools; each has a section below.
+lists 97 tools; each has a section below.
 
 Since SB-517 every call is checked against its tool's `inputSchema` before it runs (types,
 `required`, `enum`, `minimum` and `maximum`, `minLength` and `maxLength`, list items and size,
@@ -138,6 +138,13 @@ fixed it leaves the list on the next background pass. Read-only, also on a read-
 Since 0.7.84 (SB-366) `refused_there` also appears: an account on another machine whose copy the
 provider refused there at the last background read (`since` is that read's time); fix it with a
 sign-in on that machine, or call the account back with `switchboard_account_recall`.
+
+Since SB-550 (DEC-0033) three items name another machine (as `label` and `machine`; the sentence
+names none), each with `action.tool` `switchboard_machines`: `machine_unreachable` (its Switchboard
+did not answer three reads a minute apart: `failures`, `code`), and from its last read that
+worked, `machine_health` (its failing health checks, or its owner not running: `checks`) and
+`machine_sessions` (sessions there that need a person, a second copy or a board run gone quiet:
+`count`, `kinds`, `session_ids`; `action.window` `open_sessions`).
 ### `switchboard_anthropic_keys`: `name?` (string), `model?` (string)
 
 The Anthropic API keys agents run on directly (SB-390), each under a name the person chose
@@ -235,11 +242,12 @@ This Switchboard's health as one report, `agent-health/1` (SB-393), for a watche
 readings into incidents: `state` (the worst check) and `checks`, each `{id, area, state, count,
 fix}`. `state` is `ok`, `warn`, `fail` or `unknown` (never read as ok: `errors_today` is unknown
 while usage counts are off). Checks: `owner`, `sign_in`, `accounts`, `sessions_stuck`,
-`sessions_duplicate`, `sessions_gone`, `crashes` (a crash in the last day fails, in the week warns),
+`sessions_duplicate`, `sessions_gone`, `machines` (SB-550: another machine that stopped answering,
+a failing health check there or sessions there that need a person warn), `crashes` (a crash in the
+last day fails, in the week warns),
 `errors_today` (50 or more warn), `watchdog` (what the watchdog found: `fail` when Switchboard is
 down or silent; absent where no watchdog job runs, `unknown` only when its installed job's report
-is older than 15 minutes).
-`fix.tool` names the tool that repairs it. Counts and kinds
+is older than 15 minutes). `fix.tool` names the tool that repairs it. Counts and kinds
 only: no account, folder, session id or text.
 ### `switchboard_bugs`: no arguments
 
@@ -651,7 +659,7 @@ this machine's ssh key there) keeps it as a guest in the group `pool` names (nev
 group), pinned to this machine's settings signing key. There it is never moved on, given to an agent,
 lent, shared or made the ordinary sign-in, and only this machine calls it back
 (`switchboard_account_recall`). `lease_hours` (1 to 720, default 48): this machine's background
-read of that machine (every 15 minutes) extends it; past it the copy there is switched off but
+read of that machine extends it every 15 minutes (the read itself runs every minute, SB-550); past it the copy there is switched off but
 keeps its sign-in for 30 days (the next read turns it on again, and a call back takes the live
 sign-in), then the sign-in there is removed. The teammate's key line pins the one group there
 (`ssh-serve --pool`). The answer carries `delegated: {lease_hours}`.
@@ -698,11 +706,17 @@ also reads each machine's Switchboard over ssh, all at once, 20 seconds per call
 Reads only.
 
 
-Without `live` (SB-366, DEC-0017) each machine carries `read`: `{as_of, tried_at, reason, failures}`
-of the owner's last background read (every 15 minutes while the owner runs, one hour after three
-failures in a row; `reason` is `unreachable`, `refused` or `unreadable`), and each account `there`:
-`{used_percent, usage_status, enabled, as_of, tried_at, reason}` of its copy on that machine, or
-null before a first read. The numbers are shown, never used to switch or route here.
+Without `live` (SB-366, DEC-0017; SB-550, DEC-0033) each machine carries `read`: `{as_of,
+tried_at, reason, failures, call, sessions, health}` of the owner's last background read (every
+minute while the owner runs, through that machine's own Switchboard over ssh, `switchboard
+remote-status`; every five minutes after three failures in a row; `reason` is `unreachable`,
+`refused` or `unreadable`; `call` is `status`, or `accounts` for an older Switchboard there;
+`sessions` is `{counts, troubled, degraded}`, its rows per group and the rows that need a person by
+`why` and ids; `health` is `{state, failing}`; `health_since` and `sessions_since` are when a read
+that worked first saw a failing check, or sessions there that need a person, null otherwise), and
+each account `there`: `{used_percent,
+observed_at, usage_status, enabled, as_of, tried_at, reason}` of its copy on that machine, or null
+before a first read. The numbers are shown, never used to switch or route here.
 ### `switchboard_machine_set`: `action`, `apply?`, `account_id?`, `on?`, `machine?`, `key?`, `decision?`
 
 Only when the operator asks. `adopt`: places each account marked used elsewhere and in no machine
@@ -893,6 +907,23 @@ renewed in it, a launch copies no MCP sign-in out of the ordinary home's credent
 session duty officer looks only at sessions in Switchboard's own homes. Claude Desktop is outside
 Switchboard either way. Without `on` it reads `{own_sign_in: "on" | "off", on}`; `on` changes it, only
 when the operator asks. Kept in `<data>/own-sign-in`.
+
+### `switchboard_boot_resume`: `on?`
+
+Continuing sessions after this computer restarts (SB-450, DEC-0030). The owner's first pass after
+a restart continues each Claude Code session the restart cut, as itself (`claude --resume <id>`
+with a prompt to go on) in a session host of its own, attachable by its launch id: Switchboard
+launched it, it was running at the owner's last look before the restart, the restart cut it in a
+turn (its transcript written after its last turn ended, in the two hours before the restart and not
+since, its last words not the person's `/exit`), it has no end (or one by the shutdown's signal),
+nobody closed it on purpose (the person, the duty officer, a session host), it is not a dispatched
+board run, and no process, session host or later launch holds it; with the person's own sign-in
+off, only sessions in Switchboard's own homes; a first pass more than six hours after the restart
+continues nothing (`too_late`). At most five after one restart, newest first, inside the session
+pool; each intent and outcome is journalled in `<data>/boot-resume.jsonl` and never repeated.
+Without `on` it reads `{settings: {on}, boot_time, last_look, window_minutes, max_per_boot, recent,
+supported}`; `on` changes it, only when the operator asks. Kept in `<data>/boot-resume.json`, on
+when absent.
 
 ### `switchboard_duty`: `on?`, `stuck_minutes?`, `waiting_minutes?`, `idle_minutes?`, `max_age_hours?`, `run?`, `dry_run?`
 

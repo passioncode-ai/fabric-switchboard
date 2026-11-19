@@ -118,42 +118,6 @@ pub fn owner_state(
     }
 }
 
-/// When this computer started (Unix seconds), or `None` where it cannot be read.
-#[cfg(target_os = "macos")]
-pub fn boot_time() -> Option<i64> {
-    let mut tv = libc::timeval {
-        tv_sec: 0,
-        tv_usec: 0,
-    };
-    let mut size = std::mem::size_of::<libc::timeval>();
-    let name = c"kern.boottime";
-    // SAFETY: `kern.boottime` answers one `timeval`; the buffer and its size are that.
-    let done = unsafe {
-        libc::sysctlbyname(
-            name.as_ptr(),
-            (&mut tv as *mut libc::timeval).cast(),
-            &mut size,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    (done == 0 && size == std::mem::size_of::<libc::timeval>() && tv.tv_sec > 0)
-        .then_some(tv.tv_sec)
-}
-/// When this computer started (Unix seconds): `btime` of `/proc/stat`.
-#[cfg(target_os = "linux")]
-pub fn boot_time() -> Option<i64> {
-    std::fs::read_to_string("/proc/stat")
-        .ok()?
-        .lines()
-        .find_map(|l| l.strip_prefix("btime "))
-        .and_then(|v| v.trim().parse().ok())
-}
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub fn boot_time() -> Option<i64> {
-    None
-}
-
 /// The acts of `duty.jsonl` left half done for at least `ACT_SECONDS`. The duty officer's own by
 /// its own rule (`duty::interrupted`: the newest intent per session with no outcome that settles
 /// it, under an hour old, which is as long as its next check finishes a cut act), so a warning
@@ -394,7 +358,13 @@ pub async fn once(root: &Path, now: i64) -> Value {
         std::time::Duration::from_secs(crate::control::PROBE_SECONDS),
     )
     .await;
-    let owner = owner_state(&probe, run.as_ref(), crate::bugs::alive, boot_time(), now);
+    let owner = owner_state(
+        &probe,
+        run.as_ref(),
+        crate::bugs::alive,
+        crate::boot_resume::boot(),
+        now,
+    );
     let acts = unfinished_acts(&crate::duty::journal(root), now, |id| run_open(root, id));
     let watch: Value = switchboard_core::private_fs::read_private(
         &root.join(crate::session_watch::FILE),
@@ -517,7 +487,9 @@ mod tests {
             "not_answering"
         );
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        assert!(boot_time().is_some_and(|b| b > 0 && b <= crate::session_watch::now()));
+        assert!(
+            crate::boot_resume::boot().is_some_and(|b| b > 0 && b <= crate::session_watch::now())
+        );
     }
 
     #[test]

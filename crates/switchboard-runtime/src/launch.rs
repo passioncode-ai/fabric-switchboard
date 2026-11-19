@@ -1501,6 +1501,33 @@ pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
     }
     Ok(())
 }
+/// SB-450 (review round 3 of #836): whether a home's `.session-pid` marker cannot name the
+/// process that holds `pid` now: it was written before this boot, or (Unix) the process is younger
+/// than the marker by more than `PID_REUSE_MARGIN` (the pid was reused). An unknown age keeps it.
+pub(crate) fn marker_outlived(marker: &Path, pid: u32) -> bool {
+    let Ok(written) = fs::symlink_metadata(marker).and_then(|m| m.modified()) else {
+        return false;
+    };
+    let written_at = written
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    if crate::boot_resume::boot().is_some_and(|boot| written_at < boot) {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        SystemTime::now()
+            .duration_since(written)
+            .ok()
+            .zip(process_age(pid))
+            .is_some_and(|(marker_age, age)| pid_reused(marker_age, age))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
 /// Whether a live session holds `home`: its marker names a process that is still the session
 /// (the pid alive and at least as old as the marker; on Windows, the pid with its creation
 /// time). Reads only. An unreadable or invalid marker is an error, never "not running".

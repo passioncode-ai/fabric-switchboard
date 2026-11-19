@@ -344,6 +344,7 @@ export function createDemoAdapter(): Adapter {
   const demoShare = (cap: number) => demoBoard ?? Math.min(cap, Math.max(1, Math.ceil(cap / 4)));
   let demoDutyOn = true;
   let demoOwnSignIn = true;
+  let demoBootResume = true;
   let balanceGroups: string[] = []; let balanceAllNew = false; let balanceBackup: string[] = [];
   const balanceStatus = () => {
     const pools = ['default', ...(state.projects ?? []).map((p) => p.pool)];
@@ -496,7 +497,7 @@ export function createDemoAdapter(): Adapter {
     },
     async recallAccount(id, _from, pool) { await pause(); const item = account(id); delete state.elsewhere?.[id]; delete state.locations?.[id]; item.enabled = true; if (item.pool.startsWith('machine_')) { item.pool = pool ?? state.returns_to?.[id] ?? 'default'; delete state.returns_to?.[id]; log('machine', id, 'left'); } else log('account.updated', id, 'Called back from another machine'); },
     // SB-366: the last background read; `?remote=failed` shows a machine that did not answer.
-    async machinesList() { await pause(); const failed = new URLSearchParams(location.search).get('remote') === 'failed'; const at = now() - 12 * 60; return { machines: (state.machines ?? []).map((m) => ({ pool: m.pool, name: m.name, read: { as_of: at, tried_at: failed ? now() - 60 : at, reason: failed ? 'unreachable' : null, failures: failed ? 1 : 0 }, accounts: state.accounts.filter((a) => a.pool === m.pool).map((a) => ({ id: a.id, there: { used_percent: 42, usage_status: 'ok', enabled: true, as_of: at, tried_at: failed ? now() - 60 : at, reason: failed ? 'unreachable' : null } })) })) }; },
+    async machinesList() { await pause(); const failed = new URLSearchParams(location.search).get('remote') === 'failed'; const at = now() - 12 * 60; return { machines: (state.machines ?? []).map((m) => ({ pool: m.pool, name: m.name, read: { as_of: at, tried_at: failed ? now() - 60 : at, reason: failed ? 'unreachable' : null, failures: failed ? 3 : 0, call: 'status', sessions: { counts: { needs_you: 0, running: 2, waiting: 1, ended: 4 }, troubled: [] }, health: { state: 'ok', failing: [] } }, accounts: state.accounts.filter((a) => a.pool === m.pool).map((a) => ({ id: a.id, there: { used_percent: 42, observed_at: at - 120, usage_status: 'ok', enabled: true, as_of: at, tried_at: failed ? now() - 60 : at, reason: failed ? 'unreachable' : null } })) })) }; },
     // SB-473, SB-474: the known machines and a machine's groups; `?remote=failed` makes the read fail.
     async targets() { await pause(); return { targets: (state.machines ?? []).map((m) => ({ machine: m.name, aliases: m.aliases ?? [], known_by: ['moves'], last_at: m.created_at, program: null })) }; },
     async remoteStatus(target) { await pause(); if (new URLSearchParams(location.search).get('remote') === 'failed') throw new Error('The other machine did not answer over ssh.'); return { target, groups: [{ pool: 'passioncode', name: 'PassionCode', organization: 'PassionCode.ai', accounts: 3, folders: 4 }, { pool: 'apps', name: 'Apps', organization: null, accounts: 1, folders: 2 }] }; },
@@ -806,6 +807,12 @@ export function createDemoAdapter(): Adapter {
       // A board run the pool would admit now ends the demo's wait, as `dispatch_refusals::admitted` does once one starts.
       if (admitted) demoRefused = null;
       return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30, on_limit_stop: 1, on_waits: 1, board_share: share, board_share_set: demoBoard !== null, board_share_clamped: clamped, board_used: 1, board_admitted: admitted, waiting: demoRefused?.count ?? 0, refused_waiting: demoRefused };
+    },
+    async bootResume(on) {
+      await pause(); if (typeof on === 'boolean') demoBootResume = on;
+      const now = Math.floor(Date.now() / 1000);
+      return { settings: { on: demoBootResume }, boot_time: now - 3600, window_minutes: 120, max_per_boot: 5, supported: true,
+        recent: [{ at: now - 3500, boot: now - 3600, session: 'demo-s7', folder: '/Users/demo/Code/site', outcome: 'continued', new_launch_id: 'demo-launch-7' }] };
     },
     async ownSignIn(on) { await pause(); if (typeof on === 'boolean') demoOwnSignIn = on; return { own_sign_in: demoOwnSignIn ? 'on' : 'off', on: demoOwnSignIn }; },
     async duty(change) {

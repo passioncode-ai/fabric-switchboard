@@ -365,8 +365,9 @@ impl Pass {
                 crate::stop_spool::done(&file);
             }
         }
-        // SB-366 (DEC-0017): the accounts on other machines, read over ssh every 15 minutes on a
-        // thread of their own; nothing at all without a machine group.
+        // SB-366 (DEC-0017), SB-550 (DEC-0033): each machine group's Switchboard, its accounts,
+        // sessions and health read over ssh every minute in one call, on a thread of their own;
+        // nothing at all without a machine group.
         if let Ok(snapshot) = runtime.store.snapshot() {
             crate::remote_usage::tick(&runtime.root, &snapshot, time);
             // SB-403 (DEC-0025): a seat another machine delegated here whose lease ran out, once

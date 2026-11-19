@@ -99,7 +99,7 @@ Behaviour and decisions: [PLAN-0.4](PLAN-0.4.md). Code: `crates/switchboard-core
 - **Statistics (SB-145, SB-147).** The proxy counts each relayed request under `day\taccount\tpool\tclient\tfolder` (`switchboard_proxy::stats`: UTC day, account id, pool, client family from `user-agent` such as `claude-code`, `codex`, `opencode`, `hermes`, else `other`, and the group folder the request came from, empty when unknown; a 0.6.52 key without the folder still reads): `requests`, `ok`, `limited`, `failed`, and `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` as the provider reported them in its own response. The folder (SB-147) is the folder whose own capability the request presented, else the deepest group folder holding the folder the request names (`stats::folder_hint`: the newest Codex `<cwd>`, or Claude Code's `Working directory:` line in the body's first MiB; a byte scan, nothing of the body kept), else that named folder itself (SB-157: a session outside every group, or an agent Switchboard launched on a key), which the statistics resolve through Git to the repository whose checkout holds it (`ProjectIndex::with_strays`). The owner passes every group folder with its pool (`ProxyHandle::set_stat_folders`) wherever it sets the folders' capabilities. A 429 that moved (SB-98) counts once on the refusing account; a network failure counts as failed. `ProxyHandle::take_statistics()` hands the counts over and clears them. The owner adds them to `statistics.json` (0600, `{version: 1, tallies}`, 90 days, at most 50 000 rows) every pass, writing at most every 15 min and at stop; an unreadable file starts empty. `Statistics { days? }` (1 to 90, default 30; read fast path, offline reads the file) answers `{days, from, to, since, total, groups[{pool, name}], projects[{project, name, groups[{pool, name}]}], accounts[{account_id, label, provider, kind}], agents[{agent}], routes[group, project, project_name, account and agent], by_day[{day, groups[{pool, requests, tokens}]}]}`, each row with the counts, busiest first, and `switching` (WF-5.3, SB-367: `digest::switching_shares` over the daily operations digests of the last seven closed UTC days: `days` counted, `rotations`, `rotations_failed`, `automatic_switch_failed_share` (`rotation` failed over every outcome), `limit_stops` (`recovery_hook` ok), `limit_stops_resumed` (`recovery_continued` ok), `limit_stop_resumed_share`; a share with nothing to divide is null, never 0; test `digest::tests::switching_shares_read_the_closed_days_and_say_null_when_nothing_happened`). A project (`statistics::ProjectIndex`, built from `roots::tree` per group) is a repository with all its checkouts, keyed by its `origin` identity, or a folder outside Git keyed by its path (DEC-0089 AT-6, AT-7, AT-15); `project: ""` holds requests that named no folder. Not counted: an off-project Codex request passed through on the person's own sign-in (SB-143), and anything that does not go through the proxy. No prompt, answer or header value is kept; folder paths stay in this file on this computer.
 - Only `Owner::native` reads the ordinary CLIs' sign-in; `Owner::start` (tests, smoke) reports current accounts as unavailable.
 - `switchboard mcp [--read-only]`: stdio JSON-RPC 2.0 per the tool table in PLAN-0.4. Tool failures are results with `isError: true`; protocol faults are JSON-RPC errors (-32700 parse/oversize > 1 MiB, -32600 invalid, -32601 method, -32602 unknown tool or `arguments` not an object).
-- **MCP arguments, read forms and refusals (SB-517).** Every `tools/call` is checked against the tool's `inputSchema` before its handler runs (`mcp::validate`: `type`, `required`, `additionalProperties: false`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength`, `items`, `minItems`, `maxItems`; `every_schema_stays_inside_the_checked_keywords` keeps every schema inside that set). A fault answers `isError: true` with `structuredContent.error = {code: "invalid_arguments", field, message}` and runs nothing. A `decision` stays the four fields `spend::Decision` reads (`by`, `instruction`, `at`, `source`; the runtime denies any other), so the schema check and the runtime refuse the same bodies. Twelve write tools have a read form (`mcp::READ_FORMS`; `mcp::writes` decides per call from the fields given): a read-only server lists them with read annotations and a sentence saying so, and answers that form. A write tool, or a write form, on a read-only server answers `isError: true` with `error.code` `read_only` instead of "Unknown tool.". The full server lists and annotates every tool as before. `switchboard_launch_keys` only reads and is listed as a read. A tool that would answer a refusal as data (`{state: "refused", reason}`, as `remote_dispatch::start` and a dispatch at capacity answer the CLI) answers an MCP caller `isError: true` with `error.code` its `reason`; no tool returns that shape yet (dispatch has no MCP tool, SB-482), so the mapping guards the tools to come, and the CLI's JSON is unchanged. The window's *Remove* of a Kimi Code account and of the OpenRouter key have tools: `switchboard_kimi_remove {id}` (`Operation::KimiRemove`) and `switchboard_openrouter_remove {pool?, decision?}` (`Operation::AgentKeyRemove`, `by: mcp`, wrapped in the operator's words when given), both annotated `destructiveHint` and `idempotentHint` and answering `{removed}`. Calls wait out a held store lock for up to 8 s, asking the owner first (`STORE_WAIT`, SB-181).
+- **MCP arguments, read forms and refusals (SB-517).** Every `tools/call` is checked against the tool's `inputSchema` before its handler runs (`mcp::validate`: `type`, `required`, `additionalProperties: false`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength`, `items`, `minItems`, `maxItems`; `every_schema_stays_inside_the_checked_keywords` keeps every schema inside that set). A fault answers `isError: true` with `structuredContent.error = {code: "invalid_arguments", field, message}` and runs nothing. A `decision` stays the four fields `spend::Decision` reads (`by`, `instruction`, `at`, `source`; the runtime denies any other), so the schema check and the runtime refuse the same bodies. Thirteen write tools have a read form (`mcp::READ_FORMS`; `mcp::writes` decides per call from the fields given): a read-only server lists them with read annotations and a sentence saying so, and answers that form. A write tool, or a write form, on a read-only server answers `isError: true` with `error.code` `read_only` instead of "Unknown tool.". The full server lists and annotates every tool as before. `switchboard_launch_keys` only reads and is listed as a read. A tool that would answer a refusal as data (`{state: "refused", reason}`, as `remote_dispatch::start` and a dispatch at capacity answer the CLI) answers an MCP caller `isError: true` with `error.code` its `reason`; no tool returns that shape yet (dispatch has no MCP tool, SB-482), so the mapping guards the tools to come, and the CLI's JSON is unchanged. The window's *Remove* of a Kimi Code account and of the OpenRouter key have tools: `switchboard_kimi_remove {id}` (`Operation::KimiRemove`) and `switchboard_openrouter_remove {pool?, decision?}` (`Operation::AgentKeyRemove`, `by: mcp`, wrapped in the operator's words when given), both annotated `destructiveHint` and `idempotentHint` and answering `{removed}`. Calls wait out a held store lock for up to 8 s, asking the owner first (`STORE_WAIT`, SB-181).
 - Desktop: `agent_setup() -> { cli_path, bundled_cli, linked_cli, can_link, commands }`; `link_cli()` creates `~/.local/bin/switchboard` → bundled CLI and never replaces a file or a foreign link. The macOS build embeds the signed CLI at `Contents/MacOS/switchboard`, byte-identical to the archived CLI.
 
 ## Other agents (0.6)
@@ -1324,6 +1324,26 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   (`launches::tests::a_nested_session_in_the_same_home_never_overwrites_its_parent`). The hook
   sends `source` only for those three values; an owner from before it refuses the field, and the
   hook sends the start once more without it, which that owner records as before.
+- **The session a launch's own process holds wins (SB-451, 2026-11-18).** A start hook reaches the
+  owner in the order its processes run it, and a session's id can change with no start hook:
+  launch 38e41114 (0.7.117, a hosted console in the `tokens` group) recorded a session whose
+  transcript never existed while its process held another, so its history, its continuation and
+  every reader of its transcript looked at the wrong one. `launches::reconcile` corrects a record
+  from the process table: each launch's own process is the earliest Claude Code process the scan
+  joins to it (through its home's `.session-pid` or its host, two parents up; a session it runs
+  itself, a nested `claude -p`, is a child and starts later), and its session is the one that
+  process's `sessions/<pid>.json` names. A record naming another gets `provider_session_id` and
+  `transcript` (the session's `projects/<folder>/<id>.jsonl` in that file's config folder, or
+  null while it is not written) from it, the session it named moves to `nested_sessions`, and
+  `session_corrected_at` says when; logged once per pass as `launch_session_corrected` with a
+  count. It runs on every fresh read of the session watch (each minute, and a tree read older than
+  15 s) and before `sessions show <launch_id>` answers; a scan that could not read the process
+  table corrects nothing. A record that ended, was launched before this boot, or whose process
+  started more than 60 s before its `launched_at` is never corrected (`launches::may_correct`: that
+  process cannot be its own, a stale marker or a reused pid joined it). Its own turns count from
+  the correction on. Evidence:
+  `a_record_naming_another_session_than_its_own_process_holds_is_corrected`,
+  `a_record_a_process_could_not_belong_to_is_never_corrected`.
 - **Where it went.** `continued_as` is set once, where the successor is known, and only to a
   launch that started: a launch naming a
   `parent` sets `{kind: "launch", id}` on it; a continuation of a workflow sets it on the latest
@@ -3314,24 +3334,75 @@ replayed answer proves nothing).
 
 ### Background reads of other machines (SB-366, DEC-0017)
 
+Since SB-550 ([DEC-0033](DECISIONS.md#dec-0033-each-machine-is-read-every-minute-through-its-own-switchboard-its-sessions-and-health-with-its-accounts)) every minute, with each machine's sessions and health.
 `remote_usage::tick` runs from the owner's background pass after the dispatch sweep. With no
-machine group it returns at once and reads nothing. Otherwise, when a machine is due (15 minutes
-after its last try, or an hour once `failures >= 3`) and no read runs (`BUSY`), it starts one
-thread that reads every due machine one after another with `read_accounts`: a single
-`<switchboard> --json accounts list` over `ssh -o BatchMode=yes -o ConnectTimeout=15`, given up
-after 20 seconds. Each answer is matched to this machine's accounts of that machine group by label
-and provider, as `machines --live` matches, and written to `remote-usage.json` (0600):
-`{machines: {<name>: {tried_at, as_of, reason, failures, accounts: [{id, used_percent,
-usage_status, enabled}]}}}`. A failure keeps `as_of` and the accounts, sets `reason` (`unreachable`,
-`refused` for a refused target or path, `unreadable`) and counts `failures`; a success resets it. A
-machine group that is gone loses its entry. One log line `remote_usage` with `read` and `failed`
-counts per thread. `machines list` (no ssh) adds each machine's `read` and each account's `there`
-(`remote_usage::view`); Attention lists `refused_there` when an account's last read says
-`usage_status: rejected`. Nothing here selects, rotates, lends or renews (DEC-0013). Evidence:
-`remote_usage::tests::a_read_keeps_each_copy_there_and_a_failure_keeps_the_last_good_one`,
-`three_failures_in_a_row_read_a_machine_once_an_hour_and_a_gone_group_is_forgotten`,
+machine group it returns at once and reads nothing. Otherwise, when a machine is due (`EVERY_SECONDS`,
+60 seconds after its last try; `BACKOFF_SECONDS`, five minutes, once `failures >= 3`) and no read
+runs (`BUSY`), it starts one thread that reads every due machine one after another with
+`read_remote`, each ssh call `ssh -o BatchMode=yes -o ConnectTimeout=15` given up after 20 seconds.
+Sessions are never contacted: only each machine's own Switchboard is asked.
+
+- **One call.** `<switchboard> --json remote-status` (CLI `switchboard remote-status`, composed from
+  `Operation::Snapshot`, `Operation::SessionRows` and `Operation::Health`, so it works beside an
+  owner that was not restarted yet) answers `{schema: "remote-status/1", version, accounts, sessions,
+  health}`: `accounts` as `remote_usage::accounts_answer` cuts them (label, provider, enabled,
+  `usage.used_percent`, `usage.observed_at`, `usage_health.status`); `sessions` as
+  `remote_usage::sessions_digest` cuts the Sessions page's rows (`counts` for every group; `rows`
+  of every group but `ended`, at most 100, each `id`, `group`, `why`, `agent`, `launch_id`,
+  `session_id`, `since`; `degraded` codes; never a folder, an account label, a group or a task);
+  `health` the `agent-health/1` report. A part that could not be read is null; the accounts are
+  required.
+- **An older Switchboard there.** A refusal reading `Invalid arguments. Run switchboard --help.`
+  (a CLI before the call) or the restricted entry's `NOT_ALLOWED` sentence (an `ssh-serve` before
+  it) is `status_unknown`: the same read goes on with `accounts list`, then `sessions --rows`
+  (not through a restricted entry, which refuses it: kept as `restricted`, so the next reads never
+  ask it), the machine is read every `OLDER_EVERY_SECONDS` (15 minutes) while it is that old, and
+  asked the one call again `STATUS_RETRY_SECONDS` (an hour) later (`status_unknown_at`). A refusal
+  in its own words (`{"ok":false,...}`) is `refused` (`READ_REFUSED`); any other failure is
+  `unreachable`.
+- **A teammate's restricted entry.** `ssh-serve` answers `remote-status` cut to the seats the
+  calling key delegated into its group (`accounts_view`) and the session rows whose `pool` is that
+  group (`sessions_digest(rows, Some(pool))`), with `health: null`.
+- **The file.** Each answer is matched to this machine's accounts of that machine group by label
+  and provider, as `machines --live` matches, and written to `remote-usage.json` (0600, at most
+  1 MiB): `{machines: {<name>: {tried_at, as_of, reason, failures, accounts: [{id, used_percent,
+  observed_at, usage_status, enabled}], sessions?: {counts, rows, degraded}, health?: {state,
+  checks: {<id>: <state>}}, call?, status_unknown_at?, restricted?, leases_at?, lease_failed?,
+  health_since?, sessions_since?}}}` (`health_since` and `sessions_since`: when a read that worked
+  first saw a failing check, or sessions there that need a person; cleared by a read without it). Every field read from the
+  other machine is checked: a code is a lowercase word of at most 40 characters, an id at most 160
+  of letters, digits and `:_.-`; a row with a field that is neither is dropped
+  (`SessionsRead::from_answer`, `HealthRead::from_answer`). A failure keeps `as_of`, the accounts,
+  the sessions and the health, sets `reason` (`unreachable`, `refused` for a refused target or
+  path or a refusal in the other Switchboard's words, `unreadable`) and counts `failures`; a success
+  resets it. Its failing checks and troubled sessions keep naming it through one or two failed
+  reads, and stop once `failures >= 3`, when `machine_unreachable` takes over. A machine group that is gone
+  loses its entry. One log line `remote_usage` with `read` and `failed` counts per thread.
+- **Leases (SB-403).** A machine that answered gets the leases of the seats delegated to it
+  extended (`extend_leases`) when `leases_at` is older than `LEASE_EVERY_SECONDS` (15 minutes,
+  DEC-0025's cadence); every try sets `leases_at`, and one that left a seat unextended
+  (`lease_failed`) is tried again after `LEASE_RETRY_SECONDS` (five minutes).
+- **What reads it.** `machines list` (no ssh) adds each machine's `read` (`machine_view`: `as_of`,
+  `tried_at`, `reason`, `failures`, `call`, `health_since`, `sessions_since` (when a read that worked
+  first saw a failing check, or sessions there that need a person; null otherwise), `sessions: {counts, troubled, degraded}` with the rows
+  that need a person, `health: {state, failing}`) and each account's `there` (`remote_usage::view`,
+  with `observed_at` and `listed`, whether its copy was in the last answer); the window's account row shows `there` (SCN-092 step 8); Attention lists
+  `refused_there` when an account's last read says `usage_status: rejected`, and the machine
+  reasons below. Nothing here selects, rotates, lends or renews (DEC-0013).
+- **The window.** It reads `machines list` again each minute while Accounts or Groups is on screen
+  (`backgroundReads`), and when the owner wrote the file: the app's 15-second look stats
+  `remote-usage.json` and emits `machines-changed` when its stamp moved (`remote_stamp`).
+
+Evidence: `remote_usage::tests::a_read_keeps_each_copy_there_and_a_failure_keeps_the_last_good_one`,
+`three_failures_in_a_row_slow_the_reads_and_a_gone_group_is_forgotten`,
+`a_status_read_keeps_sessions_and_health_as_ids_and_codes_only`,
+`an_older_switchboard_is_read_with_the_older_calls`,
+`leases_are_extended_every_fifteen_minutes_not_every_read`,
 `nothing_starts_on_a_computer_without_machine_groups`,
-`attention::tests::a_copy_the_provider_refused_on_its_machine_is_listed_from_the_last_read`.
+`attention::tests::a_copy_the_provider_refused_on_its_machine_is_listed_from_the_last_read`,
+`attention::tests::a_silent_machine_its_failing_health_and_its_troubled_sessions_are_listed`,
+`ssh_serve::tests::the_one_minute_read_shows_only_the_seats_and_the_groups_sessions`,
+`suggestions::tests::the_remote_stamp_moves_with_the_file`.
 ## MCP sign-ins across Claude homes (SB-358, SB-359, 2026-11-14)
 
 Claude Code keeps each MCP server's OAuth sign-in in its credential item, keyed
@@ -3405,9 +3476,12 @@ WF-3.1). Code: [attention.rs](../crates/switchboard-runtime/src/attention.rs).
   | `session_duplicate` | the one-minute watch's `duplicate` finding (SB-388) | `switchboard_session_close_copy` | `close_copy` |
   | `session_stuck` | the watch's `stuck` finding: a board run quiet for 30 minutes, its log included (SB-379, SB-407); `launch_id` the run's | `switchboard_dispatch_stop` | `dispatch_stop` |
   | `session_gone` | the watch's `gone` finding of a dispatched run here: its process ended with no end recorded (SB-407); `launch_id` the run's; `action.if_gone: true` | `switchboard_dispatch_stop` with `if_gone` | `dispatch_stop` |
-  | `session_continuable` | the watch's `gone` finding of a launch that is not a dispatched run, whose Claude Code session (`session_id`, the record's `provider_session_id`) was cut in a turn: its folder is here, no live process holds it, its transcript was written more than `CUT_MARGIN_SECONDS` (30) after the record's `last_turn_at` (else its start) and its last lines are not the person's `/exit` or `/quit` (`session_watch::cut_turn`); a session closed on purpose in the last day (a `resumable.jsonl` line, a duty officer's act in `duty.jsonl`; `session_watch::closed_on_purpose`) is not offered, since a Terminal launch records no end of its own (`session_watch::offer`, SB-509; tests `only_a_turn_cut_by_the_process_ending_is_offered_never_a_session_ended_on_purpose`, `a_session_closed_on_purpose_is_not_offered`); offered once per session: `continue-offers.json` records it when first offered and takes it once the session runs again or is continued (`session_watch::continued`), so it is never offered again; `action.command` `switchboard sessions continue <session>` | `switchboard_session_continue` | `continue_session` |
+  | `session_continuable` | the watch's `gone` finding of a launch that is not a dispatched run, whose Claude Code session (`session_id`, the record's `provider_session_id`) was cut in a turn: its folder is here, no live process holds it, its transcript was written more than `CUT_MARGIN_SECONDS` (30) after the record's `last_turn_at` (else its start) and its last lines are not the person's `/exit` or `/quit` (`session_watch::cut_turn`); a session closed on purpose in the last day at or after its launch began (a `resumable.jsonl` line, a duty officer's act in `duty.jsonl`; `session_watch::closed_on_purpose`, compared with the finding's `launched_at` by `session_watch::closed_since`: a close before the launch was the session closed and then continued as it) is not offered, since a Terminal launch records no end of its own (`session_watch::offer`, SB-509; tests `only_a_turn_cut_by_the_process_ending_is_offered_never_a_session_ended_on_purpose`, `a_session_closed_on_purpose_is_not_offered`); offered once per session: `continue-offers.json` records it when first offered and takes it once the session runs again or is continued (`session_watch::continued`), so it is never offered again; `action.command` `switchboard sessions continue <session>` | `switchboard_session_continue` | `continue_session` |
   | `token_rotated` | `proxy-rotated.json` names when the proxy took a new port and token because its port was taken (SB-269), and the live Claude Code or Codex sessions started before then that run through the proxy (a `managed` launch, a Claude Code session in a folder whose route `bindings.json` records, a Codex session in a group folder while the Codex route is on) are listed with `count`, `sessions` (`pid`, `agent`, `folder`, `launch_id`) and `since` (the rotation); the file is removed once the process table shows none (`token_rotation::sessions`, SB-509). Nothing restarts by itself: the fix is a restart wave the person or agent plans and applies; `action.command` `switchboard sessions restart plan` | `switchboard_sessions_restart_plan` | `restart_wave` |
   | `dispatch_refused` | board runs refused `at_capacity` that still wait (SB-412, SB-417: since the pool last admitted a board start, with no one-hour cutoff): one item with `count`, `since` (the first refusal that waits), `last_at` (the newest), `newest_request`, `freed` and `freed_at` (a session ended since, read by the one-minute watch) | `switchboard_capacity` | `open_capacity` |
+  | `machine_unreachable` | a machine group's last `failures >= 3` reads (a minute apart) failed (SB-550); `label` and `machine` the machine's name, `machine_pool` its group, `failures`, `code` (the last `reason`); `since` the last read that worked, or null | `switchboard_machines` | `open_machines` |
+  | `machine_health` | from a machine's last read that worked, its health checks that `fail`, or its `owner` check not `ok` (SB-550, `MachineRead::failing_checks`); `checks` lists their ids; `since` when a read that worked first saw it (`health_since`); kept through one or two failed reads | `switchboard_machines` | `open_machines` |
+  | `machine_sessions` | from a machine's last read that worked, its session rows in `needs_you` whose `why` is `duplicate` or `stuck` (SB-550, `MachineRead::troubled_sessions`; a `gone` run is history there, as its own health reads `sessions_gone`); `count`, `kinds` (the whys), `session_ids`; `since` when a read that worked first saw the trouble (`sessions_since`) | `switchboard_machines` | `open_sessions` |
 
   The session reasons are listed first (`session_duplicate`, `session_stuck`, `session_gone`),
   named by their folder. A dispatched run's item also carries `action.command`, the CLI act
@@ -3440,7 +3514,9 @@ WF-3.1). Code: [attention.rs](../crates/switchboard-runtime/src/attention.rs).
   the board under its share). The CLI text adds "Board runs waiting at the limit: N, the first
   refused at <UTC time>". Tests `dispatch_refusals::tests::*` (with
   `refused_board_starts_wait_past_the_hour_until_the_pool_admits_one`), `attention::tests::dispatches_refused_at_the_session_limit_are_one_item_with_their_count`. Health (`agent-health/1`) names
-  `switchboard_dispatch_stop` for `sessions_stuck` and `sessions_gone` (still `ok`: history).
+  `switchboard_dispatch_stop` for `sessions_stuck` and `sessions_gone` (still `ok`: history), and
+  counts the three machine reasons in the check `machines` (area `connection`, from the contract's closed list; `warn`, fix `switchboard_machines`;
+  SB-550).
 
   An account is listed once: a sign-in reason wins over failing usage. `refused_there` (a copy
   on another machine the provider refused there) is not listed yet: no stored source holds it;
@@ -3588,10 +3664,10 @@ Vesta's board request `a7325ed3` (G2, plan fabric-workspace `docs/plans/2026-11-
 
 [DEC-0025](DECISIONS.md#dec-0025-a-subscription-is-delegated-to-a-teammates-machine-as-a-guest-under-a-lease) (operator 2026-11-17): the operator delegates one of an organization's subscriptions to a teammate's machine, the teammate uses it in console sessions through Switchboard without signing in with it, and the operator calls it back. The teammate keeps their own subscription in Claude Desktop and the ordinary Claude Code, which Switchboard never touches. Threat model: the teammate owns that machine; these rules keep an honest Switchboard from passing a guest on and let the sender take it back, and against an uncooperative teammate the revocation is signing the subscription out at the provider.
 
-- **The restricted entry.** `switchboard ssh-serve --sender-key KEY --pool GROUP [--from NAME]` (`crates/switchboard-cli/src/ssh_serve.rs`) is the forced command of the delegating machine's key in the teammate's `~/.ssh/authorized_keys`, written `command="'<program>' ssh-serve --sender-key KEY --pool GROUP",restrict …` (`ssh_serve::forced_command`; sshd runs it through `$SHELL -c`, so the path with its space is single-quoted; test `the_documented_key_line_runs_through_a_shell_as_one_program` runs the line every guide documents through `/bin/sh -c`). It reads `SSH_ORIGINAL_COMMAND` as single-quoted words (`ssh_serve::words`; `$`, backquotes, `;`, `|`, `&`, redirections, double quotes, globs and line ends are refused before anything runs), never a shell, and answers only: `machines prove --nonce` (SB-357), `accounts list` (only the seats that key delegated into GROUP, with `lease_until`, `lease_ended`), `project list` (GROUP alone: pool, name, organizations; no folder, no account), `org list` (GROUP's organizations, ids and names), `org assign` (a seat of that key, to `personal`, `auto` or GROUP's organizations; else `ORGANIZATION_NOT_ALLOWED`), `accounts add … --delegated --sender-key KEY [--lease-hours N]` (OAuth only, into GROUP only, else `POOL_NOT_ALLOWED`; without `--delegated` it answers `DELEGATE_ONLY`), `usage ID`, `accounts surrender ID [--undo] --sender-key KEY`, `accounts lease ID --hours N --sender-key KEY`, `accounts remove ID --sender-key KEY` (each only for a seat of that key in GROUP). A `--data-dir` naming another folder is refused (`DATA_DIR_MISMATCH`), another key `KEY_MISMATCH`, anything else `NOT_ALLOWED`. It answers in JSON. macOS and Linux (`UNIX_ONLY` elsewhere). Tests `ssh_serve::tests::*`.
+- **The restricted entry.** `switchboard ssh-serve --sender-key KEY --pool GROUP [--from NAME]` (`crates/switchboard-cli/src/ssh_serve.rs`) is the forced command of the delegating machine's key in the teammate's `~/.ssh/authorized_keys`, written `command="'<program>' ssh-serve --sender-key KEY --pool GROUP",restrict …` (`ssh_serve::forced_command`; sshd runs it through `$SHELL -c`, so the path with its space is single-quoted; test `the_documented_key_line_runs_through_a_shell_as_one_program` runs the line every guide documents through `/bin/sh -c`). It reads `SSH_ORIGINAL_COMMAND` as single-quoted words (`ssh_serve::words`; `$`, backquotes, `;`, `|`, `&`, redirections, double quotes, globs and line ends are refused before anything runs), never a shell, and answers only: `machines prove --nonce` (SB-357), `accounts list` (only the seats that key delegated into GROUP, with `lease_until`, `lease_ended`), `remote-status` (SB-550: those seats and GROUP's session rows as ids and codes, `health: null`), `project list` (GROUP alone: pool, name, organizations; no folder, no account), `org list` (GROUP's organizations, ids and names), `org assign` (a seat of that key, to `personal`, `auto` or GROUP's organizations; else `ORGANIZATION_NOT_ALLOWED`), `accounts add … --delegated --sender-key KEY [--lease-hours N]` (OAuth only, into GROUP only, else `POOL_NOT_ALLOWED`; without `--delegated` it answers `DELEGATE_ONLY`), `usage ID`, `accounts surrender ID [--undo] --sender-key KEY`, `accounts lease ID --hours N --sender-key KEY`, `accounts remove ID --sender-key KEY` (each only for a seat of that key in GROUP). A `--data-dir` naming another folder is refused (`DATA_DIR_MISMATCH`), another key `KEY_MISMATCH`, anything else `NOT_ALLOWED`. It answers in JSON. macOS and Linux (`UNIX_ONLY` elsewhere). Tests `ssh_serve::tests::*`.
 - **The receiver's operations are sent only by it.** `AddDelegated`, `SurrenderDelegated`, `LeaseDelegated` and `RemoveDelegated` carry `served`, set only by `ssh-serve`; without it they are refused (`SSH_SERVE_ONLY`). The local CLI, MCP and window never send them; a process holding the control token (`control.json`, readable by every process of the person on that computer) can, with the same trust as the person's own Keychain. So this keeps an honest Switchboard from offering the operations, not the teammate who owns the machine; against an uncooperative teammate the real revocation is signing the subscription out at the provider. `ssh-serve` carries no separate proof of its own: any secret it held would be readable by the same processes (plan D-40). Test `a_delegated_seat_and_the_own_sign_in_switch_through_the_operations`.
 - **A delegated account** (`Snapshot::delegated`, `switchboard_core::delegation::Delegation {sender_key, from?, pool, granted_at, lease_until, ended_at?, purged_at?}`; `accounts.json` schema version 16 while one exists, a sender's record exists, or the journal holds a `delegation` event). `Store::add_delegated` saves the account and its record in one publish, only in a group of this computer with folders, never `default` or the pay-per-token group (`DELEGATE_GROUP`), only for a new account. On every publication `delegation::stays` checks against the state before: its pool is still the record's and not `default`; it is not marked elsewhere, given to an agent, waiting to return, shared into a group or the default group, or lent (`DELEGATED_STAYS`); an ended lease keeps it off with no route (`LEASE_ENDED`); the record never changes key, pool or grant time, is never put on an account already here, comes back from an ended lease only while its credential is here (`SIGN_IN_REMOVED` once removed), and goes only with its account. Explicit refusals: `send` and `surrender` (`DELEGATED_NOT_SENT`), `assign_to_agent` (`DELEGATED_NOT_GIVEN`), `remove` before its credential is removed (`DELEGATED_NOT_REMOVED`), `activate_native_anyway` (`DELEGATED_NOT_NATIVE`), a launch in an isolated home (`launch::group_allows_launch`, `DELEGATED_ISOLATED`), deleting its group (`remove_project`, `GROUP_HOLDS_GUEST`). Balancing never counts or lends one (`balancing::usable`). A backup never carries one. Tests `delegation::tests::*`, `launch::tests::a_delegated_seat_launches_only_in_managed_mode`.
-- **The lease.** Default 48 hours, 1 to 720 (`LEASE_INVALID`). The sender's background read of each machine group (`remote_usage::tick`, every 15 minutes) extends every seat it delegated there to its hours from then (`remote_usage::extend_leases`, from the store's record, else the move's `seats.jsonl` line); a failure is logged (`delegation_lease`). On the receiver a seat stops being renewed once its lease time passes (`refresh`); the owner's background pass ends it only when it ran `LEASE_GRACE_SECONDS` (15 minutes) past both the lease and its own start (`Snapshot::leases_due(now, opened_at)`, `Store::end_lease`): switched off, routes dropped, `ended_at` set, its isolated home cleaned (`launch::clean_account`), its credential kept. An extension revives an ended seat while its credential is here (`extend_lease`). `KEEP_AFTER_LEASE_SECONDS` (30 days) after it ended, `Store::purge_lease` deletes the credential and sets `purged_at`; only then may the person remove it there. The sender does not pull the receiver's tokens at each read: a call back within the 30 days takes the live sign-in. Logged `delegation_ended` (`ended`, `purged`). Tests `past_its_lease_a_seat_is_switched_off_kept_and_removed_30_days_later`, `a_seat_whose_lease_ended_is_still_given_back_with_its_live_sign_in`, `a_read_extends_the_leases_of_the_seats_delegated_there_and_only_those`.
+- **The lease.** Default 48 hours, 1 to 720 (`LEASE_INVALID`). The sender's background read of each machine group (`remote_usage::tick`, every minute since SB-550) extends every seat it delegated there to its hours from then, at most every 15 minutes (`leases_at`; `remote_usage::extend_leases`, from the store's record, else the move's `seats.jsonl` line); a failure is logged (`delegation_lease`) and tried again five minutes later (`lease_failed`, `LEASE_RETRY_SECONDS`), not at every read. On the receiver a seat stops being renewed once its lease time passes (`refresh`); the owner's background pass ends it only when it ran `LEASE_GRACE_SECONDS` (15 minutes) past both the lease and its own start (`Snapshot::leases_due(now, opened_at)`, `Store::end_lease`): switched off, routes dropped, `ended_at` set, its isolated home cleaned (`launch::clean_account`), its credential kept. An extension revives an ended seat while its credential is here (`extend_lease`). `KEEP_AFTER_LEASE_SECONDS` (30 days) after it ended, `Store::purge_lease` deletes the credential and sets `purged_at`; only then may the person remove it there. The sender does not pull the receiver's tokens at each read: a call back within the 30 days takes the live sign-in. Logged `delegation_ended` (`ended`, `purged`). Tests `past_its_lease_a_seat_is_switched_off_kept_and_removed_30_days_later`, `a_seat_whose_lease_ended_is_still_given_back_with_its_live_sign_in`, `a_read_extends_the_leases_of_the_seats_delegated_there_and_only_those`.
 - **The sender's side.** `Operation::SendAccount { delegate, lease_hours }` (CLI `accounts send --delegate [--lease-hours N]`, MCP `switchboard_account_send` `delegate`, `lease_hours`, the window's box *Delegate to a teammate*) needs a group there (`DELEGATE_INTO_GROUP`), names this machine's settings signing key and the lease in the remote `accounts add`; a failed check there removes the copy under that key (`as_sender`); when the removal fails too, the seat is recorded in `delegated_out` and a granted `seats.jsonl` line with its account there, lease and key, the account stays marked used there but is not placed in the machine's group (its lease is not extended), and the answer is `LEFT_THERE_DELEGATED`, which says to call it back with `accounts recall` (review round 2, P2-B). The seat line is written from the move's own answer (`account_send::send_with`, `SendError::left`) whether or not the store took its record, and both carry `sent`, the print of the token sent, so a call back keeps a sign-in renewed here since aside instead of replacing it with the spent copy there; the adoption pass (`machines::plan`) never places such a seat in the machine's group; and using the account here again (`mark_elsewhere` off, whatever its group) clears its `delegated_out` record, which a call back that gives the sign-in back puts back, outside the machine's group when it was outside (review round 3; tests `a_delegated_move_that_fails_its_check_removes_the_copy_there_under_its_key`, `a_delegated_copy_left_there_is_recorded_so_it_can_be_called_back`, `a_copy_left_there_after_a_renewal_here_is_called_back_keeping_the_live_sign_in`, `the_record_of_a_seat_left_outside_a_machine_group_goes_when_the_account_is_used_here`); the move records `lease_hours` and `sender_key` on its `seats.jsonl` line and, once the account joined its machine group, a `Snapshot::delegated_out` record (`DelegatedOut {remote_id, lease_hours, sender_key, sent?}`, cleared when the account comes home or is removed, carried by backups and restores), and answers `delegated: {lease_hours}`; `--lease-hours` without `--delegate` is refused (`SEND_LEASE_WITHOUT_DELEGATE`). `RecallAccount` names the key from that record (else the seat line) in `surrender`, `surrender --undo` and `remove` there. A seat whose credential was removed there answers `{credential: null, lease_ended: true}`: the mark here is cleared and the sign-in kept here since the move is asked; if it answers, the call back finishes as usual; if not, the row there is removed, the call back is recorded, and the account stays here with `LEASE_ENDED_SIGN_IN`. Tests `a_delegated_seat_goes_there_as_a_guest_and_comes_back_only_to_its_sender`, `a_delegated_move_that_fails_its_check_removes_the_copy_there_under_its_key`, `a_call_back_after_the_lease_ran_out_keeps_the_sign_in_kept_here`, `the_stores_record_of_a_delegated_seat_outlives_seats_jsonl`.
 - **Own sign-in off** (`<data>/own-sign-in`, `on` or `off`, absent on; CLI `own-sign-in on|off`, MCP `switchboard_own_sign_in`, Settings → *Your own sign-in*, `Operation::OwnSignIn`). While off, `own_sign_in::mask` hands the runtime ordinary-sign-in sources that read and write nothing (`current`, `fresh`, `activate`, `live`, Claude Swap; `OFF_LIMITS`), both in the owner (`Runtime::native()`) and offline (`execute`, `projects::apply`); the folder bindings treat the ordinary Claude Code as signed out (`Runtime::claude_signed_out`), so a group's folders get the placeholder token for a teammate who signs in only in Claude Desktop; `mcp-homes` and a launch's MCP sign-in copy leave the ordinary home out (`mcp_homes::ordinary_for`; a launch skips the copy altogether); the session duty officer looks only at sessions whose Claude home is under Switchboard's data folder (`duty::keep_ours`). Session transcripts for limits, Codex's routing file and the shell homes' carried settings are unchanged. No source names Claude Desktop's bundle, data folder or Keychain item (`own_sign_in::tests::no_code_names_claude_desktop`). Tests `own_sign_in::tests::*`, `launch::tests::with_own_sign_in_off_a_launch_carries_no_mcp_sign_in`, `duty::tests::with_own_sign_in_off_only_switchboards_own_sessions_are_looked_at`, `mcp_homes::tests::with_own_sign_in_off_the_ordinary_home_is_left_out`.
 
@@ -3885,15 +3961,16 @@ keeps `<data>/live-sessions.json` (0600, `live_ledger.rs`): `{version: 1, sessio
 {config, cwd, host, pid, first_seen, last_seen}}}`, one entry per Claude Code session whose
 `sessions/<pid>.json` names a live Claude Code process of the scan (`live_ledger::observed`: a valid
 session id, an absolute folder, Claude Code's `kind` `interactive`, so a `claude -p` board run is
-never kept), with that `kind`, `host` from the process's ancestors (`duty::host_of`, asked only for
+never kept; a session file written before the process now holding its pid started is dropped by
+`machine_sessions::session_files`, SB-450), with that `kind`, `host` from the process's ancestors (`duty::host_of`, asked only for
 a session new to the ledger or on a new process). Written only when an entry appears or changes
 process or folder, an entry ages out, or an hour after the last refresh (`REFRESH_SECONDS`), when
 every live session's `last_seen` is refreshed at once (one write an hour; a session in two
 processes is one entry on the process the ledger names, else the lowest pid). An entry no longer
 live is marked once with when and how it ended (`ended_at`, `ended`): `boot` when it was last seen
-before this computer's boot (`watchdog::boot_time`: it was live when the computer went down) and
+before this computer's boot (`boot_resume::boot`: it was live when the computer went down) and
 `watched` otherwise (the watch saw it go: an `/exit`, a closed window, `/clear` or `/resume` in its
-process, a crash); a session live again clears it. an entry is kept 7 days after it was last seen (`resumable::WINDOW_SECONDS`), at most 500
+process, a crash); a session live again clears it. An entry is kept 7 days after it was last seen (`resumable::WINDOW_SECONDS`), at most 500
 (`KEEP`, the most recently seen). A scan that did not read the process table changes nothing; with
 the person's own sign-in off (SB-403) only sessions in Switchboard's own homes are kept. Ids, paths,
 a host word, a pid and times only: never a transcript line, a prompt or a credential.
@@ -3905,11 +3982,16 @@ names one, since its folder is only a guess (test
 `resumable::tests::a_launch_record_that_names_no_config_never_beats_a_source_that_does`). Review round 3 of PR #852: the Sessions page offers *Continue* (`ended_seen`, above) only for a
 session that ended in the last day with `ended: boot`, whose transcript does not end with the
 person's `/exit` or `/quit` (`session_watch::exited`) and that Switchboard did not close on purpose
-(`session_watch::closed_on_purpose`, whose own line is listed instead); a session the watch saw go
+(`session_watch::closed_on_purpose`, whose own line is listed instead; a close counts when made at
+or after the entry's last sighting less 120 s, so one made before the session was taken up again
+does not hide it); a session a Switchboard launch names (`session_id` of the launch records of the
+last day) or that this boot's boot-resume journal names (`boot_resume::named_this_boot`, SB-450)
+has its own line and its own continuation and is never listed as ended outside Switchboard; a
+session boot resume continued runs again, which clears its entry's end; a session the watch saw go
 is listed as ended with no act; a Fabric Dashboards console (host `dashboards`) and, with own
 sign-in off, a session outside Switchboard's homes are left out of the rows and of `locate`
 (tests `live_ledger::tests::only_a_session_cut_by_a_reboot_is_offered_and_one_closed_on_purpose_never`,
-`resumable::tests::a_session_is_never_continued_beside_a_process_nobody_could_see`). Even so so `sessions continue <id>` (and every continuation that goes through `locate`) resumes such
+`resumable::tests::a_session_is_never_continued_beside_a_process_nobody_could_see`). So `sessions continue <id>` (and every continuation that goes through `locate`) resumes such
 a session as itself; `continue_as` keeps its refusals (a live process, an unread process table, a folder or a transcript
 gone). Tests `live_ledger::tests::*`,
 `resumable::tests::a_session_nobody_closed_or_launched_is_found_in_the_live_ledger`.
@@ -3925,7 +4007,7 @@ no store lock. It reads `owner-run.json` (`bugs::last_run`) and probes the owner
 within `control::PROBE_SECONDS`, 5; never an operation): `owner` is `answers`, `starting` (its run
 record is not clean, its process runs, it started under 2 minutes ago and has no port yet),
 `stopped` (it ended through its drain, or never wrote a run record), `down` (not clean, its process
-gone: a crash; a run that started before this boot, `watchdog::boot_time` from `kern.boottime` or
+gone: a crash; a run that started before this boot, `boot_resume::boot` from `kern.boottime` or
 `/proc/stat`, counts as gone whatever now holds its pid) or `not_answering` (its process runs or its port took the connection, and it did not
 prove itself in time; also an unreadable descriptor). It reads `duty.jsonl` (`duty::journal`): an
 intent with no outcome for at least 10 minutes (`ACT_SECONDS`) is an act left
@@ -3992,6 +4074,101 @@ removes it for the app's own data folder (`Places.remove_watchdog`) and lists `w
 `not_installed_here`) and `watchdog` (`on`). Tests `watchdog_job::tests::*`,
 `owner_tests::the_watchdog_job_is_never_installed_from_another_data_folder`,
 `uninstall::tests::the_watchdogs_job_and_files_go_and_a_failure_is_reported_not_fatal`.
+
+## Sessions after a restart (SB-450, DEC-0030)
+
+Code: `crates/switchboard-runtime/src/boot_resume.rs`, `session_watch::watch`,
+`resumable::being_continued`, `session_host::start_detached`, `launches::continued_by_boot`,
+`Operation::BootResume`; CLI `switchboard boot-resume [on|off]`; MCP `switchboard_boot_resume`;
+the window's `boot_resume` command (Settings → Sessions after a restart, SCN-105).
+
+- **The ledger.** Each fresh pass of the one-minute session watch, when it read the process table,
+  computes the live launched sessions (`boot_resume::seen_of`: for each launch id, its earliest-started
+  Claude Code row, the rule of `launches::reconcile`, whose pid a `sessions/<pid>.json` pairs with a
+  session; a nested `claude -p` joined to the same launch is not its session) and writes `<data>/boot-live.json` (0600:
+  `boot`, `at`, `sessions: [{session, launch_id}]`, `stopped_at`) when the boot or that set
+  changed, `stopped_at` was set, or, while that set is not empty, its `at` is 30 minutes old
+  (`REFRESH_SECONDS`); with no such session running nothing is written. The owner's drain sets `stopped_at` on a ledger of this boot,
+  and no watch pass of that owner writes the ledger after it (`boot_resume::observe` checks the drained data folders).
+  A home's `.session-pid` written before this boot, or older than the process now holding its pid
+  by more than 60 s (`launch::marker_outlived`), joins no process to its launch, and a
+  `sessions/<pid>.json` last written more than 60 s before its process started is not that
+  process's session (`fabric_sessions_core::machine_sessions::written_before_start`, applied to
+  the live session pairs and to `session_files`, which the duty officer, the session pool and the
+  launch records read): after a restart a reused pid never reads as an old session. A process's
+  start is `pbi_start_tvsec` on macOS and, on Linux, `btime` of `/proc/stat` plus field 22 of
+  `/proc/<pid>/stat` over the clock-tick rate (`machine_sessions::stat_start_ticks`, the reader of
+  SB-445), never the modification time of `/proc/<pid>`, which is when its procfs entry was made;
+  a start that cannot be read keeps the file.
+  Boot time: `sysctl kern.boottime` (macOS), `btime` of `/proc/stat` (Linux), read once a process.
+- **The pass.** Once per owner process, the first watch pass that read the process table decides
+  (more than `MAX_AFTER_BOOT_SECONDS`, 6 hours, after the boot it continues nothing and journals
+  one `too_late` line for that boot):
+  with `boot-resume.json` saying on (absent: on) and a ledger from an earlier boot it runs
+  `boot_resume::run`; a pass that could not read the table waits for the next one. `run` it first settles each
+  intent of this boot with no outcome (`continued` when a live process holds the session or it is
+  `being_continued`, else `interrupted`), then continues what `boot_resume::candidates` admits,
+  the rule of DEC-0030 (Claude, launched before the boot, its record naming that session, not
+  continued, not a dispatched board run (`dispatch`), and either no end or an `exited` end with a
+  shutdown signal's exit code (129, 137, 143) recorded between the ledger's `at` and the boot (an
+  in-place or headless launch, or a host, records its own end as the machine stops); with the
+  person's own sign-in off (SB-403 S3), only a record with `home_dir` (Switchboard's own home),
+  and its continuation refused (`not_ours`) when `resumable::locate` finds it outside the data
+  folder; cut in a turn (SB-509's rule: transcript written more than
+  `session_watch::CUT_MARGIN_SECONDS` after `last_turn_at`, else `launched_at`, and its last
+  lines not the person's `/exit`), not closed on purpose at or after its launch began
+  (`session_watch::closed_on_purpose` since 2 hours before the boot, each session's latest close,
+  and a duty officer's close intent not finished yet, compared by `session_watch::closed_since`
+  with the record's `launched_at`: a close before it was the session closed and then continued as
+  this launch); in the ledger, the
+  ledger at most 2 hours older than the boot and its last look neither older than that nor older
+  than the transcript's last write minus 120 s, the last look being `stopped_at`, or, with none
+  (no drain: a crash, a power cut), the ledger's `at` plus `REFRESH_SECONDS`; transcript last written in `[boot - 7200, boot]`
+  in any config folder (`machine_sessions::transcript_at`); not live, not waiting on a limit stop
+  (`recovery::live_stop_sessions`: recovery continues those), not `being_continued`, not named by
+  a launch since the boot, not in this boot's journal), newest transcript first, at most 5 (the
+  rest `over_limit`). Each needs `capacity::reserve(Start::Interactive)`, every reservation held
+  until the pass ends (a started session takes seconds to show in the process table); a refusal
+  writes `at_capacity` for it and every one after. A continuation is `resumable::continue_as` with `How
+  {in_place: true, hosted: true, by: {surface: recovery, by: boot-resume, parent: <launch>}}`, then
+  `session_host::start_detached(root, launch, script, launch::agent_cli(), 40, 120)`; when that
+  wait ends unanswered the pass looks once more 2 s later, a host that runs then is a
+  continuation, and one that never came up ends the new launch `not_started`. A started one gives the cut launch `ended: {kind:
+  reboot, at}` (unless an end was recorded) and `continued_as: {kind: launch, id}`; the
+  Sessions page reads that end as “Cut by a computer restart, continued after it” (`why:
+  reboot`), and MCP `switchboard_sessions` names `reboot` among the ends.
+- **The journal.** `<data>/boot-resume.jsonl` (0600, the newest 500 lines within 256 KiB; a
+  file grown past that is read up to 4 MiB and cut to its newest lines, never emptied): `at`, `boot`, `session`,
+  `launch_id`, `folder`, `phase` (`intent` before a start; `outcome` after) and `outcome`
+  (`continued` with `new_launch_id`, `failed` with `reason`, `interrupted`, `at_capacity`,
+  `over_limit`, and `too_late` with no session). Logged once a pass as `boot_resume` with the counts.
+- **Never twice (SB-507).** `continue_as` serializes continuations with an in-process mutex
+  (`resumable::CONTINUING`: one owner, one continuation at a time; it does not span processes) and
+  refuses (`LIVE`) a session `resumable::being_continued` names, beside the live-process check it
+  had: a session host runs it (its launch's `provider_session_id`; a host descriptor written before this
+  boot is ignored, `session_host::live_hosts`, whatever process holds its pid now); a launch named it in the last
+  `JUST_STARTED_SECONDS` (120) with no end; a Terminal resume marked it in the last 120 s
+  (`<data>/resuming/<session>`, 0600, its start time, written by `resumable::mark_resuming` before
+  the duty officer's restart, a restart wave's resume and a person's Terminal Continue open their
+  window, taken back when the window did not open, marks older than a day removed on the next
+  write); the duty officer's restart of it is begun and not finished (`duty::restart_open`: a
+  `restart` intent with no outcome in the last hour, which its act or the next check finishes by
+  resuming it); or a running restart wave holds it (`restarts::in_wave`). The watch runs the duty
+  officer and the restart wave before this pass, so a resume they start that minute is seen. Fabric
+  Dashboards' temporary `ai.passioncode.resume-after-boot` applies the same rule until 2026-11-25;
+  either one finds the other's continuation through the live process, and Switchboard also through
+  its host or launch record.
+- **Reading.** `Operation::BootResume {on}` (no store lock) saves `on` when given and answers
+  `settings`, `boot_time`, `last_look` (`boot`, `at`, `sessions` count, `stopped_at`),
+  `window_minutes` (120), `max_per_boot` (5), `recent` (the newest 20 outcome lines) and
+  `supported` (false on Windows, where no boot time is read, so no ledger is kept and nothing is
+  continued). An unreadable `boot-resume.json` is
+  `boot_resume::UNREADABLE`.
+- **Hosted starts.** `session_host::start_detached` is the one way a host starts: `launch --hosted`
+  and `sessions continue --hosted` (`hosted::spawn`, the CLI's own executable) and this pass (the
+  installed CLI). It runs `<cli> --data-dir <root> session-host --launch-id … --program <script>
+  --rows … --cols …` in a session of its own with nothing on its stdio, waits up to 10 s for the
+  socket, and reaps the host on a thread.
 
 ## Pay-per-token group (SB-401, DEC-0023)
 

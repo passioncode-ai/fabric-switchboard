@@ -12,7 +12,7 @@
 //! them. Ids and paths only: never a transcript line, a prompt or a credential.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 pub const FILE: &str = "live-sessions.json";
@@ -21,6 +21,9 @@ pub const VERSION: u32 = 1;
 pub const KEEP: usize = 500;
 /// How often a live session's `last_seen` is written again.
 pub const REFRESH_SECONDS: i64 = 3600;
+/// How long after a close on purpose the watch may still have seen the session live (it renews
+/// `last_seen` while the process runs, and a close's line is written before its process ends).
+const CLOSE_SLACK_SECONDS: i64 = 120;
 /// A ledger larger than this is not read (500 entries take about 150 KiB).
 const MAX_BYTES: u64 = 1024 * 1024;
 
@@ -230,7 +233,9 @@ fn write(root: &Path, ledger: &Ledger) {
 /// The watch's step: the live sessions of this look (`alive`: the live Claude Code pids the
 /// watch's scan read) merged into the ledger, written only when it changed. With the person's
 /// own sign-in off limits (SB-403), only sessions in Switchboard's own homes are kept, as the
-/// duty officer keeps only those.
+/// duty officer keeps only those. `machine_sessions::session_files` already drops a session file
+/// written before the process now holding its pid started (SB-450, a pid reused after a restart),
+/// so a leftover file never reads as a live session here.
 pub fn observe(root: &Path, alive: &HashSet<u32>, now: i64) {
     let mut seen = observed(&crate::machine_sessions::session_files(root), alive);
     let mut previous = read(root);
@@ -250,7 +255,7 @@ pub fn observe(root: &Path, alive: &HashSet<u32>, now: i64) {
     }
     let host =
         |pid: u32| crate::duty::host_of(&crate::machine_sessions::ancestor_paths(pid)).to_owned();
-    if let Some(mut next) = merge_at(&previous, &seen, host, now, crate::watchdog::boot_time()) {
+    if let Some(mut next) = merge_at(&previous, &seen, host, now, crate::boot_resume::boot()) {
         next.sessions.extend(set_aside);
         write(root, &next);
     }
@@ -279,14 +284,31 @@ pub const ENDED_LISTED_SECONDS: i64 = 86_400;
 /// transcript ends with the person's `/exit` (`session_watch::exited`) or Switchboard closed it on
 /// purpose (`closed`: `session_watch::closed_on_purpose`, whose own line is listed instead). One the
 /// watch saw go (`/exit`, a closed window, `/clear` or `/resume` in its process, a crash) is listed
-/// as ended without an act (`reason: seen_gone`). `at` is when it ended.
-pub fn ended_rows(root: &Path, now: i64, closed: &HashSet<String>) -> Vec<Value> {
+/// as ended without an act (`reason: seen_gone`). `at` is when it ended. A close counts for the
+/// life that ended (made at or after its last sighting, less `CLOSE_SLACK_SECONDS`), not one
+/// before the session was taken up again. A session a Switchboard launch names (`launched`: the
+/// launch records of the last day and this boot's boot-resume journal, SB-450) has its own line
+/// and its own continuation, so it is never listed here as ended outside Switchboard.
+pub fn ended_rows(
+    root: &Path,
+    now: i64,
+    closed: &HashMap<String, i64>,
+    launched: &HashSet<String>,
+) -> Vec<Value> {
     let own_off = crate::own_sign_in::is_off(root);
     let ledger = read(root);
     let mut rows: Vec<(i64, Value)> = ledger
         .sessions
         .iter()
-        .filter(|(id, e)| shown(root, e, own_off) && !closed.contains(id.as_str()))
+        .filter(|(id, e)| {
+            shown(root, e, own_off)
+                && !launched.contains(id.as_str())
+                && !crate::session_watch::closed_since(
+                    closed,
+                    id,
+                    Some(e.last_seen - CLOSE_SLACK_SECONDS),
+                )
+        })
         .filter_map(|(id, e)| {
             let at = e.ended_at?;
             if !(0..=ENDED_LISTED_SECONDS).contains(&(now - at)) {
@@ -534,7 +556,7 @@ mod tests {
             ]
         );
         // A live session is never a line of the Sessions page.
-        assert!(ended_rows(root.path(), 2000, &HashSet::new()).is_empty());
+        assert!(ended_rows(root.path(), 2000, &HashMap::new(), &HashSet::new()).is_empty());
         // A broken file reads as empty and is replaced by the next write.
         std::fs::write(root.path().join(FILE), b"{").unwrap();
         assert_eq!(read(root.path()), Ledger::default());
@@ -583,6 +605,14 @@ mod tests {
         ledger
             .sessions
             .insert(id(6), entry("terminal", "print", ENDED_BOOT, &config));
+        // Session 8 was closed on purpose before it was taken up again; session 9 is a session a
+        // Switchboard launch names (boot resume continues it, SB-450).
+        ledger
+            .sessions
+            .insert(id(8), entry("terminal", "interactive", ENDED_BOOT, &config));
+        ledger
+            .sessions
+            .insert(id(9), entry("terminal", "interactive", ENDED_BOOT, &config));
         ledger.sessions.insert(
             id(7),
             entry(
@@ -597,8 +627,9 @@ mod tests {
         let t = crate::resumable::transcript(&config, "/w/a", &id(3));
         std::fs::create_dir_all(t.parent().unwrap()).unwrap();
         std::fs::write(&t, "{\"content\":\"<command-name>/exit</command-name>\"}\n").unwrap();
-        let closed: HashSet<String> = [id(5)].into();
-        let rows = ended_rows(root.path(), 2000, &closed);
+        let closed: HashMap<String, i64> = [(id(5), 950), (id(8), 300)].into();
+        let launched: HashSet<String> = [id(9)].into();
+        let rows = ended_rows(root.path(), 2000, &closed, &launched);
         let by: BTreeMap<String, String> = rows
             .iter()
             .map(|r| {
@@ -612,14 +643,21 @@ mod tests {
         assert_eq!(by.get(&id(2)).map(String::as_str), Some("seen_gone"));
         assert_eq!(by.get(&id(3)).map(String::as_str), Some("seen_gone"));
         assert_eq!(by.get(&id(7)).map(String::as_str), Some("seen_live"));
-        for n in [4, 5, 6] {
+        assert_eq!(by.get(&id(8)).map(String::as_str), Some("seen_live"));
+        for n in [4, 5, 6, 9] {
             assert!(!by.contains_key(&id(n)), "{n}");
         }
         assert_eq!(rows[0]["at"], 1000, "the time it ended");
-        assert!(ended_rows(root.path(), 1000 + ENDED_LISTED_SECONDS + 1, &closed).is_empty());
+        assert!(ended_rows(
+            root.path(),
+            1000 + ENDED_LISTED_SECONDS + 1,
+            &closed,
+            &launched
+        )
+        .is_empty());
         // Own sign-in off: only Switchboard's own homes, in the rows and in `locate`.
         crate::own_sign_in::set(root.path(), false).unwrap();
-        let rows = ended_rows(root.path(), 2000, &closed);
+        let rows = ended_rows(root.path(), 2000, &closed, &launched);
         assert!(rows.iter().all(|r| r["session"] != id(7).as_str()));
         assert!(rows.iter().any(|r| r["session"] == id(1).as_str()));
         assert_eq!(locate(root.path(), &id(7), 2000), None);

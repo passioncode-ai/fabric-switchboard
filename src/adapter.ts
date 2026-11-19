@@ -26,6 +26,11 @@ export function onSpendChanged(callback: () => void) {
   if (!native) return;
   void import('@tauri-apps/api/event').then(({ listen }) => listen('spend-changed', () => callback())).catch(() => { /* read again with the minute's refresh */ });
 }
+/** SB-550: the owner wrote a new one-minute read of the other machines; the window reads it again. */
+export function onMachinesChanged(callback: () => void) {
+  if (!native) return;
+  void import('@tauri-apps/api/event').then(({ listen }) => listen('machines-changed', () => callback())).catch(() => { /* read again with the minute's refresh */ });
+}
 export const demo = !native && new URLSearchParams(location.search).get('demo') === '1';
 /** SB-192 (UX-27): `?demo=1&empty=1` shows a first run: the tour and the terms notice ignore what this browser stored. */
 export const demoFirstRun = demo && new URLSearchParams(location.search).get('empty') === '1';
@@ -93,6 +98,7 @@ export const nativeAdapter: Adapter = {
   capacity: (change) => invoke('capacity', { cap: change?.cap ?? null, clear: change?.clear ?? false, board: change?.board ?? null, boardDefault: change?.boardDefault ?? false }),
   duty: (change) => invoke('duty', { on: change?.on ?? null, run: change?.run ?? false }),
   ownSignIn: (on) => invoke('own_sign_in', { on: on ?? null }),
+  bootResume: (on) => invoke('boot_resume', { on: on ?? null }),
   balance: (change) => invoke('balance', { add: change?.add ?? [], remove: change?.remove ?? [], allNew: change?.all_new ?? null, backupAdd: change?.backup_add ?? [], backupRemove: change?.backup_remove ?? [] }),
   feed: (change) => invoke('feed', { pool: change?.pool ?? null, on: change?.on ?? null, priority: change?.priority ?? null, ready: change?.ready ?? null, lookaheadMinutes: change?.lookahead_minutes ?? null }),
   repositoryMap: (under) => readWithDeadline(invoke('repository_map', { under }), 60_000),
@@ -302,6 +308,8 @@ const safeErrors = new Set([
   "Give the duty officer's limits in range: stuck, waiting and idle minutes from 10 to 1440, maximum age hours from 1 to 72.",
   "The duty officer's settings (duty.json) could not be read. Set them again, or delete duty.json for the defaults.",
   "The duty officer's settings could not be saved.",
+  "The setting for continuing sessions after a restart (boot-resume.json) could not be read. Set it again, or delete the file for the default.",
+  "The setting for continuing sessions after a restart could not be saved.",
   "At capacity: this computer runs as many coding sessions as its limit allows. The start waits until one ends.",
   "Claude Code here is signed in to this account and no other Claude account here can take its place. Add one, then move this one.",
   "This account was not given back by a call back here, so its mark stays. Nothing changed.",

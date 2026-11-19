@@ -10,7 +10,7 @@ license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 compatibility: Requires Fabric Switchboard 0.4 or later on the same machine and the switchboard CLI on PATH; the plugin starts its MCP server as switchboard mcp over stdio. Without the server, the same reads and writes run through the CLI. Local only; provider calls are an explicit usage refresh and Switchboard's own renewal of inactive Claude sign-ins (never the account Claude Code uses).
 metadata:
   author: PassionCode.ai
-  version: "0.7.121"
+  version: "0.7.122"
   mcp-server: switchboard
   mcp-protocol: "2025-06-18"
 ---
@@ -117,7 +117,7 @@ first write call, or when a result field is unclear.
 
 - **Only the read tools are listed**: the server runs `--read-only` (an isolated
   session gets that set, since a route change cannot reach it). The 39 read tools and the
-  read form of 13 write tools answer; a change is refused with `error.code` `read_only`.
+  read form of 14 write tools answer; a change is refused with `error.code` `read_only`.
   Report reads; for a change, tell the operator which tool is refused and why. Do not
   work around it.
 - **`error.code` `invalid_arguments`**: the arguments do not match the tool's schema;

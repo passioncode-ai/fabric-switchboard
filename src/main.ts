@@ -8,11 +8,11 @@ import { watchProblems } from './bugs';
 // SB-379 (W3): the window's uncaught errors, rejected promises and stalls are counted as codes.
 if (native) watchProblems(reportProblem);
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
-import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, reportProblem, type Operation } from './adapter';
+import { demo, demoFirstRun, native, nativeAdapter, onMachinesChanged, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, reportProblem, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { feedView, feedBadge, feedMoveLine, feedNotice, feedPriority, feedArrows, statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, machineChoices, remoteGroupChoices, movableAccounts, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, watchdogLine, duplicateOffer, attentionActionLabel, dispatchRefusedLine, defaultBoardShare, dispatchStopLineText, dispatchExtendLineText, dispatchStopNotice, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
+import { feedView, feedBadge, feedMoveLine, feedNotice, feedPriority, feedArrows, statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, machineChoices, remoteGroupChoices, movableAccounts, remoteUsageView, machineReadLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, watchdogLine, duplicateOffer, attentionActionLabel, dispatchRefusedLine, defaultBoardShare, dispatchStopLineText, dispatchExtendLineText, dispatchStopNotice, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, FeedStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey, OwnSignIn } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, FeedStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey, OwnSignIn, BootResumeStatus, BootResumeLine } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -548,16 +548,36 @@ let machinesLive: MachinesLive | null = null; let machinesReading = false; let m
 let machinesRead: MachinesList | null = null; let machinesReadLoading = false; let machinesReadAt = 0;
 function loadMachinesRead() {
   if (machinesReadLoading || !(snapshot?.machines?.length)) return;
-  if (machinesRead && Date.now() - machinesReadAt < 60_000) return;
-  machinesReadLoading = true;
-  void adapter.machinesList().then((v) => { machinesRead = v; machinesReadAt = Date.now(); }, () => { machinesReadAt = Date.now(); }).finally(() => { machinesReadLoading = false; render(); });
+  // Review of PR #861: a failed read waits its minute too (it sets machinesReadAt), so a window
+  // whose first read fails does not ask again at every redraw.
+  // Review round 3: stamped when the read is asked, with a 55 s guard, so the minute's refresh
+  // never finds it a few milliseconds too fresh and waits a second minute.
+  if (machinesReadAt && Date.now() - machinesReadAt < 55_000) return;
+  machinesReadLoading = true; machinesReadAt = Date.now();
+  // SB-550: read every minute now, so the page is redrawn as the background redraws it: never under an open menu or dialog.
+  void adapter.machinesList().then((v) => { machinesRead = v; }, () => { /* the next minute asks again */ }).finally(() => { machinesReadLoading = false; backgroundRender(); });
 }
-/** SB-366: the row line of an account on another machine, or none for an account here. */
-function remoteLine(account: Account): string | null {
-  const machine = machineOf(snapshot ?? {}, account); if (!machine) return null;
+/**
+ * SB-550: the usage cell of an account on another machine: the bar, share and age of its copy
+ * there from the last read (every minute), the machine and the read's age under it. This
+ * computer's own older check is shown only while there is no read there, and says so.
+ */
+function remoteUsageCell(account: Account, machine: Machine) {
   loadMachinesRead();
   const there = machinesRead?.machines.find((m) => m.pool === machine.pool)?.accounts.find((a) => a.id === account.id)?.there;
-  return remoteUsageLine(there, machine.name, Math.floor(Date.now() / 1000));
+  const own = account.usage ? { used: accountUsedPercent(account.usage), observedAt: account.usage.observed_at } : null;
+  const view = remoteUsageView(there, own, machine.name, Math.floor(Date.now() / 1000));
+  const top = el('span', 'usage-line');
+  if (view.percent !== null && view.at !== null) {
+    const meter = el('progress', `usage-meter is-${view.tone}`); meter.max = 100; meter.value = Math.min(100, view.percent); meter.setAttribute('aria-hidden', 'true');
+    const ageNode = el('span', `usage-age${view.tone === 'stale' || view.tone === 'failed' ? ' is-warn' : ''}`, age(view.at));
+    ageNode.title = view.ownCheck ? t('Checked on this computer {date}', { date: date(view.at) }) : t('Checked on {machine} {date}', { machine: machine.name, date: date(view.at) });
+    top.append(meter, el('strong', 'usage-pct', `${Math.round(view.percent)}%`), ageNode);
+  } else top.append(el('span', 'usage-unknown', t('Usage unknown')));
+  const sub = el('span', `usage-sub usage-remote${view.tone === 'failed' || view.tone === 'stale' ? ` is-${view.tone}` : ''}`, view.line);
+  const cell = el('div', 'row-usage'); cell.setAttribute('role', 'group');
+  cell.setAttribute('aria-label', view.percent !== null ? `${t('{percent}% used', { percent: Math.round(view.percent) })}. ${view.line}` : view.line);
+  cell.append(top, sub); return cell;
 }
 function readMachines() {
   if (machinesReading) return;
@@ -586,6 +606,11 @@ function machinesSection() {
     details.append(title);
     const aliases = machineAliasesLine(machine); if (aliases) details.append(el('p', 'account-meta', aliases));
     const state = machineLiveLine(live?.live); if (state) details.append(el('p', live?.live?.reachable ? 'form-note' : 'form-error', state));
+    // SB-550: the last one-minute read of that machine: its sessions and its own health.
+    loadMachinesRead();
+    const lastRead = machinesRead?.machines.find((m) => m.pool === machine.pool)?.read;
+    const readLine = machineReadLine(lastRead, Math.floor(Date.now() / 1000));
+    if (readLine) details.append(el('p', (lastRead?.failures ?? 0) >= 3 || lastRead?.health?.failing.length ? 'form-error' : 'form-note', readLine));
     if (!accounts.length) details.append(el('p', 'account-meta', t('No account lives there now.')));
     const rows = el('ul', 'group-projects'); rows.setAttribute('aria-label', t('Accounts on {machine}', { machine: machine.name }));
     for (const account of accounts) {
@@ -731,6 +756,42 @@ function dutySection() {
   actions.append(button(set.on ? t('Turn off') : t('Turn on'), () => { void mutate(async () => { dutyState = await adapter.duty({ on: !set.on }); }, set.on ? t('The duty officer is off.') : t('The duty officer is on.'), 'duty-toggle'); }, 'button', 'duty-toggle'));
   if (set.on && state.supported) actions.append(button(t('Check now'), () => { void mutate(async () => { await adapter.duty({ run: true }); dutyState = await adapter.duty(null); }, t('Sessions checked.'), 'duty-run'); }, 'button', 'duty-run'));
   section.append(actions);
+  return section;
+}
+/** SB-450 (DEC-0030): whether the sessions a restart of this computer cut are continued. */
+let bootResumeState: BootResumeStatus | null = null; let bootResumeLoading = false; let bootResumeError = '';
+function loadBootResume() {
+  if (bootResumeLoading) return;
+  bootResumeLoading = true; const stamp = clock.stamp();
+  void adapter.bootResume(null).then((s) => { if (clock.accepts(stamp) || !bootResumeState) { bootResumeState = s; bootResumeError = ''; } }, (e) => { if (clock.accepts(stamp) || !bootResumeState) bootResumeError = t(safeError(e, 'read')); }).finally(() => { bootResumeLoading = false; render(); });
+}
+function bootResumeLineText(line: BootResumeLine): string {
+  const folder = folderName(line.folder ?? '');
+  switch (line.outcome) {
+    case 'continued': return t('Continued in {folder} after the restart.', { folder });
+    case 'at_capacity': return t('Not continued in {folder}: the session pool was full.', { folder });
+    case 'over_limit': return t('Not continued in {folder}: five sessions were already continued.', { folder });
+    case 'interrupted': return t('Not continued in {folder}: Switchboard stopped while starting it.', { folder });
+    case 'too_late': return t('Nothing was continued: Switchboard first ran more than six hours after the restart.');
+    default: return t('Not continued in {folder}: it could not start.', { folder });
+  }
+}
+function bootResumeSection() {
+  const section = el('div', 'fold-content');
+  section.append(el('p', 'surface-note', t('After this computer restarts, Switchboard continues the Claude Code sessions the restart cut in the middle of a turn: those it launched that were working and wrote in the two hours before. It leaves alone the sessions that waited for you, those you or Switchboard closed, and board runs. While Switchboard leaves your own sign-in alone, only sessions in its own homes are continued. Each opens as itself in a session you can attach to from Fabric Dashboards. At most five after one restart.')));
+  if (bootResumeError) { section.append(el('p', 'form-error', bootResumeError)); return section; }
+  if (!bootResumeState) { if (!bootResumeLoading) loadBootResume(); section.append(el('p', 'form-note', t('Reading the setting…'))); return section; }
+  const state = bootResumeState;
+  if (!state.supported) section.append(el('p', 'form-note', t('On this system sessions are not continued after a restart.')));
+  const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = state.settings.on; box.dataset.focus = 'boot-resume';
+  box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { bootResumeState = await adapter.bootResume(wanted); }, wanted ? t('Sessions a restart cuts will be continued.') : t('Sessions a restart cuts are left as they are.'), 'boot-resume'); });
+  option.append(box, el('span', '', t('Continue my sessions after a restart')));
+  section.append(option);
+  const recent = state.recent.slice(0, 5);
+  if (recent.length) {
+    section.append(el('h3', 'fold-part-heading', t('After the last restarts')));
+    const list = el('ul', 'watch-findings'); for (const line of recent) list.append(el('li', 'account-meta', `${date(line.at)} · ${bootResumeLineText(line)}`)); section.append(list);
+  }
   return section;
 }
 /** SB-403 S3 (DEC-0025, SCN-095): whether Switchboard reads or changes the person's own Claude Code and Codex sign-in here. */
@@ -3063,6 +3124,8 @@ function compactWait(lead: string, until: number, estimated = false) {
 }
 /** Two lines in every state (compact list): use and freshness, then the one time that matters. */
 function usageCell(account: Account) {
+  // SB-550: an account on another machine shows its copy there, never this computer's old check as its state.
+  const machine = machineOf(snapshot ?? {}, account); if (machine) return remoteUsageCell(account, machine);
   const observation = account.usage; const now = Date.now() / 1000; const limit = accountLimit(account);
   const context = quotaContext(); const state = cardState(account, context); const health = account.usage_health;
   const used = observation ? accountUsedPercent(observation) : null;
@@ -3094,7 +3157,7 @@ function usageCell(account: Account) {
     if (reset) sub.append(compactWait(t('Resets in'), reset)); else sub.append(t('Reset time unavailable'));
   } else if (state === 'unknown') sub.append(monitorChecks(account) ? (health ? t('Next check {date}', { date: date(health.next_check_at) }) : t('Waiting for the first check')) : t('Not checked automatically'));
   else if (state === 'sign_in') sub.append(t('Sign in to check usage'));
-  else if (state === 'disabled') sub.append(remoteLine(account) ?? t('Not checked while disabled'));
+  else if (state === 'disabled') sub.append(t('Not checked while disabled'));
   // SCN-021: API-key and setup-token rows have no subscription quota to check (SB-67).
   else if (state === 'no_quota') sub.append(t('Not checked automatically · Quota checks need OAuth'));
   const label = `${CARD_STATE[state]}${used !== null ? t(', {percent}% used', { percent: Math.round(used) }) : ''}. ${sub.textContent ?? ''}`;
@@ -4022,6 +4085,7 @@ function renderSettings(main: HTMLElement) {
     foldSection({ key: 'balancing', title: t('Balancing between groups'), state: onOff(balancingState?.on), body: () => snapshot ? [balancingSection()] : reading() }),
     foldSection({ key: 'session-limit', title: t('Coding sessions'), state: capacityState ? (capacityState.cap === null ? t('No limit') : t('{used} of {cap} working', { used: capacityState.used, cap: capacityState.cap })) : undefined, body: () => [capacitySection()] }),
     foldSection({ key: 'session-duty', title: t('Session duty officer'), state: onOff(dutyState?.settings.on), body: () => [dutySection()] }),
+    foldSection({ key: 'boot-resume', title: t('Sessions after a restart'), state: onOff(bootResumeState?.settings.on), body: () => [bootResumeSection()] }),
     foldSection({ key: 'own-sign-in', title: t('Your own sign-in'), state: onOff(ownSignInState?.on), body: () => [ownSignInSection()] }),
     foldSection({ key: 'codex-route', title: t('Codex in group folders'), state: onOff(codexRouteState?.on), body: () => snapshot ? [codexRouteSection()] : reading() }),
     foldSection({ key: 'terminals', title: t('Terminals in organization folders'), state: shell === 'on' || shell === 'default_on' || shell === 'inactive' ? t('On') : shell === 'off' || shell === 'default_off' ? t('Off') : undefined, body: () => snapshot ? [shellHookSection()] : reading() }),
@@ -4889,6 +4953,9 @@ function backgroundRefresh() {
     if (reads.includes('session_rows')) void loadSessionRows();
     if (reads.includes('ceilings')) void loadCeilings();
     if (reads.includes('passioncode')) void loadPassioncode();
+    // SB-550: the other machines' last read while Accounts or Groups is on screen, at most once a
+    // minute: a read the owner's machines-changed already asked for is not asked again.
+    if (reads.includes('machines')) loadMachinesRead();
     // SB-100: Kimi's figures refresh in the background too, every five minutes.
     if (Date.now() - kimiLoadedAt > 5 * 60_000) void loadKimi();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });
@@ -4903,6 +4970,8 @@ onProjectSuggestions(() => { clearTimeout(suggestionsTimer); suggestionsTimer = 
 onShellHook(() => { shellHookState = null; checkShellHookNotice(); backgroundRefresh(); });
 // C-7 (SB-72): spend.json changed (a ceiling reached, set or answered); the questions are read again at once.
 onSpendChanged(() => { void loadCeilings(); });
+// SB-550: the owner wrote a new read of the other machines; read it again while it is on screen.
+onMachinesChanged(() => { machinesReadAt = 0; if (!document.hidden && (page === 'accounts' || page === 'projects')) loadMachinesRead(); });
 // A window shown after hours in the background (SB-30) reads fresh metadata at once rather
 // than at the next minute.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) backgroundRefresh(); });
