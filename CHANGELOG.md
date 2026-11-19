@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Needs attention no longer keeps a Keychain warning that an earlier version recorded (SB-549). After an update, the warning that Claude Code's sign-in is too large to write stayed until the next switch or launch, although 0.7.121 writes such an item. A refusal that still holds is shown again at the next act.
 - Hermes on a named Anthropic key now takes a reasoning level (SB-535): `switchboard agents launch hermes --anthropic <name> --effort xhigh` (also `--reasoning`) starts `hermes --provider anthropic -m <model> --reasoning xhigh`. Such a launch no longer lets Hermes adopt Claude Code's sign-in, has no fallback provider, runs its side tasks (titles, compression and the rest) on the same key and model, and clears every other provider key from its environment, so nothing it does is billed to another account.
 
 ## 0.7.121
