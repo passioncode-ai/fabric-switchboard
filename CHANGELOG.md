@@ -10,7 +10,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 - `switchboard --json status` and MCP `switchboard_status` now say whether Switchboard is running on this data folder, without ever starting it (SB-576): an `owner` block with its state (answers, runs and does not answer, gone, or absent), its process id, its version, whether it is the app or `switchboard serve`, and whether launchd or systemd starts it again. When nothing answers, the answer comes from files alone, at once, instead of opening the store and waiting up to 8 seconds for its lock. Fabric Dashboards can use it to find the running Switchboard before starting one.
 - `switchboard targets` and MCP `switchboard_targets` now show, for each other machine, which groups there hold an account that can start a session, per provider, from the reads Switchboard already makes every minute (SB-577; no new ssh call). `switchboard launch --target MACHINE --provider P --pool GROUP` stops before ssh runs, with code `no_account_in_group`, when the last read (at most five minutes old) shows no such account in that group; an older or missing read never stops it. `switchboard_targets` with `machine`, `pool` and `provider` gives the same check, and `remote status` gives the counts from its own read. Fabric Dashboards can now refuse a session on the Mac Studio that would end at once with "Select an account for this provider first".
-- The app's threads get the 16 MiB stack the command line has run on since 0.6.61 (SB-558): the threads of its async runtime on every system, and its main thread on Windows, where it was 1 MiB. The Windows test steps give each test thread the same. The nightly checks of 0.7.123 failed on Windows on Arm when one test overflowed its 2 MiB thread.
+
+## 0.7.124
+
+- 0.7.124 carries 0.7.123's changes, which were tagged but never published: one test overflowed its 2 MiB thread on Windows on Arm, so the nightly checks failed and the release stopped. The Windows test steps now give each test thread 16 MiB.
+- The app's async runtime threads, on every system, and its main thread on Windows (1 MiB before) get the 16 MiB stack the command line has run on since 0.6.61 (SB-558). The app runs its account owner on these threads, as the command line does.
 
 ## 0.7.123
 
