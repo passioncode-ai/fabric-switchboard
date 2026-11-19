@@ -44,7 +44,7 @@ Beyond that they differ:
   path is absolute): a symlinked path, `/tmp` against `/private/tmp`, another letter case or a
   trailing slash never matches a canonical working folder (SB-512).
 - 158 of 261 group folders are worktrees; nothing prunes merged ones, and saves fail at
-  `MAX_ALL_FOLDERS = 1024` (`projects.rs:453`) (SB-513).
+  `MAX_ALL_FOLDERS = 1024` (`projects.rs:451`) (SB-513).
 - The proxy's folder hint can be taken from message text and drifts when a Codex session changes
   folder (`stats.rs:93-121`), and it is computed twice (SB-483). "Project" names three things: a
   group (`pool`), a repository (statistics), and Fabric's own project on a dispatch, stored and
@@ -76,11 +76,12 @@ dispatched runs stopped at their deadline while still writing.
   open and the next check finished it again: a second close line and Continue entry, a second
   resume window for a restart, restarts counted twice.
 - Two continuations of one session can start: `continue_as` checks only for a live process
-  (`resumable.rs:159`), and a Terminal takes seconds to write its session file. The `boot-resume`
+  (`resumable.rs:156`), and a Terminal takes seconds to write its session file. The `boot-resume`
   branch (PR #836) serialises them with a lock and a 120 s guard (SB-507).
-- After a reboot, sessions the person started themselves cannot be continued: no resumable line,
-  launch record or stop names them (`resumable.rs:105-130`), and 55 of 62 closes were such sessions
-  (SB-508).
+- After a reboot or a crash, a session Switchboard never closed and never launched (one the person
+  started in a terminal or an editor) cannot be continued: no resumable line, launch record or stop
+  names it (`resumable.rs:105-130`). The duty officer's own closes do write resumable lines with the
+  config and working folders (`duty.rs:776-779`), so the gap is the sessions nobody closed (SB-508).
 - The session host closes a hosted session after 65 quiet minutes without the SB-500 checks (its
   own launches, subagent transcripts, running commands): `session_host.rs:618` (SB-506).
 - A gone launch stays in Needs attention with no action; managed sessions keep the old proxy token
@@ -96,12 +97,15 @@ through admission; sessions on a rotated token restarted by a wave; a dispatched
 while its log grows. A small launchd job `switchboard watchdog --once` every 5 minutes, independent
 of the owner, checks that the owner answers, that no intent is older than 10 minutes, that no gone
 launch is older than 30 minutes and no duplicate older than 15; it reports through Needs attention,
-an `agent-health/1` check and the operator's notification channel, and never acts itself.
+an `agent-health/1` check and the operator's notification channel, and never acts itself. It is
+Switchboard's first own launchd label (`ai.passioncode.fabric-switchboard.watchdog`): the same change
+updates the Lifecycle table ("Launchd labels owned"), `switchboard uninstall` and the Linux and
+Windows equivalents (a systemd user timer, a scheduled task).
 
 ## C. Full access by default
 
 **Now.** The setting `permissions` in `agents-settings.json` is bypass when absent
-(`agent_settings.rs:37-61`); `launch::bypass_args` (`launch.rs:3423-3460`) gives Claude Code
+(`agent_settings.rs:37-61`); `launch::bypass_args` (`launch.rs:3456-3498`) gives Claude Code
 `--dangerously-skip-permissions` and Codex `approval_policy="never"` with `danger-full-access`,
 and adds nothing when the caller named a mode. It reaches window and CLI launches, the fallback's
 Claude Code and Codex hand-overs, local dispatch (its own `--permissions all`), the duty officer's
@@ -128,9 +132,10 @@ the launch dialog and `switchboard_run` carry a "restricted" switch.
 **Gaps.**
 - No MCP tool launches anything (`Not(LAUNCH)`, `main.rs:6718`), and `switchboard_launch_keys`
   points to `switchboard_launch_agent`, which does not exist (`mcp.rs:210`): section E closes it.
-- Bugs (SB-517): `switchboard_anthropic_keys` is marked read but writes a default model
-  (`mcp.rs:1923-1927`); read halves of several tools are hidden from a read-only server because a
-  tool has one flag; a write tool on a read-only server answers "Unknown tool." (`mcp.rs:1492`);
+- Bugs (SB-517): read halves of several tools are hidden from a read-only server because a tool
+  has one write flag (`capacity`, `duty`, `own_sign_in`, `app`, `analytics`, `balance`, `feed`,
+  `switchboard_launch_keys`, and `switchboard_anthropic_keys`, flagged write at `mcp.rs:207`
+  although its list half only reads); a write tool on a read-only server answers "Unknown tool." (`mcp.rs:1492`);
   schemas declare `additionalProperties:false`, enums and ranges, but nothing validates them;
   some refusals return as success (`remote_dispatch.rs:202`).
 - Two doors (`search`, `execute`) instead of 93 tools: SB-478, with old names answering one release.
@@ -157,7 +162,9 @@ prefilled from a saved launch), one CLI verb and one MCP tool, all producing one
 1. **Folder** (required), with its group shown from the one resolver of section A and any other
    group holding it offered.
 2. **Agent**: installed catalog agents, the default first.
-3. **Billing**: the group's subscription route, one subscription account (isolated), the
+3. **Billing**, by agent: only Claude Code and Codex run on a subscription sign-in (Claude Code on a
+   Claude subscription, Codex on a ChatGPT one); every other agent runs on a key (the template's
+   rule that an agent's capability never rides a subscription sign-in). The choices: the group's subscription route, one subscription account (isolated), the
    pay-per-token group's key, an OpenRouter key (the group's or the machine's), or a named
    Anthropic key (shown as unmetered until a ceiling counts it).
 4. **Key**: reuse a saved key, take one Observatory holds (`switchboard_observatory_keys`), or
@@ -173,8 +180,10 @@ prefilled from a saved launch), one CLI verb and one MCP tool, all producing one
 8. **First message** (text or file), the fresh-branch step, parallel runs allowed or not.
 9. **Money line**: the group's ceiling and today's spend before Run.
 
-A plan step validates everything (the crossing rules of DEC-0031, the folder outside the key's
-group with "add the folder to the group" offered, unmetered spend, a reached ceiling, a live last
+A plan step validates everything (the pay-per-token group and its ceiling, DEC-0023; keys by name
+through Observatory, DEC-0024; the proxy's refusal of a crossing between a subscription group and
+the pay-per-token group, SB-452; the folder outside the key's group with "add the folder to the
+group" offered; unmetered spend, a reached ceiling, a live last
 run offered for attach) and answers a digest; the run step runs exactly that plan. CLI:
 `switchboard run --dir D --agent A --billing route|account:ID|tokens|openrouter[:pool]|anthropic:NAME
 [--mint openrouter:limit=USD,reset=P] --model M --profile P --mode hosted|terminal|headless
@@ -201,9 +210,17 @@ straight to `exec_ssh`).
   `Retry-After` until resumed, so the agent stays alive, tools keep running and nothing is spent;
   stored in `<data>/holds.json`, reachable remotely. An opt-in freeze (SIGSTOP) only for a hosted
   session, with SIGCONT on resume.
+- **Restart one session** remotely: end, then continue as itself (`sessions restart <id> --target`),
+  through the same continuation lock as section B.
+- `sessions output` and `send` carry whatever a session printed or will read: output is redacted by
+  the same scrubber as the logs before it leaves the machine, and over MCP it is opt-in per call.
+- Pause by 503 reaches only proxied launches, and Claude Code gives up after its own retry budget:
+  the pause is bounded (measured before it ships) and the window says when a paused session will
+  stop; a longer pause is the freeze, or an end and a later Continue.
 - On another person's device of an organization, a separate restricted grant (`ssh-serve
   --sessions --pool G`) for reads, output, end and attach of that group's launches only; typing
-  behind its own switch; never launch or continue there.
+  behind its own switch and the device holder's consent on that device; output only when the
+  holder allowed it; never launch or continue there.
 
 ## G. The organization's subscriptions board
 
@@ -238,7 +255,7 @@ always full, about 8 usage calls a minute from one address. A switch needs a fig
 300 s (`rotation.rs:609-631`), the real cadence is about 240 s plus stalls (`control_slow` up to
 33 s), so most switches come after a refusal: 25 before the limit against 66 after it on
 2026-11-18, 175 "no candidate" decisions. Response headers are read on every Claude answer
-(`proxy/lib.rs:973`, `:1018`) but never push the next check back (`core/lib.rs:2696-2704`); each
+(`proxy/lib.rs:1065`, `:1144`) but never push the next check back (`core/lib.rs:2696-2704`); each
 changed header rewrites `accounts.json` with fsync (1187 `metadata_write_slow`). A 429 holds one
 account, never the provider (`usage_gate.rs:30`). An external sweep checks every account at :03
 and :33; the window and CLI have no spacing (`runtime/lib.rs:1850`). Codex headers are not read.
@@ -248,12 +265,16 @@ and :33; the window and CLI have no spacing (`runtime/lib.rs:1850`). Codex heade
   the next active check is 180 s after the last header, and an account with no traffic falls to
   the idle cadence (600 s). Header observations are kept in memory and written at most once a
   minute.
+- **The one move of a refused request (DEC-0002) is unchanged**: it uses the group's next usable
+  account as today and asks for no check.
 - **Active only when it decides something.** Before a switch, one fresh check of the chosen
   candidate (30 s budget); near the limit (95 %) only when the last header is older than 60 s; 30 s
   after a reset. Ranking accepts figures up to 900 s old; the switch itself needs the fresh one.
 - **A budget per provider:** a token bucket of 2 checks a minute with a burst of 4 (about 120 an
   hour, a quarter of today), at most 2 in flight, ±15 % jitter on every schedule. A 429 on a usage
-  check holds the whole provider for `max(Retry-After, 300 s)`, growing on repeats.
+  check holds the whole provider for `max(Retry-After, 900 s)`, doubling on repeats up to an hour;
+  900 s is today's floor per account (`usage_gate.rs:30`), kept because the provider answers
+  `retry-after: 0` while it refuses every check.
 - **People's checks** (window, CLI, MCP, ssh) are spaced 60 s per account and go through the same
   bucket; a sweep over all accounts takes its turn. The source of the :03/:33 sweep is found and
   routed through the bucket.
@@ -261,6 +282,8 @@ and :33; the window and CLI have no spacing (`runtime/lib.rs:1850`). Codex heade
   figures over the existing 15-minute read.
 - The rotation log names the group; the event journal keeps switches apart from usage lines; Codex
   headers are read the same way.
+- **A mode the person chooses** (CLI, MCP, window): `smart` (the default, above), `timer` (today's
+  fixed cadence) or `on_demand` (only before a switch and when a person asks).
 - **App updates** keep their cadence (DEC-0004, every 5 minutes, one small feed request): they never
   reach the provider.
 
@@ -269,11 +292,11 @@ and :33; the window and CLI have no spacing (`runtime/lib.rs:1850`). Codex heade
 | Item | What | Rows | Order |
 |---|---|---|---|
 | W10.0 | Open PRs land: #838 PATH, #848 duty journal, #830 recovery filters, #836 boot resume, #829 org usage, #821 account off, #832 named users | SB-455, SB-505, SB-423, SB-450, SB-451, SB-418, SB-421 | first |
-| W10.1 | Lifecycle: host idle rule, live-session ledger, gone and rotated-token continuations, dispatch extension, the watchdog job | SB-506, SB-508 to SB-510 | 1 |
+| W10.1 | Lifecycle: the duty journal (merged, #848), host idle rule, one continuation at a time, live-session ledger, gone and rotated-token continuations, dispatch extension, the watchdog job | SB-505 to SB-510, SB-529, SB-530 | 1 |
 | W10.2 | Full access for every agent, remote mode sent, MCP bugs | SB-515, SB-517 | 2 |
 | W10.3 | Smart usage checks and a provider budget | SB-518, SB-519 | 3 |
 | W10.4 | Attribution: one resolver, canonical folders, stored tie order, worktree pruning | SB-511 to SB-514 | 4 |
-| W10.5 | The Launch flow (`switchboard run`, `switchboard_run`, the dialog), key minting, harness profile; saved launches on top | SB-520 to SB-522, SB-454 | 5 |
+| W10.5 | The Launch flow (`switchboard run`, `switchboard_run`, the dialog) with its restricted switch, key minting, harness profile; saved launches on top | SB-516, SB-520 to SB-522, SB-454 | 5 |
 | W10.6 | Remote session acts and pause | SB-523, SB-524 | 6 |
 | W10.7 | Custody, conversion and the subscriptions board; then invitations and the restricted session grant | SB-526, SB-527, SB-525, SB-528 | 7 |
 | W10.8 | Two MCP doors | SB-478 | 8 |

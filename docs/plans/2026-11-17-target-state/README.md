@@ -92,10 +92,10 @@ structure: refactors A1 to A7, B1 to B3 and the splits).
 
 ### W10. Launch, fleet and lifecycle ([10](10-launch-fleet-lifecycle.md), the operator's order of 2026-11-19)
 
-W10.0 the open PRs land; W10.1 lifecycle and the watchdog (SB-505 to SB-510); W10.2 full access for
+W10.0 the open PRs land; W10.1 lifecycle and the watchdog (SB-505 to SB-510, SB-529, SB-530); W10.2 full access for
 every agent and the MCP defects (SB-515, SB-517); W10.3 the smart usage mode (SB-518, SB-519); W10.4
-one folder-to-group resolver (SB-511 to SB-514); W10.5 the Launch flow with key minting (SB-520 to
-SB-522, SB-454); W10.6 remote session acts and pause (SB-523, SB-524); W10.7 the subscriptions board
+one folder-to-group resolver (SB-511 to SB-514); W10.5 the Launch flow with key minting (SB-516, SB-520
+to SB-522, SB-454); W10.6 remote session acts and pause (SB-523, SB-524); W10.7 the subscriptions board
 (SB-526, SB-527, SB-525, SB-528); W10.8 two MCP doors (SB-478). Ends with a release.
 
 ### W2. Devices of an organization (02, 04 §7)
@@ -165,4 +165,4 @@ prepared to the last step a person must take and named with its link. Also (oper
 | W5 | Fabric Sessions | planned |
 | W6 | docs and board | done: #823 `3ba78af8` (two review rounds, no P0/P1); left: "under Groups" in folder-rule messages to check, the MCP and onboarding wording to also name a group's sources |
 | W7 | acceptance by the person | planned |
-| W10 | launch, fleet and lifecycle | W10.0 in progress: #838, #830, #848 (SB-505) in review |
+| W10 | launch, fleet and lifecycle | W10.0: #848 (SB-505) merged `07f60d03`; #838, #830 in review; W10.2 and W10.3 building (SB-515, SB-517, SB-518) |
