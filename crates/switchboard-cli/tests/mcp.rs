@@ -193,6 +193,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_capacity",
             "switchboard_own_sign_in",
             "switchboard_duty",
+            "switchboard_watchdog",
             "switchboard_attention",
             "switchboard_bugs",
             "switchboard_health",
