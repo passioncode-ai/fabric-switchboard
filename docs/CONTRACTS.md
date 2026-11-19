@@ -1054,7 +1054,9 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
   …args=[…] -c …env.ELECTRON_RUN_AS_NODE="1" [resume --last] <first prompt>` — Codex gets
   Switchboard's server from its private `config.toml`, so the `-c` entries add to it. The session
   script unsets only the provider variables in `CONFLICTS`, so the caller's own environment
-  (`FABRIC_DASHBOARDS_CONTEXT`, `FABRIC_DASHBOARDS_TASK`) reaches the agent. Its `PATH` is the
+  (`FABRIC_DASHBOARDS_CONTEXT`, `FABRIC_DASHBOARDS_TASK`) reaches the agent. `CONFLICTS` includes
+  `ANTHROPIC_CUSTOM_HEADERS` since SB-533: a managed session's route header never reaches an agent
+  it starts (Hermes sent its own key to the proxy with a parent's header and got 401). Its `PATH` is the
   program's folder, the caller's own `PATH`, then the session PATH's other folders (SB-455, below). Test
   `a_dashboards_console_launch_reaches_the_agent_as_sent` runs the generated script with a
   recording agent and compares the exact argv and environment.
