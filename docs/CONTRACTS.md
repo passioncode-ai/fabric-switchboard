@@ -292,6 +292,68 @@ Account list order is display-only; it never selects/activates. Within provider/
 - With `--yes`, first (SB-183): the terminal hook's block comes out of every start file it is in (`shell::install::remove_all`, `Places::shell`, the person's home; each file byte for byte as before, whatever the choice; a start file the installer created and that holds nothing else is deleted), and the plan names `shell_hook_files` (start files holding the block). Only the app's own data folder looks at the start files (`uninstall::places(root)`: `Places::shell` is None for any other `--data-dir`, since every data folder writes the same marker into the same home; test `uninstall::tests::only_the_apps_own_data_folder_takes_the_blocks_out`, and on Linux CLI `another_data_folder_never_touches_the_start_files`). `shell-hook` and `shell-hook.json` are owned entries; `<data>/shell/` is kept like a session home: its map and hook scripts go, and in each shell home the credential-shaped files of a session home plus `config.toml` (it names the machine's auto capability) go while the history stays (`--purge` removes it whole). Test: `uninstall::tests::apply_removes_owned_things_and_keeps_the_persons_files` (an injected home).
 - With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then, unless `--keep-data`, only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` (the Kimi Code homes, each the only copy of its login, SB-81), `launches` (the launch records, SB-212), `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
 
+## Smart usage checks (SB-518, DEC-0032)
+
+- **Modes.** `<data>/usage-mode` holds `smart` (absent: the default), `timer` or `on_demand`
+  (`switchboard_core::UsageMode`, `usage_mode::read`); read at owner start and by each offline
+  command, set with `switchboard usage-mode smart|timer|on-demand` or MCP `switchboard_usage_mode`
+  (`Operation::UsageMode`). `timer` is 0.7.120's cadence below; `on_demand` makes no check on a
+  schedule (no due list, no pull-in), while headers, a switch's candidate and a person's check work
+  as in `smart` (`usage_mode::tests`).
+- **Headers count as a check.** `Store::observe_generation` with `source: response_headers` whose
+  windows include both `HEADER_WINDOWS` (`five_hour`, `seven_day`) and whose account the usage
+  endpoint answered in this process within `PASSIVE_CEILING_SECONDS` = 1800 s
+  (`Store::endpoint_seen`, memory only): `next_check_at = max(existing, min(observed + 180,
+  endpoint + 1800))`, near the limit `observed + HEADER_FRESH_SECONDS` (60) instead of 180. A
+  partial header, a header before the endpoint's first answer and one past the ceiling keep
+  `max(existing, observed)` as before
+  (`a_complete_header_observation_postpones_the_next_check_up_to_the_ceiling`). The merged usage
+  keeps the oldest age of the windows it holds, as before
+  (`partial_headers_never_freshen_an_unobserved_low_quota_window`); `Store::header_figure` reads
+  the two header windows of the account in use, and the decision takes them only at or over the
+  threshold (`the_account_in_use_switches_on_its_header_figures_while_its_other_windows_age`).
+- **Cadence.** `next_quota_check(in_use || routed, …)`: an account that only could be switched to
+  is on the idle cadence in `smart` and `on_demand` (`timer`: `in_use || routed || rotates`).
+  `monitor::due_at` spreads every schedule of 120 s or more by ± 15 % (`usage_budget::jittered`,
+  deterministic per account and schedule; not in `timer`).
+- **Budget.** `UsageGate::budget` (`usage_budget::UsageBudget`, unbudgeted in a test's
+  `UsageGate::default()`): per provider a bucket of `TOKEN_SECONDS` = 30 s of refill per check,
+  `BURST` = 4; the pass takes a token per check (`monitor::choose_checks`, at most 4 a pass);
+  a person's check (`check_by_person`) and a candidate's check take one with `DEBT` = 4 of room;
+  every check holds one of `IN_FLIGHT` = 2 places (the background only a free one). Past the debt
+  a person's check answers `usage_budget::USAGE_PACED` and logs `usage_check` `paced`
+  (`the_bucket_allows_its_burst_then_two_a_minute`,
+  `the_budget_holds_an_hour_of_passes_with_32_accounts_to_about_120_checks`: 100 to 130 an hour
+  in `smart`, over 400 in `timer`).
+- **Provider hold.** A usage check answered 429 records the account's hold (SB-39, unchanged) and
+  `UsageBudget::refused(provider, at, retry_after)`: held until `at + max(retry_after,
+  min(900 · 2^(n-1), 3600))` for the n-th 429 in a row, never shortening a longer hold; a success
+  clears it (`a_429_holds_the_whole_provider_and_doubles_on_repeats_up_to_an_hour`). While held,
+  `due_now_at` leaves every account of the provider out and `check_as` answers
+  `USAGE_RATE_LIMITED` before any renewal or credential read, logging `usage_check`
+  `provider_held` (`a_429_on_one_accounts_check_holds_every_account_of_the_provider`).
+  `usage-provider-holds.json` (0600, `{version: 1, providers: {claude|codex: {until,
+  recorded_at, strikes}}}`), a hold over at start dropped, one stamped ahead of the clock moved
+  to now plus what was left. Log event `usage_provider_held` (provider, seconds, strikes).
+- **Fresh candidate.** `Store::rotation_candidate_to_confirm(policy, current, now, held)`: None
+  unless the account in use is at or over its threshold on a current figure (from metadata, no
+  credential read), not held by a limit (SB-98 takes the last known figure and waits for
+  nothing); otherwise the decision ranked with `CANDIDATE_RANK_MAX_AGE_SECONDS` = 900 names a
+  candidate whose figure is older than the policy allows. `monitor::confirm_candidates` checks at
+  most 2 such a pass before the rotation transaction (`check_candidate`, log event
+  `usage_confirm`); `rotation_decision_with` still switches only on figures within the policy's
+  age, the account in use within `max(max_age, CURRENT_MAX_AGE_FLOOR_SECONDS = 300)`
+  (`a_candidate_known_only_from_an_older_figure_is_checked_fresh_before_the_switch`,
+  `a_switch_checks_its_candidate_fresh_before_it_moves`). The proxy's failover (DEC-0002) is
+  unchanged.
+- **Near the limit.** An endpoint answer near the limit is not checked again before the last
+  complete header plus 60 s, and `pull_in_next_accounts` skips an account whose header is under
+  60 s old (`near_its_limit_the_endpoint_is_asked_only_once_no_header_came_for_a_minute`,
+  `the_pools_next_account_is_not_pulled_in_while_its_headers_are_fresh`).
+- **Writes.** A changed header observation is held in memory (`Store::hold`) and written by
+  `flush_headers_if_older(now, HEADER_FLUSH_SECONDS = 60)` from the pass, or at the drain
+  (`header_observations_reach_the_disk_at_most_once_a_minute`).
+
 ## Near-limit quota checks (SB-106, 2026-10-12)
 
 - **Who.** The account a session works on where a switch can follow it: the pool's managed route,
@@ -302,8 +364,8 @@ Account list order is display-only; it never selects/activates. Within provider/
   `CHECK_NEAR_LIMIT_SECONDS` 60; `AT_LIMIT_PERCENT` 98 → `CHECK_AT_LIMIT_SECONDS` 30, one pass
   (LC-08 holds: nothing faster than the pass); 100 → none (full until a reset); both less
   `NEAR_LIMIT_SLACK_SECONDS` (below). Applied in
-  `observe_generation` as `min(next_quota_check, near_limit_check)`; response headers still
-  never move the schedule.
+  `observe_generation` as `min(next_quota_check, near_limit_check)`; since SB-518 a complete
+  header moves it (see [Smart usage checks](#smart-usage-checks-sb-518-dec-0032)).
 - **The next account.** `Store::pull_in_next_accounts(now)`: for each such pool whose current
   account was measured ≥ 95 % within ten minutes, or is held by a limit (`Store::limited`), the
   account a failover would most likely take (`Store::next_to_check`: `failover_candidate`'s order
