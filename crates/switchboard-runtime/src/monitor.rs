@@ -802,14 +802,15 @@ pub(crate) async fn probe(
     };
     // SB-518: a 429 another check met while this one renewed or waited holds the provider; a
     // request sent now would ask through it, and its answer would end that hold.
-    if gate.budget.held_until(account.provider, now()).is_some() {
+    // One clock read: a hold stamped at or after it was not seen here and stays (`succeeded_since`).
+    let sent = now();
+    if gate.budget.held_until(account.provider, sent).is_some() {
         crate::oplog::event(
             "usage_check",
             &[("outcome", crate::oplog::Field::Code("provider_held"))],
         );
         return Err(UNSENT.into());
     }
-    let sent = now();
     // The hold below binds to this credential: the one the provider actually answered.
     let result = probe_provider(store.clone(), id, generation.clone(), gate).await;
     let checked = now();
