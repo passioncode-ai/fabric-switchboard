@@ -1493,13 +1493,23 @@ mod runs {
         // Before its deadline nothing happens; past it (one minute), the pass stops it.
         sweep(b.root.path(), crate::monitor::now(), None);
         assert!(crate::launches::get(b.root.path(), &id).unwrap()["ended"].is_null());
+        // SB-509: the run's log was just written, so at its deadline it may be extended, never
+        // past three times its limit; past that, the pass stops it whatever its log says.
         sweep(b.root.path(), crate::monitor::now() + 61, None);
+        sweep(
+            b.root.path(),
+            crate::monitor::now() + EXTEND_LIMIT * 60 + 1,
+            None,
+        );
         let record = crate::launches::get(b.root.path(), &id).unwrap();
         assert_eq!(record["ended"]["kind"], TIMED_OUT);
         assert_eq!(record["state"], "ended");
         assert!(!b.root.path().join(LIVE_FILE).exists());
         // SB-407: the duty officer's stop at the deadline, intent then outcome.
-        let lines = journal(b.root.path());
+        let lines: Vec<Value> = journal(b.root.path())
+            .into_iter()
+            .filter(|l| l["action"] != EXTEND_ACTION)
+            .collect();
         let kinds: Vec<(&Value, &Value, &Value)> = lines
             .iter()
             .map(|l| (&l["phase"], &l["outcome"], &l["by"]))
