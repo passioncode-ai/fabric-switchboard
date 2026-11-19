@@ -171,6 +171,15 @@ enum Command {
         #[command(subcommand)]
         command: Option<DutyCmd>,
     },
+    /// Whether Switchboard continues, after this computer restarts, the Claude Code sessions the
+    /// restart cut in the middle of a turn: those it launched that were running and wrote in the
+    /// two hours before the restart, never one closed on purpose or a board run (with your own
+    /// sign-in off, only its own homes), at most five, each in a session host you can attach to.
+    /// Without a subcommand: the setting and what was continued.
+    BootResume {
+        #[command(subcommand)]
+        command: Option<BootResumeCmd>,
+    },
     /// Whether Switchboard reads or changes your own Claude Code and Codex sign-in on this
     /// computer. Off on a teammate's computer that only serves seats an organization
     /// delegated: nothing captures, activates, renews or copies from your own sign-in, and the
@@ -1148,6 +1157,13 @@ enum OwnSignInCmd {
     /// Switchboard may read and change your own sign-in (the default).
     On,
     /// Switchboard never reads or changes your own sign-in on this computer.
+    Off,
+}
+#[derive(Subcommand)]
+enum BootResumeCmd {
+    /// Continue cut sessions after a restart (the default).
+    On,
+    /// Leave sessions a restart cut as they are.
     Off,
 }
 #[derive(Subcommand)]
@@ -3079,6 +3095,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         },
         // Answered before the owner is asked (`ssh_serve`); here only to keep this match whole.
         Command::SshServe { .. } => return Err(ssh_serve::NOT_THROUGH_SSH.into()),
+        Command::BootResume { command } => Operation::BootResume {
+            on: command.as_ref().map(|c| matches!(c, BootResumeCmd::On)),
+        },
         // Answered before the owner is asked (`remote_status`); here only to keep this match whole.
         Command::RemoteStatus => return remote_status(&root).await,
         Command::Duty { command } => {
@@ -6870,6 +6889,8 @@ mod mcp_parity {
         ),
         ("capacity set", Tool("switchboard_capacity")),
         ("capacity clear", Tool("switchboard_capacity")),
+        ("boot-resume on", Tool("switchboard_boot_resume")),
+        ("boot-resume off", Tool("switchboard_boot_resume")),
         ("duty on", Tool("switchboard_duty")),
         ("duty off", Tool("switchboard_duty")),
         ("duty set", Tool("switchboard_duty")),

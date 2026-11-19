@@ -4,6 +4,22 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  // SB-450 (DEC-0030, 2026-11-18): continuing the sessions a restart cut. Copylot en-US reports 52cdef07…9f96a565, ru-RU 149e0051…b8c22300 (suggestions only).
+  "Sessions after a restart": "Сессии после перезагрузки",
+  "After this computer restarts, Switchboard continues the Claude Code sessions the restart cut in the middle of a turn: those it launched that were working and wrote in the two hours before. It leaves alone the sessions that waited for you, those you or Switchboard closed, and board runs. While Switchboard leaves your own sign-in alone, only sessions in its own homes are continued. Each opens as itself in a session you can attach to from Fabric Dashboards. At most five after one restart.": "После перезагрузки компьютера Switchboard продолжает сессии Claude Code, прерванные ею посреди хода: запущенные им, работавшие и писавшие в последние два часа перед ней. Сессии, ждавшие вас, закрытые вами или Switchboard, и запуски с доски он не трогает. Пока Switchboard не трогает ваш собственный вход, продолжаются только сессии в его собственных домашних папках. Каждая открывается как та же сессия, к ней можно подключиться из Fabric Dashboards. Не больше пяти после одной перезагрузки.",
+  "On this system sessions are not continued after a restart.": "На этой системе сессии после перезагрузки не продолжаются.",
+  "Continue my sessions after a restart": "Продолжать мои сессии после перезагрузки",
+  "Sessions a restart cuts will be continued.": "Сессии, прерванные перезагрузкой, будут продолжены.",
+  "Sessions a restart cuts are left as they are.": "Сессии, прерванные перезагрузкой, остаются как есть.",
+  "After the last restarts": "После последних перезагрузок",
+  "Continued in {folder} after the restart.": "Продолжена в {folder} после перезагрузки.",
+  "Not continued in {folder}: the session pool was full.": "Не продолжена в {folder}: пул сессий был заполнен.",
+  "Not continued in {folder}: five sessions were already continued.": "Не продолжена в {folder}: пять сессий уже были продолжены.",
+  "Not continued in {folder}: Switchboard stopped while starting it.": "Не продолжена в {folder}: Switchboard остановился во время её запуска.",
+  "Not continued in {folder}: it could not start.": "Не продолжена в {folder}: она не смогла запуститься.",
+  "Nothing was continued: Switchboard first ran more than six hours after the restart.": "Ничего не продолжено: Switchboard впервые запустился больше чем через шесть часов после перезагрузки.",
+  "The setting for continuing sessions after a restart (boot-resume.json) could not be read. Set it again, or delete the file for the default.": "Настройку продолжения сессий после перезагрузки (boot-resume.json) не удалось прочитать. Задайте её снова или удалите файл, чтобы вернуть значение по умолчанию.",
+  "The setting for continuing sessions after a restart could not be saved.": "Настройку продолжения сессий после перезагрузки не удалось сохранить.",
   // SB-550 (DEC-0033, 2026-11-19): the other machines read every minute, with their sessions and health. Copylot en-US reports f4524725…79b729de, review of PR #861 71b60267…8267b674; ru-RU e1b07239…4486543b, review d7eaf7ed…e2d595fb (docs/brand/strings.md).
   "This machine's Switchboard has not answered three reads in a row. Check that the machine is on and reachable over ssh.": "Switchboard на этой машине не ответил на три чтения подряд. Проверьте, что машина включена и доступна по ssh.",
   "This machine's Switchboard reports a failing health check. Open Other machines to see which.": "Switchboard на этой машине сообщает о проваленной проверке здоровья. Откройте «Другие машины», чтобы увидеть, какую.",
@@ -2128,6 +2144,7 @@ export const RU: Record<string, string> = {
   // Sessions page wave 1 (2026-11-16): the audit of the page and its restart flow.
   "Unable to load sessions": "Не удалось загрузить сессии",
   "Ended by a restart and not back, can continue": "Завершена перезапуском и не вернулась, можно продолжить",
+  "Cut by a computer restart, continued after it": "Прервана перезагрузкой компьютера, продолжена после неё",
   "Asking this computer and your other machines…": "Загрузка с этого компьютера и других ваших машин…",
   "No restart wave has run on this computer.": "На этом компьютере ещё не было перезапуска.",
   "The sessions could not be read. Refresh to retry.": "Не удалось прочитать сессии. Обновите, чтобы повторить.",

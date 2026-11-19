@@ -110,6 +110,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-102 | Delegate an organization's subscription to a teammate's machine and call it back | draft |
 | SCN-103 | Keep Switchboard away from my own sign-in on a teammate's computer | draft |
 | SCN-104 | Keep a group supplied from the default group, by priority | draft |
+| SCN-105 | Have my sessions go on after the computer restarts | draft |
 ### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -2284,3 +2285,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** ui-logic `the_feed_reads_every_state` (`scripts/test-ui-logic.mjs`); runtime `feed::tests::*`, among them `a_placement_goes_back_only_when_truly_out_and_replaced` and `a_pass_feeds_a_group_and_turning_the_feed_off_gives_everything_back`; `tests/mcp.rs` (`switchboard_feed`). No walk in the installed app yet; design pass B NOT_RUN.
 **Product:** unobserved
 **Traces:** SB-419, DEC-0028, DEC-0012, SCN-090
+
+### SCN-105: Have my sessions go on after the computer restarts
+**Persona:** P-01
+**Goal:** A person whose Mac restarts (an update, a crash, a power cut) finds the Claude Code sessions it cut working again as themselves, each in a session host they can open from Fabric Dashboards, without opening anything (SB-450, DEC-0030).
+**Preconditions:** the owner (the app or `switchboard serve`) ran before the restart and starts again after it; `boot-resume.json` absent or `on: true`; macOS or Linux.
+**Entry point:** Settings → “Sessions after a restart”. CLI `switchboard boot-resume [on|off]`; MCP `switchboard_boot_resume`.
+**Steps:**
+1. Before the restart, sessions Switchboard launched run; the session watch notes them each minute it sees a change.
+2. The computer restarts; the owner starts at login. Within its first minute, each session the restart cut in the middle of a turn (running at the last look, its transcript written after its last turn ended, in the two hours before the restart and not since, its last words not the person's `/exit`, no end recorded or one by the shutdown's signal, not closed on purpose by the person, the duty officer or a session host, not a board run, nothing holding it; with the person's own sign-in off, only in Switchboard's own homes) is continued as itself with a prompt to go on, at most five, newest first, inside the session pool. A session that waited for the person between turns, was closed on purpose or is a board run is left as it is.
+3. Open the fold → the note, *Continue my sessions after a restart* (checked) and “After the last restarts” with the last five outcomes and their time: “Continued in {folder} after the restart.”, “Not continued in {folder}: the session pool was full.”, “Not continued in {folder}: five sessions were already continued.”, “Not continued in {folder}: Switchboard stopped while starting it.”, “Not continued in {folder}: it could not start.”, and “Nothing was continued: Switchboard first ran more than six hours after the restart.”.
+4. Uncheck it → “Sessions a restart cuts are left as they are.”; check it → “Sessions a restart cuts will be continued.”.
+**Alt paths:** on Windows “On this system sessions are not continued after a restart.”; a session another agent or the person continued first (a process or host holds it, or a launch since the restart names it) is left alone; the owner quits while starting one → the next start records it as continued when something holds it, else as interrupted, and never starts it again; the first restart after updating to this version continues nothing (no earlier look was kept).
+**Expected result:** no session the restart cut in a turn is lost or started twice, and none that waited for the person, was closed on purpose or is a board run is started; each continuation is a launch of its own, attachable by its launch id, whose record names the launch it continues.
+**UI elements:** the fold and its state, the checkbox, the list of outcomes.
+**States covered:** reading, read failed, on, off, nothing continued, continued, refused by the pool, over the limit, interrupted, failed, unsupported.
+**Errors & recovery:** a continuation that could not start ends its new launch as `not_started` and leaves the old session's history; `sessions continue <id>` continues it by hand.
+**Status:** draft
+**Meaning:** SB-450 (Fabric Dashboards, board request 737b04e6: after the Mac rebooted nothing continued the sessions).
+**Copy:** checked with Copylot, register ui, en-US and ru-RU; report ids in [strings](../brand/strings.md#sessions-after-a-restart-scn-105-sb-450-dec-0030).
+**Coverage:** runtime `boot_resume::tests::*`, `resumable::tests::a_session_a_launch_began_to_continue_a_moment_ago_is_not_continued_again`; `tests/mcp.rs` (tool list). No walk in the installed app yet; design pass B NOT_RUN.
+**Product:** unobserved
+**Traces:** SB-450, DEC-0030, SCN-096

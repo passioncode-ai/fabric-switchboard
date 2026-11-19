@@ -144,6 +144,18 @@ const ALLOWLIST = {
   "Switchboard could not prepare this hand-over's session with permission prompts on. It is still waiting: take it without --ask, or leave it for Terminal.": 'SB-405: handovers run --ask is CLI only',
   // core projects.rs restore_project(): called only by backup::restore, which counts a refusal
   // as a project not put back and never returns the message.
+  // runtime boot_resume.rs (SB-450): reason codes written in `boot-resume.jsonl`; the window
+  // shows its own sentence per outcome (`bootResumeLineText`), never the code.
+  'no_cli': 'SB-450: a journal reason code, shown as its outcome sentence',
+  'no_script': 'SB-450: a journal reason code, shown as its outcome sentence',
+  'unsupported': 'SB-450: a journal reason code, shown as its outcome sentence',
+  'not_ours': 'SB-450: a journal reason code, shown as its outcome sentence',
+  // runtime session_host.rs start_detached (SB-450): `launch --hosted` and `sessions continue
+  // --hosted` print it to their terminal, and the owner's pass after a restart journals it; no
+  // window or MCP request starts a host.
+  'The session host could not start.': 'SB-450: hosted starts print to the CLI or go to the boot-resume journal',
+  'The session host stopped before the session started.': 'SB-450: hosted starts print to the CLI or go to the boot-resume journal',
+  'The session host did not answer within ten seconds.': 'SB-450: hosted starts print to the CLI or go to the boot-resume journal',
   'Project already here.': 'swallowed by backup restore',
   'Organization already here.': 'swallowed by backup restore (SB-109)',
   'Nothing to restore.': 'swallowed by backup restore (SB-109)',

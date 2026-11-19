@@ -32,12 +32,18 @@ impl Accounts for Homes<'_> {
     fn launch_markers(&self) -> HashMap<u32, String> {
         let mut found = HashMap::new();
         for home in self.launched_homes() {
-            let Some(pid) = std::fs::read_to_string(home.join(".session-pid"))
+            let marker = home.join(".session-pid");
+            let Some(pid) = std::fs::read_to_string(&marker)
                 .ok()
                 .and_then(|t| t.trim().parse::<u32>().ok())
             else {
                 continue;
             };
+            // SB-450 (review round 3 of #836): a marker from before this boot, or older than the
+            // process now holding its pid, names a launch that process never belonged to.
+            if crate::launch::marker_outlived(&marker, pid) {
+                continue;
+            }
             let launch = std::fs::read(home.join(crate::launch::SESSION_RECORD))
                 .ok()
                 .and_then(|b| serde_json::from_slice::<Value>(&b).ok())

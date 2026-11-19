@@ -12,8 +12,9 @@ group's id is its `pool` (`default` is the default group). **Automatic switching
 names and fields call rotation. Say group and automatic switching to the person.
 
 `switchboard mcp --read-only` lists the 39 tools that only read (every tool under
-[Read tools](#read-tools)) and, since SB-517, the 13 write tools that also have a read form:
-`switchboard_capacity`, `switchboard_own_sign_in`, `switchboard_duty` (a dry run included),
+[Read tools](#read-tools)) and, since SB-517, the 14 write tools that also have a read form:
+`switchboard_capacity`, `switchboard_own_sign_in`, `switchboard_boot_resume` (without `on`),
+`switchboard_duty` (a dry run included),
 `switchboard_app` (`updates` and `login_item` without `enabled`), `switchboard_analytics`,
 `switchboard_balance`, `switchboard_feed`, `switchboard_anthropic_keys`,
 `switchboard_codex_route`, `switchboard_project_sources`, `switchboard_machine_set` (`keys`, and
@@ -22,7 +23,7 @@ names and fields call rotation. Say group and automatic switching to the person.
 as reads and answer only that form: a call with a field that changes something, or any other
 write tool, is refused with `isError: true` and `structuredContent.error.code` `read_only`, never
 as an unknown tool. A session Switchboard launches in isolated mode gets that set. The server
-lists 96 tools; each has a section below.
+lists 97 tools; each has a section below.
 
 Since SB-517 every call is checked against its tool's `inputSchema` before it runs (types,
 `required`, `enum`, `minimum` and `maximum`, `minLength` and `maxLength`, list items and size,
@@ -923,6 +924,23 @@ usage check holds the whole provider for at least 15 minutes, doubling on repeat
 candidate and a person's check. Without `mode` it reads `{usage_mode, modes}`; `mode` changes it,
 only when the operator asks. Kept in `<data>/usage-mode`. A person's check (`switchboard_usage`
 with `refresh`) runs ahead of the budget by at most 4 checks, then answers that checks are paced.
+
+### `switchboard_boot_resume`: `on?`
+
+Continuing sessions after this computer restarts (SB-450, DEC-0030). The owner's first pass after
+a restart continues each Claude Code session the restart cut, as itself (`claude --resume <id>`
+with a prompt to go on) in a session host of its own, attachable by its launch id: Switchboard
+launched it, it was running at the owner's last look before the restart, the restart cut it in a
+turn (its transcript written after its last turn ended, in the two hours before the restart and not
+since, its last words not the person's `/exit`), it has no end (or one by the shutdown's signal),
+nobody closed it on purpose (the person, the duty officer, a session host), it is not a dispatched
+board run, and no process, session host or later launch holds it; with the person's own sign-in
+off, only sessions in Switchboard's own homes; a first pass more than six hours after the restart
+continues nothing (`too_late`). At most five after one restart, newest first, inside the session
+pool; each intent and outcome is journalled in `<data>/boot-resume.jsonl` and never repeated.
+Without `on` it reads `{settings: {on}, boot_time, last_look, window_minutes, max_per_boot, recent,
+supported}`; `on` changes it, only when the operator asks. Kept in `<data>/boot-resume.json`, on
+when absent.
 
 ### `switchboard_duty`: `on?`, `stuck_minutes?`, `waiting_minutes?`, `idle_minutes?`, `max_age_hours?`, `run?`, `dry_run?`
 

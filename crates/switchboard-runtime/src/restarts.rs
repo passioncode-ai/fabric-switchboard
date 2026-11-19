@@ -734,7 +734,12 @@ pub fn tick(root: &Path, now: i64) {
             continue;
         } else {
             let path = terminal_script_path(root, &wave.id, &session);
+            // SB-450: marked before the window opens (no launch record names a Terminal resume).
+            crate::resumable::mark_resuming(root, &session, now);
             let started = path.is_file() && crate::launch::start_terminal(&path).is_ok();
+            if !started {
+                crate::resumable::unmark_resuming(root, &session);
+            }
             e.state = if started { "resuming" } else { "failed" }.into();
             if !started {
                 e.reason = Some("not_started".into());
@@ -944,9 +949,14 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
         json!({"session": e.session, "config": e.config, "cwd": e.cwd, "reason": "restart",
             "at": crate::monitor::now(), "by": "wave"}),
     );
+    // SB-450: marked before the window opens (no launch record names a Terminal resume).
+    crate::resumable::mark_resuming(root, &e.session, crate::monitor::now());
     match crate::launch::start_terminal(&path) {
         Ok(()) => ("resuming", None),
-        Err(_) => ("failed", Some("not_started")),
+        Err(_) => {
+            crate::resumable::unmark_resuming(root, &e.session);
+            ("failed", Some("not_started"))
+        }
     }
 }
 

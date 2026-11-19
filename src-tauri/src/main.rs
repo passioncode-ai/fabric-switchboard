@@ -273,6 +273,15 @@ async fn send_account(
         })
         .await
 }
+/// SB-450: whether the sessions a restart cut are continued; `on` changes it.
+#[tauri::command]
+async fn boot_resume(on: Option<bool>, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::BootResume { on })
+        .await
+}
 /// SB-403 S3: whether Switchboard reads or changes the person's own sign-in; `on` changes it.
 #[tauri::command]
 async fn own_sign_in(on: Option<bool>, state: State<'_, Slot>) -> Result<Value, String> {
@@ -2247,6 +2256,7 @@ fn main() {
             feed,
             capacity,
             duty,
+            boot_resume,
             own_sign_in,
             session_tree,
             session_rows,

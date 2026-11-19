@@ -959,9 +959,15 @@ fn resume(root: &Path, session: &str, config: &Path, cwd: &str, prompt: bool) ->
     {
         return "closed_not_restarted";
     }
+    // SB-450: a Terminal resume writes no launch record; the mark keeps a continuation after a
+    // restart from starting a second copy while this window starts the session.
+    crate::resumable::mark_resuming(root, session, crate::monitor::now());
     match crate::launch::start_terminal(&path) {
         Ok(()) => "restarted",
-        Err(_) => "closed_not_restarted",
+        Err(_) => {
+            crate::resumable::unmark_resuming(root, session);
+            "closed_not_restarted"
+        }
     }
 }
 #[cfg(not(unix))]
@@ -974,6 +980,30 @@ const INTERRUPTED_WINDOW: i64 = 3600;
 /// How old an intent is before a check finishes it: older than any act of a running check (a stop
 /// waits at most ten seconds).
 const SETTLE_SECONDS: i64 = 60;
+
+/// SB-450 (review round 1 of #836): whether a restart of `session` is begun and not finished (its
+/// intent has no outcome, within `INTERRUPTED_WINDOW`): the act or the check that finishes it
+/// resumes the session, so nothing else may.
+pub fn restart_open(root: &Path, session: &str, now: i64) -> bool {
+    open_restart(&journal(root), session, now)
+}
+
+fn open_restart(lines: &[Value], session: &str, now: i64) -> bool {
+    let mut open: Option<&Value> = None;
+    for line in lines.iter().filter(|l| l["session"] == session) {
+        if line["phase"] == "intent" {
+            open = Some(line);
+        } else if open.is_some_and(|o| settles(line, o)) {
+            open = None;
+        }
+    }
+    open.is_some_and(|o| {
+        o["action"] == "restart"
+            && o["at"]
+                .as_i64()
+                .is_some_and(|at| now - at < INTERRUPTED_WINDOW)
+    })
+}
 
 /// SB-397 W0.1: the acts whose intent has no outcome line, newest intent per session, within
 /// `INTERRUPTED_WINDOW`. Pure, for tests.
