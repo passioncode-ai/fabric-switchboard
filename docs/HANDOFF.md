@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-19: SB-561 (W11.2) one continuation module, PR #871, branch `sb-561-resume`
+
+- **Asked.** Wave W11.2 of the [plan](plans/2026-11-19-lifecycle-remote-access/plan.md), spec S1.1 to S1.7: findings M1-01, M1-03 to M1-07, M1-21 to M1-23, M1-45, M5-02 of the [audit](reports/2026-11-19-lifecycle-remote-access-audit/m1-local-lifecycle.md).
+- **Built.** `crates/switchboard-runtime/src/resume.rs`: `resume::build` (one builder for Continue, boot resume, duty restart, restart wave), `resume::check` (account through the store, fresh sign-in in an isolated home, managed route at a limit), per-launch `permissions` and `env` in launch records, `.session-pid` for a resume with no launch of its own and `ensure_idle` reading live session files, in-place restart through a live host in the duty officer, `duty::tree_of` by config folder, gates in `recovery::claim`, the fallback and the stop spool.
+- **Decisions.** [DEC-0034](DECISIONS.md#dec-0034-every-continuation-of-a-session-is-built-from-the-launch-it-continues-its-account-checked-first). A session no launch record names resumes with no permission flags; a record from before this module resumes with the person's setting; the fallback skips only a workflow being continued or whose stop a host claimed, and settles the waiting stops of a workflow it hands on.
+- **Checks.** Targeted runtime tests on the Studio (276 passed before two test-timing fixes); the full gate runs through `~/DATA/_worktrees/sb-gate.sh`, result on the PR.
+- **Not done.** One shared journal across the four continuation paths (SB-463 stays open for it); DEC-0027's "turned off" lands with #821 in `resume::turned_off`; a live run on a Mac (proved on synthetic data folders).
+
+**Exact next task.** Read the gate's `EXIT` line for PR #871 on the Studio (`~/DATA/_worktrees/sb-561.gate2.log`), run one fresh review round, fix, re-gate; then hand it to the coordinator for merge.
+
 ## 2026-11-18: SB-450 sessions continued after a restart, SB-451 launch records name their process's session, on branch `boot-resume`
 
 - **Asked.** Fabric Dashboards' board request 737b04e6 (thread a9844103): after the Mac rebooted nothing continued the sessions (SB-450); launch 38e41114 recorded another session's id and a transcript that never existed (SB-451). The coordinator added SB-455 (no login `PATH` in launch scripts, a likely cause of SB-451); it landed separately in #838, and this branch's own one-line PATH change was dropped when main was merged (2026-11-19).
