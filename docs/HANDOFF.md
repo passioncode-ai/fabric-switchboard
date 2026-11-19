@@ -2,7 +2,7 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
-## 2026-11-19: DEC-0037, no access to the operator's network for teammates; the seat relay designed (SB-575), on branch `sb-574-seat-relay`
+## 2026-11-19: DEC-0037, no access to the operator's network for teammates; the seat relay designed (SB-575), on branch `sb-574-seat-relay` (PR #876)
 
 - **Asked.** The operator, 2026-11-19, as a seat was about to be delegated to a teammate's Mac over ssh (DEC-0025): nobody outside the operator's own machines gets access to the operator's network; work only within the setup as configured. Earlier the same day: the seat is the teammate's ordinary console session, managed by the operator, chosen per project, set up through Claude Code over MCP.
 - **Done (docs only).** [DEC-0037](DECISIONS.md#dec-0037-a-teammates-computer-gets-a-seat-through-passioncodeai-never-through-the-operators-network) recorded and DEC-0025's status narrowed (ssh delegation only between the operator's own machines); the [seat relay design](plans/2026-11-19-seat-relay/design.md) (device keys at `org connect`, end-to-end encrypted envelopes through Vesta's per-device mailbox, replay rules, typed failure states, threat classes, what Vesta must provide, open questions Q1 to Q9, waves W1 to W6, tests); ORGANIZATION.md and its Russian twin, CLI.md, CONTRACTS, the skill's tools reference, SCN-102 and the MCP description of `switchboard_account_send` no longer tell a teammate to join a network, turn on Remote Login or add an `authorized_keys` line; SB-575 on the board; SB-403's S5 withdrawn.
