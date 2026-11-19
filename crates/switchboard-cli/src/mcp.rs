@@ -211,11 +211,13 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_anthropic_keys","title":"Anthropic keys for agents","description":"The Anthropic API keys agents run on directly, each under a name the person chose, such as team-a or personal: name, saved_at and default model, never a key. With name and model, changes that key's default model (an Anthropic id such as claude-sonnet-5-5). Saving or removing a key is the person's: switchboard agents anthropic set <name> --key-stdin. A launch picks one: switchboard agents launch hermes --anthropic <name> [--model ...] [--effort xhigh]; Switchboard counts no ceiling for these keys.","inputSchema":{"type":"object","properties":{"name":{"type":"string","description":"With model: the key whose default model changes."},"model":{"type":"string","description":"With name: the new default model."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_observatory_keys","title":"Provider keys in Observatory","description":"The Anthropic, OpenAI and OpenRouter keys Project Observatory holds that an agent can run on, by project, env and name (slot), never a value: kind, expiry, and where each is already saved here (added: an account in the pay-per-token group, a named Anthropic key, an OpenRouter key). Admin, management, provisioning and BYOK keys are left out. state is ok, absent (Observatory is not installed; why says so) or unreadable. Add one with switchboard_observatory_key_add.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_observatory_key_add","title":"Add a key from Observatory","description":"Saves a key Project Observatory holds in Switchboard by its slot (project/env/NAME), so an agent starts on it at once. The value goes from Observatory's vault to Switchboard's through a pipe; it never appears in an argument, a file, a log or this answer. An Anthropic key becomes an account in the pay-per-token group (to: account, the default), counted against that group's daily ceiling; to: agent or both also saves it as a named key Hermes runs on directly (no ceiling counts that). An OpenRouter key becomes this computer's OpenRouter key, or a group's with pool. An OpenAI key is refused for now. A name or key already saved is kept unless replace is true. The answer lists what was saved and the next steps.","inputSchema":{"type":"object","properties":{"slot":{"type":"string","description":"project/env/NAME, as switchboard_observatory_keys lists it."},"to":{"type":"string","enum":["account","agent","both"],"description":"For an Anthropic key; default account."},"as":{"type":"string","description":"The account's name, or the named key's name; default from the project."},"pool":{"type":"string","description":"For an OpenRouter key: the group id whose folders run on it."},"model":{"type":"string","description":"The named key's default model."},"replace":{"type":"boolean","description":"Replace a named key or an OpenRouter key already saved there."}},"required":["slot"],"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_launch_keys","title":"Keys an agent can start on","description":"Every key an agent can start on here, by name and never a value: the OpenRouter key a launch in the folder spends, marked default (its group's own, else this computer's), the other OpenRouter keys with the group whose folders use them (why_not), then the Anthropic keys for an agent that takes one (Hermes), and for Claude Code and Hermes the pay-per-token group's Claude API keys as kind group (pool, group, account_id, selected; usable once the group is on, has a daily ceiling, holds the folder and has the key selected, else why_not). Every key carries metered: whether a ceiling counts it (an Anthropic key's direct launch does not). none_usable says no key is saved to start on. Launch with switchboard_launch_agent on the default OpenRouter key, or with an Anthropic key's name.","inputSchema":{"type":"object","properties":{"agent":{"type":"string","description":"The agent's catalog id, such as hermes."},"folder":{"type":"string","description":"The absolute folder it would start in; without it, this computer's key counts as the default."}},"required":["agent"],"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_launch_keys","title":"Keys an agent can start on","description":"Every key an agent can start on here, by name and never a value: the OpenRouter key a launch in the folder spends, marked default (its group's own, else this computer's), the other OpenRouter keys with the group whose folders use them (why_not), then the Anthropic keys for an agent that takes one (Hermes), and for Claude Code and Hermes the pay-per-token group's Claude API keys as kind group (pool, group, account_id, selected; usable once the group is on, has a daily ceiling, holds the folder and has the key selected, else why_not). Every key carries metered: whether a ceiling counts it (an Anthropic key's direct launch does not). none_usable says no key is saved to start on. No MCP tool launches an agent yet: launch from the window, or with switchboard agents launch on the default OpenRouter key, or with --anthropic and a key's name.","inputSchema":{"type":"object","properties":{"agent":{"type":"string","description":"The agent's catalog id, such as hermes."},"folder":{"type":"string","description":"The absolute folder it would start in; without it, this computer's key counts as the default."}},"required":["agent"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_agents","title":"Coding agents on this computer","description":"The coding agents Switchboard knows: which are installed here, which the operator enabled for taking over work (fallback chains and switchboard continue; account switching is separate), the machine's default agent (null is Auto: switchboard continue without an account hands work to it, and Fabric starts with it unless a project sets its own), the command Switchboard runs for each, and the recommended OpenRouter models. Changing these is the operator's (the Agents page or switchboard agents enable|disable|default).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_kimi_accounts","title":"Kimi Code accounts","description":"The operator's Kimi Code subscription accounts saved in Switchboard: label, region, membership tier and each plan window's used percent and reset (5-hour, 7-day, monthly), asked of Kimi; plus the ordinary kimi CLI's sign-in. Never a token. Signing in, launching and removing are the operator's (the app or switchboard kimi).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_kimi_accounts","title":"Kimi Code accounts","description":"The operator's Kimi Code subscription accounts saved in Switchboard: label, region, membership tier and each plan window's used percent and reset (5-hour, 7-day, monthly), asked of Kimi; plus the ordinary kimi CLI's sign-in. Never a token. Signing in and launching are the operator's (the app or switchboard kimi); remove one with switchboard_kimi_remove when the operator asks.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_kimi_login","title":"Sign in a Kimi Code account","description":"Start the official Kimi Code sign-in for a new account (action begin: label, region; the person finishes it in the browser), follow it (status, finish once the person signed in, cancel), or sign an existing account in again (again: id). The person signs in; this never takes a password or a token. Only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["begin","status","finish","cancel","again"]},"id":{"type":"string","minLength":1},"label":{"type":"string","maxLength":80},"region":{"type":"string","enum":["mainland-cn","global"],"description":"mainland-cn (kimi.com, the default) or global (kimi.ai)."}},"required":["action"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_kimi_rename","title":"Rename a Kimi Code account","description":"Rename a saved Kimi Code account. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","minLength":1,"description":"The account id from switchboard_kimi_accounts."},"label":{"type":"string","minLength":1,"maxLength":80}},"required":["id","label"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_kimi_remove","title":"Remove a Kimi Code account","description":"Forget a saved Kimi Code account and delete its home here, as the window's Remove does; this cannot be undone (sign the account in again to bring it back). Refused while a kimi session runs in it. removed is false when no such account was saved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":200,"description":"The account id from switchboard_kimi_accounts."}},"required":["id"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_openrouter_remove","title":"Remove an OpenRouter key","description":"Remove the OpenRouter key agents run on, or with pool that group's own key, as the window's Remove does: the saved key and its vault item are deleted, which cannot be undone (save or issue a new key to replace it). A key whose spend a ceiling counts is removed only with decision, the operator's own words. removed is false when no key was saved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1,"maxLength":200,"description":"A group id from switchboard_projects; omit for the machine's key."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words, when a spending ceiling counts the key."}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_handovers_set","title":"Hand-overs in Fabric's console","description":"Whether hand-overs open in Fabric's console (on) or straight in Terminal (off). Only when the operator asks.","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"}},"required":["on"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_openrouter_models","title":"OpenRouter models","description":"The models OpenRouter offers (its public list, kept six hours), with the recommended ones first: id, name, maker, context and price per million tokens. No key is used. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_project_suggestions","title":"Folders joining groups","description":"Folders Switchboard is still adding to a group (retried by itself, never asked), and those added or taken out as deleted in the last day, each with its group and why (worktree, clone, worked in). Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
@@ -230,9 +232,13 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
     ]
     .into_iter()
     .map(|(write, mut tool)| {
-        tool["annotations"] = if write && STOPS_PROCESSES.contains(&tool["name"].as_str().unwrap_or("")) {
+        let name = tool["name"].as_str().unwrap_or("").to_owned();
+        tool["annotations"] = if write && STOPS_PROCESSES.contains(&name.as_str()) {
             // Review round 1: a tool that ends a process cannot be taken back.
             json!({"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false})
+        } else if write && DELETES.contains(&name.as_str()) {
+            // SB-517: a deletion cannot be taken back; asking twice removes nothing more.
+            json!({"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false})
         } else if write {
             json!({"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false})
         } else {
@@ -249,6 +255,312 @@ const STOPS_PROCESSES: [&str; 3] = [
     "switchboard_session_close_copy",
     "switchboard_session_end",
 ];
+
+/// SB-517: the tools that delete what cannot be restored (the window's Remove buttons).
+const DELETES: [&str; 2] = ["switchboard_kimi_remove", "switchboard_openrouter_remove"];
+
+/// SB-517: the write tools that also have a read form. Called without the fields that change
+/// something they only read, so a read-only server lists them and answers that form
+/// ([`writes`] decides per call); the full server lists them as before.
+pub(crate) const READ_FORMS: [&str; 12] = [
+    "switchboard_capacity",
+    "switchboard_own_sign_in",
+    "switchboard_duty",
+    "switchboard_app",
+    "switchboard_analytics",
+    "switchboard_balance",
+    "switchboard_feed",
+    "switchboard_anthropic_keys",
+    "switchboard_codex_route",
+    "switchboard_project_sources",
+    "switchboard_machine_set",
+    "switchboard_login",
+];
+
+/// SB-517: whether this call of `name` changes something. A tool without a read form answers
+/// its one flag; a tool in [`READ_FORMS`] changes something only with the fields that do.
+pub(crate) fn writes(name: &str, write: bool, args: &Map<String, Value>) -> bool {
+    if !write || !READ_FORMS.contains(&name) {
+        return write;
+    }
+    let given = |key: &str| args.get(key).is_some_and(|v| !v.is_null());
+    let any = |keys: &[&str]| keys.iter().any(|k| given(k));
+    let flag = |key: &str| args.get(key).and_then(Value::as_bool) == Some(true);
+    let listed = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|a| !a.is_empty())
+    };
+    let action = args.get("action").and_then(Value::as_str);
+    match name {
+        "switchboard_capacity" => any(&["cap", "board"]) || flag("clear") || flag("board_default"),
+        "switchboard_duty" => {
+            any(&["on", "stuck_minutes", "waiting_minutes", "idle_minutes", "max_age_hours"])
+                // A check acts unless it is a dry run.
+                || (flag("run") && !flag("dry_run"))
+        }
+        "switchboard_own_sign_in" => given("on"),
+        "switchboard_app" => given("enabled") || !matches!(action, Some("updates" | "login_item")),
+        "switchboard_analytics" | "switchboard_codex_route" => given("enabled"),
+        "switchboard_balance" => {
+            ["add", "remove", "backup_add", "backup_remove"]
+                .iter()
+                .any(|k| listed(k))
+                || given("all_new")
+        }
+        "switchboard_feed" => any(&["pool", "on", "priority", "ready", "lookahead_minutes"]),
+        "switchboard_anthropic_keys" => any(&["name", "model"]),
+        "switchboard_project_sources" => listed("add") || listed("remove"),
+        "switchboard_machine_set" => match action {
+            Some("keys") => false,
+            Some("adopt") => flag("apply"),
+            _ => true,
+        },
+        "switchboard_login" => !matches!(action, Some("status" | "pending")),
+        _ => true,
+    }
+}
+
+/// SB-517: added to a tool's description on a read-only server, which answers its read form.
+const READ_FORM_HERE: &str = "This server is read-only: it answers only the form that reads, without the fields that change something.";
+
+/// SB-517: a write tool, or a tool's write form, called on a read-only server.
+fn read_only_refusal(name: &str) -> String {
+    if READ_FORMS.contains(&name) {
+        format!("This server is read-only (switchboard mcp --read-only): {name} answers here only without the fields that change something. Use a server started without --read-only to change it.")
+    } else {
+        format!("This server is read-only (switchboard mcp --read-only): {name} changes Switchboard, so it is refused here. Use a server started without --read-only.")
+    }
+}
+
+/// SB-517: the schema keywords [`validate`] checks. Every other keyword a tool's schema carries
+/// (`description`, `title`, `default`) only documents; a test keeps the schemas inside this set.
+#[cfg(test)]
+const CHECKED_KEYWORDS: [&str; 12] = [
+    "type",
+    "properties",
+    "required",
+    "additionalProperties",
+    "enum",
+    "minimum",
+    "maximum",
+    "minLength",
+    "maxLength",
+    "items",
+    "minItems",
+    "maxItems",
+];
+
+/// SB-517: one argument the schema refuses: the field (a dotted path, `executors[0].agent`)
+/// and the sentence that says what it takes.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Invalid {
+    pub field: String,
+    pub message: String,
+}
+
+/// SB-517: checks a tool's arguments against its `inputSchema` before its handler runs, over the
+/// subset of JSON Schema the tools use ([`CHECKED_KEYWORDS`]). The first fault is answered.
+pub(crate) fn validate(schema: &Value, value: &Value, field: &str) -> Result<(), Invalid> {
+    let name = if field.is_empty() { "arguments" } else { field };
+    let fault = |message: String| {
+        Err(Invalid {
+            field: name.to_owned(),
+            message,
+        })
+    };
+    if let Some(types) = schema.get("type") {
+        let types: Vec<&str> = match types {
+            Value::String(t) => vec![t.as_str()],
+            Value::Array(list) => list.iter().filter_map(Value::as_str).collect(),
+            _ => Vec::new(),
+        };
+        if !types.is_empty() && !types.iter().any(|t| of_type(value, t)) {
+            let words: Vec<&str> = types.iter().map(|t| type_words(t)).collect();
+            return fault(format!("{name} must be {}.", words.join(" or ")));
+        }
+    }
+    if let Some(Value::Array(allowed)) = schema.get("enum") {
+        if !allowed.contains(value) {
+            let list: Vec<String> = allowed
+                .iter()
+                .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))
+                .collect();
+            return fault(format!("{name} is one of: {}.", list.join(", ")));
+        }
+    }
+    match value {
+        Value::Number(n) => {
+            let x = n.as_f64().unwrap_or(f64::NAN);
+            let low = schema.get("minimum").and_then(Value::as_f64);
+            let high = schema.get("maximum").and_then(Value::as_f64);
+            if low.is_some_and(|l| x < l) || high.is_some_and(|h| x > h) {
+                let kind = if schema["type"] == "integer" {
+                    "a whole number"
+                } else {
+                    "a number"
+                };
+                let bound = |key: &str| schema[key].to_string();
+                return fault(match (low, high) {
+                    (Some(_), Some(_)) => {
+                        format!(
+                            "{name} is {kind} from {} to {}.",
+                            bound("minimum"),
+                            bound("maximum")
+                        )
+                    }
+                    (Some(_), None) => {
+                        format!("{name} is {kind} of at least {}.", bound("minimum"))
+                    }
+                    _ => format!("{name} is {kind} of at most {}.", bound("maximum")),
+                });
+            }
+        }
+        Value::String(text) => {
+            let length = text.chars().count() as u64;
+            if let Some(min) = schema.get("minLength").and_then(Value::as_u64) {
+                if length < min {
+                    return fault(if min == 1 {
+                        format!("{name} must not be empty.")
+                    } else {
+                        format!("{name} has at least {min} characters.")
+                    });
+                }
+            }
+            if let Some(max) = schema.get("maxLength").and_then(Value::as_u64) {
+                if length > max {
+                    return fault(format!("{name} has at most {max} characters."));
+                }
+            }
+        }
+        Value::Array(items) => {
+            let count = items.len() as u64;
+            if let Some(min) = schema.get("minItems").and_then(Value::as_u64) {
+                if count < min {
+                    return fault(format!("{name} lists at least {min}."));
+                }
+            }
+            if let Some(max) = schema.get("maxItems").and_then(Value::as_u64) {
+                if count > max {
+                    return fault(format!("{name} lists at most {max}."));
+                }
+            }
+            if let Some(item) = schema.get("items") {
+                for (i, v) in items.iter().enumerate() {
+                    validate(item, v, &format!("{name}[{i}]"))?;
+                }
+            }
+        }
+        Value::Object(map) => {
+            let child = |key: &str| {
+                if field.is_empty() {
+                    key.to_owned()
+                } else {
+                    format!("{field}.{key}")
+                }
+            };
+            for key in schema["required"].as_array().into_iter().flatten() {
+                if let Some(key) = key.as_str() {
+                    if !map.contains_key(key) {
+                        return Err(Invalid {
+                            field: child(key),
+                            message: format!("{} is required.", child(key)),
+                        });
+                    }
+                }
+            }
+            let properties = schema.get("properties").and_then(Value::as_object);
+            let required = |key: &str| {
+                schema["required"]
+                    .as_array()
+                    .is_some_and(|r| r.iter().any(|k| k == key))
+            };
+            for (key, v) in map {
+                match properties.and_then(|p| p.get(key)) {
+                    // Review round 1: null for an optional argument is absent, as the handlers
+                    // and `writes` read it (`feed`, `ceiling_set` without decision).
+                    Some(_) if v.is_null() && !required(key) => {}
+                    Some(property) => validate(property, v, &child(key))?,
+                    None if schema.get("additionalProperties") == Some(&Value::Bool(false)) => {
+                        let known: Vec<&str> = properties
+                            .map(|p| p.keys().map(String::as_str).collect())
+                            .unwrap_or_default();
+                        return Err(Invalid {
+                            field: child(key),
+                            message: if known.is_empty() {
+                                format!("{} is not an argument here: this takes none.", child(key))
+                            } else {
+                                format!(
+                                    "{} is not an argument here. It takes: {}.",
+                                    child(key),
+                                    known.join(", ")
+                                )
+                            },
+                        });
+                    }
+                    None => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn of_type(value: &Value, kind: &str) -> bool {
+    match kind {
+        "string" => value.is_string(),
+        "boolean" => value.is_boolean(),
+        "integer" => value.is_i64() || value.is_u64(),
+        "number" => value.is_number(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        "null" => value.is_null(),
+        _ => true,
+    }
+}
+
+fn type_words(kind: &str) -> &str {
+    match kind {
+        "string" => "text",
+        "boolean" => "true or false",
+        "integer" => "a whole number",
+        "number" => "a number",
+        "array" => "a list",
+        "object" => "an object",
+        "null" => "null",
+        other => other,
+    }
+}
+
+/// SB-517: a typed refusal as a tool result: `isError`, the sentence for a person, and the
+/// code (and the field it names) for an agent.
+fn refusal(code: &str, field: Option<&str>, message: &str) -> Value {
+    let mut error = json!({"code": code, "message": message});
+    if let Some(field) = field {
+        error["field"] = json!(field);
+    }
+    json!({"content": [{"type": "text", "text": message}], "structuredContent": {"error": error}, "isError": true})
+}
+
+/// SB-517: an operation that refused as data (`{state: refused, reason}`, as a dispatch or a
+/// run on another machine answers) is an error to an agent: `isError` with its reason as the
+/// code. Only the MCP answer changes; the CLI prints the same JSON as before.
+fn refused_answer(value: &Value) -> Option<Value> {
+    if value.get("state").and_then(Value::as_str) != Some("refused") {
+        return None;
+    }
+    let code = value["reason"].as_str().unwrap_or("refused");
+    let message = value["message"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| switchboard_runtime::dispatch::sentence(code).to_owned());
+    let mut structured = value.clone();
+    structured["error"] = json!({"code": code, "message": message});
+    Some(
+        json!({"content": [{"type": "text", "text": message}], "structuredContent": structured, "isError": true}),
+    )
+}
 
 /// SB-385: turning usage data on or off through MCP without the operator's relayed words.
 const MACHINE_TRUST_DECISION_REQUIRED: &str = "Trusting another key for a machine decides which computer receives sign-ins: pass decision with the operator's own words (by operator, instruction, at, source).";
@@ -293,6 +605,26 @@ impl Server {
             proved: std::sync::atomic::AtomicBool::new(false),
             program: Program::here(),
         }
+    }
+    /// The tools this server lists. A read-only server lists the tools that only read and,
+    /// SB-517, the tools with a read form, described and annotated as reads here.
+    fn listed(&self) -> Vec<Value> {
+        tools()
+            .into_iter()
+            .filter(|(write, tool)| {
+                !self.read_only
+                    || !write
+                    || READ_FORMS.contains(&tool["name"].as_str().unwrap_or(""))
+            })
+            .map(|(write, mut tool)| {
+                if self.read_only && write {
+                    let text = tool["description"].as_str().unwrap_or("").to_owned();
+                    tool["description"] = json!(format!("{text} {READ_FORM_HERE}"));
+                    tool["annotations"] = json!({"readOnlyHint":true,"openWorldHint":false});
+                }
+                tool
+            })
+            .collect()
     }
     async fn call(&self, operation: Operation) -> Result<Value, String> {
         // Waits out an owner's update restart and another command's offline lock (SB-181).
@@ -1493,8 +1825,9 @@ impl Server {
         args: &Map<String, Value>,
     ) -> Option<Result<Value, String>> {
         let (write, _) = tools().into_iter().find(|(_, t)| t["name"] == name)?;
-        if write && self.read_only {
-            return None;
+        // SB-517: `handle` refuses a write here first; this keeps the gate on every path.
+        if self.read_only && writes(name, write, args) {
+            return Some(Err(read_only_refusal(name)));
         }
         Some(match name {
             "switchboard_status" => self.status().await,
@@ -1946,6 +2279,28 @@ impl Server {
             "switchboard_kimi_accounts" => self.call(Operation::KimiAccounts).await,
             "switchboard_kimi_login" => self.kimi_login(args).await,
             "switchboard_kimi_rename" => self.kimi_rename(args).await,
+            // SB-517: the window's Remove of a Kimi Code account and of the OpenRouter key.
+            "switchboard_kimi_remove" => {
+                self.call(Operation::KimiRemove {
+                    id: args
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                })
+                .await
+            }
+            "switchboard_openrouter_remove" => {
+                let remove = Operation::AgentKeyRemove {
+                    service: "openrouter".into(),
+                    pool: args.get("pool").and_then(Value::as_str).map(str::to_owned),
+                    by: switchboard_runtime::spend::Surface::Mcp,
+                };
+                match on_operators_word(args, remove) {
+                    Ok(operation) => self.call(operation).await,
+                    Err(e) => Err(e),
+                }
+            }
             "switchboard_handovers_set" => match args.get("on").and_then(Value::as_bool) {
                 Some(on) => self.call(Operation::HandoverSetting { on: Some(on) }).await,
                 None => Err("on must be true or false.".into()),
@@ -2083,10 +2438,7 @@ impl Server {
                 )
             }
             "ping" => ok(id, json!({})),
-            "tools/list" => ok(
-                id,
-                json!({"tools": tools().into_iter().filter(|(w, _)| !(*w && self.read_only)).map(|(_, t)| t).collect::<Vec<_>>()}),
-            ),
+            "tools/list" => ok(id, json!({"tools": self.listed()})),
             "tools/call" => {
                 let name = params["name"].as_str().unwrap_or_default();
                 let empty = Map::new();
@@ -2095,9 +2447,30 @@ impl Server {
                     Some(Value::Object(args)) => args,
                     Some(_) => return Some(error(id, -32602, "arguments must be an object.")),
                 };
+                let Some((write, tool)) = tools().into_iter().find(|(_, t)| t["name"] == name)
+                else {
+                    return Some(error(id, -32602, "Unknown tool."));
+                };
+                // SB-517: a write on a read-only server is refused by name, not as unknown.
+                if self.read_only && writes(name, write, args) {
+                    return Some(ok(id, refusal("read_only", None, &read_only_refusal(name))));
+                }
+                // SB-517: the arguments are checked against the tool's schema before it runs.
+                if let Err(invalid) =
+                    validate(&tool["inputSchema"], &Value::Object(args.clone()), "")
+                {
+                    return Some(ok(
+                        id,
+                        refusal("invalid_arguments", Some(&invalid.field), &invalid.message),
+                    ));
+                }
                 match self.call_tool(name, args).await {
                     None => error(id, -32602, "Unknown tool."),
                     Some(Ok(value)) => {
+                        // SB-517: a refusal answered as data reaches an agent as an error.
+                        if let Some(answer) = refused_answer(&value) {
+                            return Some(ok(id, answer));
+                        }
                         // The first answered call proves the connection (SB-93); once per server.
                         if !self.proved.swap(true, std::sync::atomic::Ordering::Relaxed) {
                             let client = self.client.lock().ok().and_then(|c| c.clone());
@@ -2534,5 +2907,329 @@ mod no_values {
         ] {
             assert!(!named.contains(value), "{value}");
         }
+    }
+}
+
+/// SB-517: the schema check, the read forms and the refusals answered as data.
+#[cfg(test)]
+mod checks {
+    use super::*;
+
+    fn args(v: Value) -> Map<String, Value> {
+        v.as_object().unwrap().clone()
+    }
+
+    /// Every keyword a tool's schema uses is one `validate` checks or one that only documents,
+    /// so no declared limit goes unchecked; every object schema with properties closes them.
+    #[test]
+    fn every_schema_stays_inside_the_checked_keywords() {
+        const DOCUMENTS: [&str; 3] = ["description", "title", "default"];
+        fn walk(schema: &Value, path: &str, out: &mut Vec<String>) {
+            let Some(map) = schema.as_object() else {
+                return;
+            };
+            for (key, value) in map {
+                if !CHECKED_KEYWORDS.contains(&key.as_str()) && !DOCUMENTS.contains(&key.as_str()) {
+                    out.push(format!("{path}: {key}"));
+                }
+                if key == "properties" {
+                    for (name, property) in value.as_object().into_iter().flatten() {
+                        walk(property, &format!("{path}.{name}"), out);
+                    }
+                }
+                if key == "items" {
+                    walk(value, &format!("{path}[]"), out);
+                }
+            }
+            // An object with named properties closes them; an opaque one (a hand-over record)
+            // is passed through whole.
+            if map.get("type") == Some(&json!("object"))
+                && map.contains_key("properties")
+                && map.get("additionalProperties") != Some(&json!(false))
+            {
+                out.push(format!("{path}: an open object"));
+            }
+        }
+        let mut found = Vec::new();
+        for (_, tool) in tools() {
+            walk(
+                &tool["inputSchema"],
+                tool["name"].as_str().unwrap(),
+                &mut found,
+            );
+        }
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_fault_names_its_field_and_what_it_takes() {
+        let schema = json!({"type":"object","properties":{
+            "n":{"type":"integer","minimum":1,"maximum":720},
+            "usd":{"type":["number","null"],"minimum":0.01,"maximum":1000},
+            "kind":{"type":"string","enum":["a","b"]},
+            "name":{"type":"string","minLength":1,"maxLength":3},
+            "list":{"type":"array","maxItems":2,"items":{"type":"object","properties":{"agent":{"type":"string"}},"required":["agent"],"additionalProperties":false}},
+            "on":{"type":"boolean"}},
+            "required":["on"],"additionalProperties":false});
+        let check = |v: Value| validate(&schema, &v, "").map_err(|i| (i.field, i.message));
+        assert_eq!(check(json!({"on": true})), Ok(()));
+        assert_eq!(check(json!({"on": true, "usd": null, "n": 720})), Ok(()));
+        // Null for an optional argument is absent; for a required one it is checked.
+        assert_eq!(
+            check(json!({"on": true, "n": null, "kind": null, "list": null})),
+            Ok(())
+        );
+        assert_eq!(
+            check(json!({"on": null})),
+            Err(("on".into(), "on must be true or false.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "extra": null})).unwrap_err().0,
+            "extra"
+        );
+        assert_eq!(
+            check(json!({})),
+            Err(("on".into(), "on is required.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": "yes"})),
+            Err(("on".into(), "on must be true or false.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "n": 0})),
+            Err(("n".into(), "n is a whole number from 1 to 720.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "n": 1.5})),
+            Err(("n".into(), "n must be a whole number.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "usd": 0})),
+            Err(("usd".into(), "usd is a number from 0.01 to 1000.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "usd": "5"})),
+            Err(("usd".into(), "usd must be a number or null.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "kind": "c"})),
+            Err(("kind".into(), "kind is one of: a, b.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "name": ""})),
+            Err(("name".into(), "name must not be empty.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "name": "four"})),
+            Err(("name".into(), "name has at most 3 characters.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "list": [{}, {}, {}]})),
+            Err(("list".into(), "list lists at most 2.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "list": [{"agent": "x"}, {}]})),
+            Err(("list[1].agent".into(), "list[1].agent is required.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "list": [{"agent": "x", "key": "k"}]})),
+            Err((
+                "list[0].key".into(),
+                "list[0].key is not an argument here. It takes: agent.".into()
+            ))
+        );
+        let (field, message) = check(json!({"on": true, "extra": 1})).unwrap_err();
+        assert_eq!(field, "extra");
+        assert!(
+            message.contains("It takes:") && message.contains("usd"),
+            "{message}"
+        );
+        // A tool that takes no argument says so.
+        let none = json!({"type":"object","properties":{},"additionalProperties":false});
+        assert_eq!(
+            validate(&none, &json!({"x": 1}), "").unwrap_err().message,
+            "x is not an argument here: this takes none."
+        );
+    }
+
+    /// The tests' own calls and the shapes agents send pass the real schemas.
+    #[test]
+    fn the_calls_agents_make_pass_the_real_schemas() {
+        let schema = |name: &str| {
+            tools()
+                .into_iter()
+                .find(|(_, t)| t["name"] == name)
+                .map(|(_, t)| t["inputSchema"].clone())
+                .unwrap()
+        };
+        let decision = json!({"by": "operator", "instruction": "raise it",
+            "at": "2026-11-19T10:00:00Z", "source": "s"});
+        for (name, arguments) in [
+            ("switchboard_status", json!({})),
+            ("switchboard_ceiling_set", json!({"usd": 5})),
+            (
+                "switchboard_ceiling_set",
+                json!({"usd": null, "decision": decision}),
+            ),
+            (
+                "switchboard_chain_set",
+                json!({"executors": [{"agent": "codex", "key": "p/prod/K"}]}),
+            ),
+            (
+                "switchboard_sessions",
+                json!({"history": true, "limit": 5, "before": 1_800_000_000}),
+            ),
+            (
+                "switchboard_project_set",
+                json!({"account_id": "a", "path": "/x", "expires_in_hours": 8}),
+            ),
+            (
+                "switchboard_feed",
+                json!({"ready": 3, "lookahead_minutes": 45}),
+            ),
+        ] {
+            assert_eq!(
+                validate(&schema(name), &arguments, ""),
+                Ok(()),
+                "{name} {arguments}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tool_with_a_read_form_writes_only_with_the_fields_that_change() {
+        let w = |name: &str, v: Value| {
+            let write = tools()
+                .into_iter()
+                .find(|(_, t)| t["name"] == name)
+                .map(|(w, _)| w)
+                .unwrap();
+            writes(name, write, &args(v))
+        };
+        assert!(!w("switchboard_capacity", json!({})));
+        assert!(w("switchboard_capacity", json!({"cap": 4})));
+        assert!(w("switchboard_capacity", json!({"clear": true})));
+        assert!(!w("switchboard_duty", json!({})));
+        assert!(!w("switchboard_duty", json!({"dry_run": true})));
+        assert!(!w(
+            "switchboard_duty",
+            json!({"run": true, "dry_run": true})
+        ));
+        assert!(w("switchboard_duty", json!({"run": true})));
+        assert!(w("switchboard_duty", json!({"idle_minutes": 90})));
+        assert!(!w("switchboard_own_sign_in", json!({})));
+        assert!(w("switchboard_own_sign_in", json!({"on": false})));
+        assert!(!w("switchboard_app", json!({"action": "updates"})));
+        assert!(!w("switchboard_app", json!({"action": "login_item"})));
+        assert!(w(
+            "switchboard_app",
+            json!({"action": "login_item", "enabled": true})
+        ));
+        assert!(w("switchboard_app", json!({"action": "restart_to_update"})));
+        assert!(w("switchboard_app", json!({"action": "check_for_updates"})));
+        assert!(!w("switchboard_analytics", json!({})));
+        assert!(w("switchboard_analytics", json!({"enabled": false})));
+        assert!(!w("switchboard_balance", json!({})));
+        assert!(!w("switchboard_balance", json!({"add": []})));
+        assert!(w("switchboard_balance", json!({"remove": ["default"]})));
+        assert!(w("switchboard_balance", json!({"all_new": false})));
+        assert!(!w("switchboard_feed", json!({})));
+        assert!(w("switchboard_feed", json!({"ready": 2})));
+        assert!(!w("switchboard_anthropic_keys", json!({})));
+        assert!(w(
+            "switchboard_anthropic_keys",
+            json!({"name": "a", "model": "m"})
+        ));
+        assert!(w("switchboard_anthropic_keys", json!({"name": "a"})));
+        assert!(!w("switchboard_codex_route", json!({})));
+        assert!(w("switchboard_codex_route", json!({"enabled": true})));
+        assert!(!w("switchboard_project_sources", json!({"pool": "p"})));
+        assert!(w(
+            "switchboard_project_sources",
+            json!({"pool": "p", "add": ["github.com/o"]})
+        ));
+        assert!(!w("switchboard_machine_set", json!({"action": "keys"})));
+        assert!(!w("switchboard_machine_set", json!({"action": "adopt"})));
+        assert!(w(
+            "switchboard_machine_set",
+            json!({"action": "adopt", "apply": true})
+        ));
+        assert!(w(
+            "switchboard_machine_set",
+            json!({"action": "forget", "machine": "m"})
+        ));
+        assert!(!w("switchboard_login", json!({"action": "pending"})));
+        assert!(w("switchboard_login", json!({"action": "begin"})));
+        // A read tool and a tool with no read form keep their one flag.
+        assert!(!w("switchboard_launch_keys", json!({"agent": "hermes"})));
+        assert!(w("switchboard_switch", json!({})));
+        assert!(w("switchboard_shell_hook_set", json!({})));
+    }
+
+    #[test]
+    fn a_read_only_server_lists_reads_and_read_forms_as_reads() {
+        let server = Server::new(std::env::temp_dir(), true);
+        let listed = server.listed();
+        let names: Vec<&str> = listed.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        for name in READ_FORMS {
+            assert!(names.contains(&name), "{name}");
+        }
+        assert!(names.contains(&"switchboard_launch_keys"));
+        assert!(!names.contains(&"switchboard_switch"));
+        assert!(!names.contains(&"switchboard_kimi_remove"));
+        assert!(listed
+            .iter()
+            .all(|t| t["annotations"]["readOnlyHint"] == true));
+        let capacity = listed
+            .iter()
+            .find(|t| t["name"] == "switchboard_capacity")
+            .unwrap();
+        assert!(capacity["description"]
+            .as_str()
+            .unwrap()
+            .ends_with(READ_FORM_HERE));
+        // The full server lists every tool as before.
+        let full = Server::new(std::env::temp_dir(), false).listed();
+        assert_eq!(full.len(), tools().len());
+        let capacity = full
+            .iter()
+            .find(|t| t["name"] == "switchboard_capacity")
+            .unwrap();
+        assert_eq!(capacity["annotations"]["readOnlyHint"], false);
+    }
+
+    #[test]
+    fn a_refusal_answered_as_data_is_an_error_with_its_code() {
+        let remote =
+            json!({"state": "refused", "reason": "target_unreachable", "target": "studio"});
+        let answer = refused_answer(&remote).unwrap();
+        assert_eq!(answer["isError"], true);
+        assert_eq!(
+            answer["structuredContent"]["error"]["code"],
+            "target_unreachable"
+        );
+        assert_eq!(answer["structuredContent"]["target"], "studio");
+        assert_eq!(
+            answer["content"][0]["text"],
+            switchboard_runtime::dispatch::sentence("target_unreachable")
+        );
+        let capacity = json!({"state": "refused", "reason": "at_capacity", "message": "Full."});
+        let answer = refused_answer(&capacity).unwrap();
+        assert_eq!(answer["structuredContent"]["error"]["code"], "at_capacity");
+        assert_eq!(answer["content"][0]["text"], "Full.");
+        assert!(refused_answer(&json!({"state": "started"})).is_none());
+        assert!(refused_answer(&json!({"usage": {"state": "refused"}})).is_none());
+    }
+
+    #[test]
+    fn a_write_refused_on_a_read_only_server_says_so() {
+        let answer = refusal("read_only", None, &read_only_refusal("switchboard_switch"));
+        assert_eq!(answer["isError"], true);
+        assert_eq!(answer["structuredContent"]["error"]["code"], "read_only");
+        assert!(answer["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("read-only"));
+        assert!(read_only_refusal("switchboard_capacity").contains("without the fields"));
     }
 }
