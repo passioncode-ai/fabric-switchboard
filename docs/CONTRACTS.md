@@ -4280,9 +4280,9 @@ the window's `boot_resume` command (Settings → Sessions after a restart, SCN-1
 ## One continuation module (SB-561, DEC-0034)
 
 Code: `crates/switchboard-runtime/src/resume.rs`; spec S1 of
-`docs/plans/2026-11-19-lifecycle-remote-access/spec.md` (PR #865); findings
-M1-01, M1-03 to M1-07, M1-21 to M1-23, M1-45 and M5-02 of the audit
-`docs/reports/2026-11-19-lifecycle-remote-access-audit/` (PR #865); builds on SB-463.
+[2026-11-19-lifecycle-remote-access](plans/2026-11-19-lifecycle-remote-access/spec.md); findings
+M1-01, M1-03 to M1-07, M1-21 to M1-23, M1-45 and M5-02 of the
+[audit](reports/2026-11-19-lifecycle-remote-access-audit/m1-local-lifecycle.md); builds on SB-463.
 
 - **One builder (S1.1).** `resume::build(root, target, program, prompt, launch_id, now)` builds
   every resume of a Claude Code session as itself: `resumable::continue_as` (Continue in the

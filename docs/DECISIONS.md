@@ -1093,8 +1093,8 @@ research notes); the ones still in force that the board cites are seeded below w
 ### DEC-0034: Every continuation of a session is built from the launch it continues, its account checked first
 
 - **Date:** 2026-11-19
-- **Status:** Accepted (built on branch `sb-561-resume`: SB-561, wave W11.2 of the plan
-  `docs/plans/2026-11-19-lifecycle-remote-access/plan.md`, PR #865)
+- **Status:** Accepted (built on branch `sb-561-resume`: SB-561, wave W11.2 of the
+  [plan](plans/2026-11-19-lifecycle-remote-access/plan.md))
 - **Context:** the audit of 2026-11-19 (M1-01, M1-03 to M1-07, M1-21 to M1-23, M1-45, M5-02)
   found every resume built from the home's current state: an isolated session resumed with the old
   token its launch wrote, on an account disabled, used elsewhere or at its limit; with the person's
@@ -1125,5 +1125,5 @@ research notes); the ones still in force that the board cites are seeded below w
   Lifecycle (session duty officer), SCN-096, SCN-105, [backlog](evidence/backlog.md) SB-561 and
   SB-463.
 - **Source:** the operator's order of 2026-11-19 to deliver the plan in waves (spec S1, accepted);
-  audit report
-  `docs/reports/2026-11-19-lifecycle-remote-access-audit/README.md` (PR #865).
+  audit
+  [report](reports/2026-11-19-lifecycle-remote-access-audit/README.md).
