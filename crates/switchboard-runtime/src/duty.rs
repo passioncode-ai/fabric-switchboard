@@ -1724,7 +1724,7 @@ mod tests {
         assert!(quiet.contains("'/bin/claude' --resume 's-1'\nstatus=$?"));
         // The person's tools are found (hooks run `node`), and an end by a signal closes the
         // window (status 0 for the window settings), not `exec`.
-        assert!(quiet.contains("export PATH='/bin:"));
+        assert!(quiet.contains("export PATH='/bin'\"${PATH:+:$PATH}\"':"));
         assert!(quiet.contains("/opt/homebrew/bin"));
         assert!(!quiet.contains("exec "));
         assert!(quiet.trim_end().ends_with("exit \"$status\""));
