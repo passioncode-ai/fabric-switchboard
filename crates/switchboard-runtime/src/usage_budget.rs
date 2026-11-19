@@ -301,7 +301,8 @@ impl UsageBudget {
     }
 
     /// A usage check of `provider` answered: the doubling starts again from the floor. Writes
-    /// only when a hold was recorded.
+    /// only when a hold was recorded. Tests end a hold with it; a check uses `succeeded_since`.
+    #[cfg(test)]
     pub(crate) fn succeeded(&self, provider: Provider) {
         self.succeeded_since(provider, i64::MAX);
     }
