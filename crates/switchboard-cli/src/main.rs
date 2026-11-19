@@ -171,7 +171,7 @@ enum Command {
         #[command(subcommand)]
         command: Option<DutyCmd>,
     },
-    /// The watchdog, a system job apart from Switchboard (SB-510): every five minutes it checks
+    /// The watchdog, a system job apart from Switchboard: every five minutes it checks
     /// that Switchboard answers, that no act of the duty officer was left half done for 10
     /// minutes, that no board run has been gone for 30 and no session has run in two processes
     /// for 15. It only reports, in Needs attention and the health report; it never acts. Without
