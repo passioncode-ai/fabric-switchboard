@@ -405,7 +405,7 @@ operator's choices takes `decision` (SB-299, SB-385).
 (`mcp.rs:226-246` when written, 2026-11-17; on main since SB-517 at `mcp.rs:236-249`, with `DELETES` at
 `mcp.rs:263`): the three tools that end a process are destructive and not idempotent; every other
 write tool was `destructiveHint: false, idempotentHint: true` (SB-517 added `DELETES`), every tool `openWorldHint: false`.
-`decision` for analytics and machine trust (`mcp.rs:248-262`). The server follows an updated binary
+`decision` for analytics and machine trust (`mcp.rs:248-262` when written). The server follows an updated binary
 (`mcp.rs:54-110`, SB-375). Plugin hooks (`plugins/switchboard/hooks/hooks.json:1-61`) call bare
 `switchboard ... 2>/dev/null || true`.
 
