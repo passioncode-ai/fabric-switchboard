@@ -160,9 +160,9 @@ One JSON object per message, at most 64 KiB encoded (open question Q6).
   `usage.report` or `seat.surrender` only along a thread that an offer opened, back to that offer's
   sender. Anything else is refused at submit.
 - Each Switchboard checks the same rules again on receipt, and more: the thread's sender key is the
-  pinned one; a `seat.surrender` with a credential is taken only after this device sent
-  `seat.recall` on that thread or the recipient declined; a second `seat.offer` on a live thread is
-  refused.
+  pinned one; a `seat.surrender` is taken only on a thread this device opened and has not yet
+  closed (an answer to a recall, a decline, or the teammate giving the seat back), and a second
+  one on a closed thread is refused; a second `seat.offer` on a live thread is refused.
 - The credential travels only in `seat.offer` and `seat.surrender`, so there is one live copy at a
   time, as with DEC-0025: the sender marks the account used elsewhere before it submits the offer,
   and the recipient marks its copy removed before it submits a surrender with the credential.
@@ -180,7 +180,9 @@ A recipient refuses, and logs `relay_refused {code}`:
 - a signature, a payload copy or a pinned key that does not match.
 
 Vesta refuses a second submit of an `id` with other bytes and answers the stored receipt for the
-same bytes.
+same bytes. A sender submits nothing newer to a device while an older envelope to it is
+`outcome_unknown`: it sends that one again first, so a lost answer never puts a pair's `seq` out of
+order.
 
 ## 9. Lease, state and the recipient's rules
 
@@ -227,12 +229,17 @@ Sender, per seat thread: `offered` (submitted, no answer), `active`, `declined`,
 `recall_sent`, `recalled` (the surrender with its credential arrived and the provider check passed),
 `expired` (the offer passed its expiry with no answer; the recipient never accepts an offer past
 its expiry and then drops the credential it held, so the account comes back here ten minutes after
-the expiry, past the clock tolerance), `outcome_unknown` (a submit whose answer
+the expiry, past the clock tolerance, and only after a fetch that worked found no report for the
+thread), `outcome_unknown` (a submit whose answer
 was lost: the same bytes are sent again until Vesta answers; until then the account stays marked
 elsewhere and Needs attention names it).
 
 Recipient, per guest seat: `pending` (an offer waits for the person), `active`, `off_lease`,
-`removed`, `surrender_sent`, `outcome_unknown`.
+`removed`, `surrender_sent`, `outcome_unknown`. An accepted seat is used only once Vesta took its
+first `usage.report` (`active`) before the offer's expiry. An accept that did not reach Vesta in
+time is dropped; one whose answer was lost stays off and is never used until a `lease.extend` on
+its thread arrives, and without one it lapses with the offer's lease and its credential is removed,
+so the sender's copy stays the only one in use.
 
 Device: the registration states of section 4. Inbox: `ok`, `empty` only after a fetch that worked,
 `unknown` after one that failed. A failed fetch never clears a seat, never ends a lease early and
@@ -285,7 +292,7 @@ lands: `device.status`, `device.register`, `device.trust`, `device.rotate`, `sea
 | The relay inserts or swaps a device key | address an offer to a device it controls, or forge a sender | first-use pinning with fingerprints shown to both people; a changed key stops all traffic until a person confirms it |
 | Replay of an old message | re-extend a lease, re-offer a seat, re-run a recall | `id`, per-pair `seq`, expiry, payload copies of the header (section 8) |
 | Re-addressing a signed envelope | deliver one person's offer to another device | the recipient id is inside the signature and inside the payload |
-| A member's device is compromised | read the seat's credential once accepted | the same as DEC-0025: the provider sign-out ends every copy; only seats offered to that device are exposed |
+| A member's device is compromised | read a seat's credential once its offer was delivered | the same as DEC-0025: the provider sign-out ends every copy; only seats offered to that device are exposed |
 | An administrator's device is compromised | offer the organization's seats, recall them | Vesta's role check limits it to that organization; the audit log shows every offer; revoking the device at Vesta stops it |
 | A member leaves the organization | keep using a seat | Vesta refuses the thread's messages once the membership ends; the lease lapses within its length; the credential is removed 30 days later; the provider sign-out ends it at once |
 | Flooding a mailbox | exhaust a device's inbox or the owner's time | Vesta rate limits per sender device and per organization; the recipient caps envelopes per fetch and their size |
