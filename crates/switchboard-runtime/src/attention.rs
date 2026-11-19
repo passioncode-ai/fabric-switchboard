@@ -1141,7 +1141,10 @@ mod tests {
         assert_eq!(item["action"]["window"], "open_machines");
         assert_eq!(
             item["action"]["command"],
-            format!("switchboard machines trust studio --key {}", change.public_key)
+            format!(
+                "switchboard machines trust studio --key {}",
+                change.public_key
+            )
         );
         assert!(!MACHINE_KEY_CHANGED.contains("studio"));
     }

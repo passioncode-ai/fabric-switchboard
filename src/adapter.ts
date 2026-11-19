@@ -217,6 +217,8 @@ const safeErrors = new Set([
   // SB-560: an act needs a trusted key; a signature that does not hold.
   'That machine has not proved it is the one Switchboard trusts for it, so nothing was sent. Update Switchboard there to 0.7.104 or later, then retry.',
   'That machine answered the challenge with a signature that does not hold, so nothing was sent. Check what that ssh name reaches.',
+  // SB-560: one machine's key holds at most 16 seats here (answered to that machine by ssh-serve).
+  'The calling machine already delegated 16 seats to this computer. Ask it to call one back before delegating another.',
   // SB-355: machine groups.
   'This account works on another machine. Call it back to use it in a group here.',
   'A machine group takes accounts only by a move to that machine.',

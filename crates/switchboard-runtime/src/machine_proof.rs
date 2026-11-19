@@ -89,7 +89,14 @@ pub enum Need {
 /// Whether `error` is one of the proof's own refusals, which a caller passes on unchanged
 /// instead of reading it as "did not answer".
 pub fn refusal(error: &str) -> bool {
-    [KEY_CHANGED, PROOF_MISSING, PROOF_REQUIRED, PROOF_INVALID, KEYS_UNREADABLE].contains(&error)
+    [
+        KEY_CHANGED,
+        PROOF_MISSING,
+        PROOF_REQUIRED,
+        PROOF_INVALID,
+        KEYS_UNREADABLE,
+    ]
+    .contains(&error)
 }
 
 /// The refusal in a runner's answer, when the guard refused before anything ran.
@@ -733,7 +740,10 @@ mod typed {
         let read = Guard::with(here.path(), "studio", &PROGRAM, &run, Need::Read);
         assert!(read.run(&line(), None).is_ok());
         assert_eq!(read.proof(), Ok(Proof::Unproven));
-        assert!(!here.path().join(FILE).exists(), "a read pins nothing (M3-08)");
+        assert!(
+            !here.path().join(FILE).exists(),
+            "a read pins nothing (M3-08)"
+        );
 
         let act = Guard::new(here.path(), "studio", &PROGRAM, &run);
         assert!(act.run(&line(), None).is_ok());
@@ -748,14 +758,19 @@ mod typed {
         let here = tempfile::tempdir().unwrap();
         let ran = Mutex::new(Vec::new());
         let old = |args: &[String], _: Option<&[u8]>| -> Result<String, String> {
-            ran.lock().unwrap().push(args.last().cloned().unwrap_or_default());
+            ran.lock()
+                .unwrap()
+                .push(args.last().cloned().unwrap_or_default());
             Err(r#"{"ok":false,"error":"Invalid arguments. Run switchboard --help."}"#.into())
         };
         let act = Guard::new(here.path(), "laptop", &PROGRAM, &old);
         assert_eq!(act.run(&line(), None), Err(PROOF_REQUIRED.into()));
         assert_eq!(ran.lock().unwrap().len(), 1, "only the challenge was sent");
         let read = Guard::with(here.path(), "laptop", &PROGRAM, &old, Need::Read);
-        assert!(read.run(&line(), None).is_err(), "the read itself ran and failed");
+        assert!(
+            read.run(&line(), None).is_err(),
+            "the read itself ran and failed"
+        );
         assert_eq!(ran.lock().unwrap().len(), 3);
 
         let silent = |_: &[String], _: Option<&[u8]>| -> Result<String, String> {
@@ -797,7 +812,11 @@ mod typed {
         assert!(key_changes(here.path()).is_empty());
 
         let read = Guard::with(here.path(), "Studio", &PROGRAM, &other, Need::Read);
-        assert_eq!(read.run(&line(), None), Err(KEY_CHANGED.into()), "reads too");
+        assert_eq!(
+            read.run(&line(), None),
+            Err(KEY_CHANGED.into()),
+            "reads too"
+        );
         verify(here.path(), "studio", &PROGRAM, &other, 9, Need::Act).unwrap();
         let changes = key_changes(here.path());
         let key = crate::settings_signing::signer(second.path(), &b).unwrap();
@@ -814,7 +833,13 @@ mod typed {
         #[cfg(not(unix))]
         let _ = mode;
 
-        trust(here.path(), "studio", key["public_key"].as_str().unwrap(), 10).unwrap();
+        trust(
+            here.path(),
+            "studio",
+            key["public_key"].as_str().unwrap(),
+            10,
+        )
+        .unwrap();
         assert!(key_changes(here.path()).is_empty());
         assert!(!here.path().join(CHANGES_FILE).exists());
     }

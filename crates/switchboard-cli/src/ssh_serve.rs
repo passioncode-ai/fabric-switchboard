@@ -798,7 +798,10 @@ mod tests {
         for pool in ["default", "paid", "missing"] {
             assert!(!pool_served(&snapshot, pool), "{pool}");
         }
-        assert!(!pool_served(&json!({}), "org"), "an unreadable list serves nothing");
+        assert!(
+            !pool_served(&json!({}), "org"),
+            "an unreadable list serves nothing"
+        );
         assert_eq!(
             parse(&asked(&["--json", "accounts", "list"]), KEY, "org", &root())
                 .unwrap()
