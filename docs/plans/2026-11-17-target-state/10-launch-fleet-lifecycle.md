@@ -44,7 +44,7 @@ Beyond that they differ:
   path is absolute): a symlinked path, `/tmp` against `/private/tmp`, another letter case or a
   trailing slash never matches a canonical working folder (SB-512).
 - 158 of 261 group folders are worktrees; nothing prunes merged ones, and saves fail at
-  `MAX_ALL_FOLDERS = 1024` (`projects.rs:451`) (SB-513).
+  `MAX_ALL_FOLDERS = 1024` (`switchboard-core/src/projects.rs:451`) (SB-513).
 - The proxy's folder hint can be taken from message text and drifts when a Codex session changes
   folder (`stats.rs:93-121`), and it is computed twice (SB-483). "Project" names three things: a
   group (`pool`), a repository (statistics), and Fabric's own project on a dispatch, stored and
@@ -261,7 +261,7 @@ always full, about 8 usage calls a minute from one address. A switch needs a fig
 can hide the other); each
 changed header rewrites `accounts.json` with fsync (1187 `metadata_write_slow`). A 429 holds one
 account, never the provider (`usage_gate.rs:30`). An external sweep checks every account at :03
-and :33; the window and CLI have no spacing (`runtime/lib.rs:1850`). Codex headers are not read.
+and :33; the window and CLI have no spacing (`switchboard-runtime/src/lib.rs:1850`). Codex headers are not read.
 
 **Target, the smart mode (SB-518, SB-519).**
 - **Passive first.** A response's headers with both windows count as a check (both windows lift the
