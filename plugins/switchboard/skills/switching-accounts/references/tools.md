@@ -536,7 +536,7 @@ Each group folder whose Claude Code sessions are routed to the group's accounts 
 
 ## Write tools
 
-Annotations: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: true`.
+Annotations: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: true`, except where a tool's section says otherwise (the tools that end a process, and those that delete what cannot be restored: `switchboard_account_remove`, `switchboard_project_delete`, `switchboard_kimi_remove`, `switchboard_openrouter_remove`).
 
 ### `switchboard_switch`: `account_id`, `target?`, `global?`, `force?`
 
