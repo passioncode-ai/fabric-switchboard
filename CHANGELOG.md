@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A seat is no longer delegated to a teammate's computer over ssh (DEC-0037): delegation over ssh runs only between your own machines, and the guides no longer ask a teammate to join your network, turn on Remote Login or add your key to their authorized_keys. A teammate's seat will come through PassionCode.ai, end-to-end encrypted, with both computers connecting only outward (SB-575, [design](docs/plans/2026-11-19-seat-relay/design.md)). Until then a teammate works on a seat signed in on their own computer.
 - The app's threads get the 16 MiB stack the command line has run on since 0.6.61 (SB-558): the threads of its async runtime on every system, and its main thread on Windows, where it was 1 MiB. The Windows test steps give each test thread the same. The nightly checks of 0.7.123 failed on Windows on Arm when one test overflowed its 2 MiB thread.
 
 ## 0.7.123

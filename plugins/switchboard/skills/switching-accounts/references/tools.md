@@ -659,15 +659,16 @@ to another machine is called back or removed there with `switchboard_account_rec
 
 ### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`, `remote_data_dir?`, `decision?`, `delegate?`, `lease_hours?`
 
-`delegate: true` (SB-403, DEC-0025) delegates the seat to a teammate's machine instead of moving it:
-that machine (reached through its restricted entry, `switchboard ssh-serve`, the forced command of
+`delegate: true` (SB-403, DEC-0025) delegates the seat to another of the operator's own machines
+instead of moving it (never a teammate's: DEC-0037; a teammate's computer gets a seat through
+PassionCode.ai, SB-575): that machine (reached through its restricted entry, `switchboard ssh-serve`, the forced command of
 this machine's ssh key there) keeps it as a guest in the group `pool` names (never its default
 group), pinned to this machine's settings signing key. There it is never moved on, given to an agent,
 lent, shared or made the ordinary sign-in, and only this machine calls it back
 (`switchboard_account_recall`). `lease_hours` (1 to 720, default 48): this machine's background
 read of that machine extends it every 15 minutes (the read itself runs every minute, SB-550); past it the copy there is switched off but
 keeps its sign-in for 30 days (the next read turns it on again, and a call back takes the live
-sign-in), then the sign-in there is removed. The teammate's key line pins the one group there
+sign-in), then the sign-in there is removed. The key line there pins the one group
 (`ssh-serve --pool`). The answer carries `delegated: {lease_hours}`.
 
 Only when the operator asks. Moves a Claude or Codex subscription sign-in to another machine over

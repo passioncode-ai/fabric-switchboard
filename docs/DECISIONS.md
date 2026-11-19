@@ -706,8 +706,10 @@ research notes); the ones still in force that the board cites are seeded below w
 ### DEC-0025: A subscription is delegated to a teammate's machine as a guest, under a lease
 
 - **Date:** 2026-11-17
-- **Status:** Accepted (built on branch `org-delegation`: SB-403 waves S2 to S4; the live run with a
-  teammate's machine, S5, waits for that machine)
+- **Status:** Accepted, narrowed by [DEC-0037](#dec-0037-a-teammates-computer-gets-a-seat-through-passioncodeai-never-through-the-operators-network)
+  (2026-11-19): delegation over ssh runs only between the operator's own machines; a teammate's
+  computer gets a seat through PassionCode.ai (SB-575). Built on branch `org-delegation`: SB-403
+  waves S2 to S4; the live run with a teammate's machine, S5, is withdrawn.
 - **Context:** the operator wants a teammate's computer to use one of an organization's
   subscriptions in console sessions through Switchboard, without the teammate ever signing in with
   it, revocable at any time, more added later; the teammate keeps their own subscription in Claude
@@ -1090,3 +1092,76 @@ research notes); the ones still in force that the board cites are seeded below w
   минуту через свитчборд а не через запросы напрямую к сессиям и на удаленный свитчборд в рамках
   организации то же самое».
 
+### DEC-0037: A teammate's computer gets a seat through PassionCode.ai, never through the operator's network
+
+- **Date:** 2026-11-19
+- **Status:** Accepted (design: [seat relay](plans/2026-11-19-seat-relay/design.md); the build,
+  SB-575, waits on Vesta's key fields and signed membership, thread 14da4917, and on the seat
+  mailbox asked of passioncode-platform, thread 54858223)
+- **Context:** DEC-0025 delegates a subscription to a teammate's computer over ssh: the operator's
+  machine must reach the teammate's, so the teammate turns on Remote Login, adds a forced
+  `switchboard ssh-serve` line to their `authorized_keys`, and both machines share a network, in
+  practice the operator's private network of devices. A device admitted to that network reaches
+  every other device and service on it, and nothing in Switchboard narrows that. A seat for a
+  teammate was about to go that way when the operator stopped it.
+- **Decision:**
+  - No teammate, and no one outside the operator's own machines, is given access to the operator's
+    network (a private overlay network, a VPN, an open port or an ssh login into the operator's
+    machines) for Switchboard's sake. No document, tool description or agent asks a teammate to join
+    one, to turn on Remote Login for the operator, or to add an `authorized_keys` line for the
+    operator's key.
+  - Delegation over ssh (DEC-0025: `accounts send --delegate`, `ssh-serve`, the lease extended by
+    the background read of DEC-0033) is used only between the operator's own machines.
+  - A seat for a teammate's computer goes through PassionCode.ai, in two services that each do
+    one thing. Vesta is the key directory and the membership attestation: each Switchboard writes
+    its X25519 encryption key and Ed25519 signing key (private parts only in the OS vault) to the
+    person's device record in Vesta's per-person registry when it connects, and Vesta signs
+    membership statements (organization, person, role, device keys, expiry); Vesta stores and
+    relays no message (its answer on thread 14da4917, message d6656231). The seat travels as
+    end-to-end encrypted, signed envelopes (`seat.offer`, `lease.extend`, `usage.report`,
+    `seat.recall`, `seat.surrender`) through a separate store-and-forward seat mailbox, recommended
+    on passioncode-platform rather than the Fabric board hub (which would bring a teammate's device
+    into the operator's estate). The mailbox authorizes from Vesta's statements (an administrator's
+    device to a member's device of the same organization; replies only back to the sender), holds
+    ciphertext only, deletes at acknowledgement or expiry within 7 days, limits size and rate, gives
+    delivery receipts and keeps audit rows without payload. Both sides only connect outward, over
+    HTTPS. Neither service reads a credential or a usage figure. The operator approved this split
+    (relayed in announcement de0ba93c, 2026-11-19).
+  - Everything DEC-0025 promised about the seat holds over the relay: a guest in one group the
+    teammate chose, never moved on, handed over, given to an agent, lent, shared or made the
+    ordinary sign-in, never in a backup; a lease of 48 hours by default (1 to 720) extended every 15
+    minutes by its sender; past it switched off with its credential kept 30 days, then removed;
+    called back only by its sender, the credential coming back as the one live copy; the
+    revocation against an uncooperative teammate is signing the subscription out at the provider.
+  - The owner sets each relayed seat's usage ceiling per window (the 5-hour and the weekly window at
+    least; 80 % of the 5-hour window and 70 % of the week for the first teammate seat, approved by
+    the operator in the same relay) and its place in the teammate's rotation (by default the last
+    resort, chosen only when no other account of the group has room) when offering it; both travel in the offer, the receiving
+    Switchboard refuses a request above the ceiling before it reaches the provider and says why, and
+    the seat's reports carry its windows back to the owner.
+  - The program's path on the teammate's computer is never assumed (`/Applications`,
+    `~/Applications` or elsewhere): the relay calls no program on another computer.
+  - Until the relay ships, a teammate works on a seat signed in on their own computer (ORGANIZATION
+    section 4) or on their own subscription; nothing is delegated to their computer.
+- **What DEC-0025 still covers:** the guest rules, the lease and its lapse, call back, `own-sign-in
+  off`, and the whole ssh path (`accounts send --delegate`, `ssh-serve`, `accounts lease`) between
+  the operator's own machines. **What it no longer covers:** any computer that is not the
+  operator's own, and any instruction to a teammate about networks, Remote Login or
+  `authorized_keys`.
+- **Consequences / affects:** [the seat relay design](plans/2026-11-19-seat-relay/design.md),
+  [ORGANIZATION.md](ORGANIZATION.md#a-teammates-computer) and its Russian twin, [CLI.md](CLI.md)
+  (the delegated seat section), [CONTRACTS](CONTRACTS.md#delegated-seats-and-the-own-sign-in-switch-sb-403-s2-to-s4-dec-0025-2026-11-17),
+  the MCP description of `switchboard_account_send`, the skill's
+  [tools reference](../plugins/switchboard/skills/switching-accounts/references/tools.md),
+  [ux/scenarios.md](ux/scenarios.md) (SCN-102, SCN-103), [CHANGELOG](../CHANGELOG.md),
+  [evidence/backlog.md](evidence/backlog.md) (SB-575, SB-403), [HANDOFF](HANDOFF.md).
+- **Source:** operator 2026-11-19, this repository's session, when a seat was about to be
+  delegated to a teammate's Mac: «Проблема, что тем, кто приходит по tailscale, они видят вообще
+  все, нету на уровне, нету никаких ограничений, поэтому мы не должны вообще это никому давать.
+  Должны работать типа в рамках, типа вот правильного, как мы все настроены, смотри, чтоб ничего не
+  наделали, ерунды никакой.» Earlier the same day: the seat is the teammate's ordinary console
+  session, managed by the operator, chosen per project, set up through Claude Code over MCP. The
+  board request to Vesta: project `passioncode-vesta`, thread 14da4917, message 446daca9, answered
+  by message d6656231 (directory and membership only); the operator's approval of that split and of
+  the seat ceiling, relayed in announcement de0ba93c; the ask for the seat mailbox: project
+  `passioncode-platform`, thread 54858223, message 2216bf60.
