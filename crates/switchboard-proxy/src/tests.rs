@@ -3097,7 +3097,33 @@ async fn a_later_group_with_the_same_id_never_serves_a_named_account() {
         .unwrap();
     assert_eq!(answer.status(), 403);
     assert!(answer.text().await.unwrap().contains(NAMED_USER_GONE));
+    let send = || {
+        reqwest::Client::new()
+            .post(format!(
+                "http://{}/claude/{}/v1/messages",
+                p.address(),
+                group.pool
+            ))
+            .bearer_auth(&own)
+            .body("{}")
+            .send()
+    };
+    // Security round 3 (P3-2): an entry that names no group's time is refused for a group too.
+    user.group_created_at = None;
+    users::save(s.root(), std::slice::from_ref(&user)).unwrap();
+    p.reload_users();
+    let answer = send().await.unwrap();
+    assert_eq!(answer.status(), 403);
+    assert!(answer.text().await.unwrap().contains(NAMED_USER_GONE));
+    // The group it was allowed for passes every named check (and has no account to serve it).
+    user.group_created_at = Some(group.created_at);
+    users::save(s.root(), std::slice::from_ref(&user)).unwrap();
+    p.reload_users();
+    let answer = send().await.unwrap();
+    assert_eq!(answer.status(), 409);
     assert_eq!(hits.load(Ordering::SeqCst), 0);
+    // Refused requests are not counted as served (review round 1).
+    assert!(p.take_user_requests().is_empty());
     p.shutdown().await;
     up.abort();
 }

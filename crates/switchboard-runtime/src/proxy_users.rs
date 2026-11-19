@@ -161,10 +161,12 @@ fn folder_is_safe(fd: std::os::fd::RawFd, me: u32) -> Result<(), String> {
     if unsafe { libc::fstat(fd, &mut st) } != 0 {
         return Err(SETTINGS_UNWRITTEN.into());
     }
-    let mode = u32::from(st.st_mode);
+    // In `mode_t` throughout (u16 on macOS, u32 on Linux): no conversion either system calls
+    // useless.
+    let mode = st.st_mode;
     let owner_ok = st.st_uid == 0 || st.st_uid == me;
-    let others_write = mode & 0o022 != 0 && mode & u32::from(libc::S_ISVTX) == 0;
-    if (mode & u32::from(libc::S_IFMT)) != u32::from(libc::S_IFDIR) || !owner_ok || others_write {
+    let others_write = mode & 0o022 != 0 && mode & libc::S_ISVTX == 0;
+    if (mode & libc::S_IFMT) != libc::S_IFDIR || !owner_ok || others_write {
         return Err(SETTINGS_FOLDER_UNSAFE.into());
     }
     Ok(())
@@ -579,16 +581,26 @@ pub(crate) fn execute(
 /// Security round 2 (P2-1): the lock every change of `proxy-users.json` holds from its read to
 /// its write (`<data>/proxy-users.lock`, 0600). Not taken: nothing is changed.
 fn list_lock(root: &Path) -> Result<std::fs::File, String> {
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    // Security round 3 (P3-4): never through a link, and only this account's own file.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW).mode(0o600);
+    }
+    let file = options
         .open(root.join(LOCK))
         .map_err(|_| users::UNWRITTEN.to_string())?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let ours = file
+            .metadata()
+            .is_ok_and(|m| m.is_file() && Some(m.uid()) == own_uid());
+        if !ours {
+            return Err(users::UNWRITTEN.into());
+        }
         let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
     }
     file.lock().map_err(|_| users::UNWRITTEN.to_string())?;
@@ -833,6 +845,14 @@ fn change(
 /// written again with the new address and capability. Answers how many were written and how many
 /// could not be (a file a person moved to the user with sudo is no longer this account's).
 pub(crate) fn repoint(root: &Path, port: u16, token: &str) -> (usize, usize) {
+    // Nobody named: nothing to write, and no lock file to make.
+    if std::fs::symlink_metadata(root.join(users::FILE)).is_err() {
+        return (0, 0);
+    }
+    // Security round 2 (P2-1): it writes the list too, so under the same lock as every change.
+    let Ok(_held) = list_lock(root) else {
+        return (0, 0);
+    };
     let Ok(mut list) = users::load(root) else {
         return (0, 0);
     };

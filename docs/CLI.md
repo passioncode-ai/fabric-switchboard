@@ -355,7 +355,7 @@ by hand (a shell, `nohup … &`, `setsid -f`, cron `@reboot`, a unit that runs i
 
 On an organization's Linux VM where `switchboard serve` runs as one user and agents run as users of
 their own, the proxy closes every connection from another user (SB-273). Name each agent user,
-with the one group whose accounts it may use (macOS and Linux; Windows refuses):
+with the one group whose accounts it may use (Linux, and macOS before 27, where another account's socket can be read, SB-459; Windows refuses):
 
 ```sh
 switchboard proxy allow-user agent-a --group team --folder /srv/agents/a \
@@ -430,7 +430,7 @@ Version 0.4 serves Switchboard to coding agents over the Model Context Protocol 
 
 ```sh
 switchboard mcp               # stdio server: status, accounts, usage, switch, project rules
-switchboard mcp --read-only   # the 39 read tools and 15 read forms; usage refresh shows the stored observation
+switchboard mcp --read-only   # the 39 read tools and 16 read forms; usage refresh shows the stored observation
 switchboard --data-dir /path/to/app-data mcp
 ```
 

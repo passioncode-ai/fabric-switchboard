@@ -852,14 +852,13 @@ fn named_user(
     // never removed.
     if user.pool != "default" {
         let made = g.store.pool_created_at(&user.pool);
+        // Security round 3 (P3-2): an entry with no recorded group (a list written by hand, or by
+        // an earlier build of this feature) is refused for any group but the default one.
         let same =
-            matches!(&made, Ok(Some(at)) if user.group_created_at.is_none_or(|was| was == *at));
+            matches!((&made, user.group_created_at), (Ok(Some(at)), Some(was)) if was == *at);
         if !same {
             return Err((StatusCode::FORBIDDEN, NAMED_USER_GONE));
         }
-    }
-    if let Ok(mut counts) = g.user_requests.lock() {
-        *counts.entry(uid).or_default() += 1;
     }
     Ok(user)
 }
@@ -1060,6 +1059,13 @@ async fn relay_as(
     // it. SB-98's move to the next account keeps the kind, so it never reaches one either.
     if named.is_some() && account.kind == AuthKind::ApiKey {
         return error(StatusCode::FORBIDDEN, NAMED_USER_KIND);
+    }
+    // Review round 1: counted once it passed every refusal that names it, so `proxy_user_requests`
+    // counts requests served, never ones refused.
+    if let Some(user) = &named {
+        if let Ok(mut counts) = g.user_requests.lock() {
+            *counts.entry(user.uid).or_default() += 1;
+        }
     }
     if operation == "chat/completions" && account.kind != AuthKind::ApiKey {
         return error(

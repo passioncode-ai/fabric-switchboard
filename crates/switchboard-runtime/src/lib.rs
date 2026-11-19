@@ -7741,17 +7741,23 @@ async fn execute(
             folders,
             write_settings,
             by,
-        } => proxy_users::execute(
-            &store,
-            root,
-            runtime,
-            action.as_deref(),
-            user.as_deref(),
-            group.as_deref(),
-            &folders,
-            write_settings.as_deref(),
-            by.as_deref(),
-        ),
+        } => {
+            // Security round 3 (P3-5): a change waits for the list's lock, never on an async
+            // worker.
+            blocking::run(|| {
+                proxy_users::execute(
+                    &store,
+                    root,
+                    runtime,
+                    action.as_deref(),
+                    user.as_deref(),
+                    group.as_deref(),
+                    &folders,
+                    write_settings.as_deref(),
+                    by.as_deref(),
+                )
+            })
+        }
         Operation::UsageMode { mode } => {
             let value = match mode {
                 Some(mode) => usage_mode::set(root, &mode)?,
@@ -9272,7 +9278,7 @@ async fn execute(
             }
             // SB-421 security round 2 (P2-2): the other users of this host allowed for it go
             // with it, so a group made later with the same id never serves them.
-            proxy_users::forget_group(root, &project.pool, runtime);
+            blocking::run(|| proxy_users::forget_group(root, &project.pool, runtime));
             Ok(json!({"removed": project.pool, "name": project.name}))
         }
         Operation::RemoveProjectRule { path, provider } => {

@@ -63,7 +63,16 @@ pub struct ControlHandle {
 }
 impl ControlHandle {
     pub async fn start(runtime: Arc<Runtime>) -> Result<Self, String> {
-        Self::start_as(runtime, switchboard_proxy::peer::me()).await
+        // Security round 3: on Windows the peer's token user is read with `OpenProcessToken`,
+        // which a process that is not elevated cannot do to an elevated client, so the owner's
+        // own command in an administrator terminal would be shut out. There the descriptor's ACL
+        // and the token stay the barrier, as before; macOS and Linux compare the uid.
+        let me = if cfg!(windows) {
+            switchboard_proxy::peer::Me::Unchecked
+        } else {
+            switchboard_proxy::peer::me()
+        };
+        Self::start_as(runtime, me).await
     }
     /// M3-13: `start` answering only peers that run as `me` (a test plays another account).
     pub(crate) async fn start_as(

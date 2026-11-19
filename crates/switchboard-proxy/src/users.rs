@@ -9,8 +9,11 @@
 //! The list is `<data>/proxy-users.json` (0600): uids, group ids, folders, when, by which
 //! surface, the settings file Switchboard wrote for the account, and the salt that makes its
 //! capability (a salt is no secret: the capability needs the session token too). The proxy reads
-//! it again whenever the file changed (`Users::current`), so allowing, disallowing and rotating
-//! take effect at the next connection and the next request, with no owner restart.
+//! it again whenever the file changed (`Users::current`): before it admits a named connection,
+//! after each change the owner saves (`ProxyHandle::reload_users`) and every [`REFRESH`] while
+//! anyone is listed. A request reads the list as last read (`Users::find_cached`), so allowing,
+//! disallowing and rotating through Switchboard take effect at once, a change made by hand within
+//! [`REFRESH`], with no owner restart.
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -184,9 +187,13 @@ impl Users {
         let Some(root) = &self.root else {
             return Arc::default();
         };
-        let Ok(_loading) = self.loading.lock() else {
-            return Arc::default();
-        };
+        // Security round 3 (P3-3): `loading` guards no data, so a read that panicked leaves
+        // nothing half done: go on, rather than freeze a cache that may still name a user
+        // disallowed since.
+        let _loading = self
+            .loading
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = stamp(&root.join(FILE));
         {
             let Ok(cache) = self.cache.lock() else {
@@ -290,6 +297,9 @@ mod tests {
         assert_ne!(base, crate::pool_token(&t, "team"));
     }
 
+    /// Unix only: on Windows the proxy names nobody (`Users::none`), and a file's stamp there has
+    /// no inode, so two saves of one length within the clock's step read as one (review round 1).
+    #[cfg(unix)]
     #[test]
     fn the_view_follows_the_file_and_fails_closed() {
         let root = tempfile::tempdir().unwrap();

@@ -201,7 +201,7 @@ enum Command {
         #[command(subcommand)]
         command: Option<OwnSignInCmd>,
     },
-    /// Other accounts of this computer the proxy serves (macOS and Linux). By default the proxy
+    /// Other accounts of this computer the proxy serves (Linux, and macOS before 27). By default the proxy
     /// closes every connection from another account; a user named here may use one group's
     /// accounts as Claude Code, only with its own capability, which Switchboard writes into a
     /// settings file and never prints.
