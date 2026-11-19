@@ -4691,7 +4691,8 @@ struct LaunchThere {
 }
 /// SB-577: the last one-minute read of `target` decides a launch of `provider` in `pool` there:
 /// a refusal is `remote_usage::NO_ACCOUNT_IN_GROUP_TEXT`; an unknown or stale read lets it start.
-/// Reads the machine groups and `remote-usage.json` only; nothing is asked over ssh.
+/// Reads the machine groups and `remote-usage.json` only; nothing is asked over ssh. A snapshot
+/// that cannot be read leaves the machine unknown: never a refusal.
 async fn launch_there_check(
     root: &std::path::Path,
     target: &str,
@@ -4701,7 +4702,7 @@ async fn launch_there_check(
     use switchboard_runtime::remote_usage;
     let check = remote_usage::check_for(
         root,
-        &call(root, Operation::Snapshot).await?,
+        &call(root, Operation::Snapshot).await.unwrap_or(Value::Null),
         target,
         pool,
         match provider {
@@ -6314,7 +6315,11 @@ fn owner_line(owner: &Value) -> String {
     let text = |v: &Value| v.as_str().map(str::to_owned);
     let mut parts: Vec<String> = Vec::new();
     match owner["state"].as_str() {
-        Some("answers") => parts.push("answers".into()),
+        // An owner that proved itself and did not answer this request says why (busy...).
+        Some("answers") => parts.push(match text(&owner["reason"]) {
+            Some(reason) => format!("answers ({reason})"),
+            None => "answers".into(),
+        }),
         Some("not_answering") => parts.push(format!(
             "runs and does not answer ({})",
             text(&owner["reason"]).unwrap_or_default()
