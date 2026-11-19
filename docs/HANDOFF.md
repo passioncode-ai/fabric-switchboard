@@ -3,6 +3,16 @@
 > [board](evidence/backlog.md).
 
 
+## 2026-11-19: SB-518 smart usage checks (DEC-0032), on branch `sb-518-smart-usage`
+
+- **Asked.** Plan 10 §H (W10.3), coordinator of SB-518: headers count as checks, header writes batched, a budget per provider, a fresh candidate before a switch, the near-limit pull-in only when the last header is a minute old; plan review: keep the 900 s floor, leave DEC-0002 alone, a person-facing mode.
+- **Built.** `switchboard-core`: `observe_generation` postpones the next check on a complete header (`PASSIVE_CEILING_SECONDS` 1800 after the endpoint's last answer, memory-only `endpoint_seen` and `header_seen`), holds changed headers in memory (`flush_headers_if_older`), puts accounts with no traffic on the idle cadence, `UsageMode`; `rotation.rs`: `rotation_candidate_to_confirm`, `header_figure`, `CANDIDATE_RANK_MAX_AGE_SECONDS` 900, `CURRENT_MAX_AGE_FLOOR_SECONDS` 300. `switchboard-runtime`: `usage_budget.rs` (bucket 2 a minute, burst 4, 2 in flight, debt 4 for people, provider hold `max(Retry-After, 900 s)` doubling to an hour in `usage-provider-holds.json`, jitter), `usage_mode.rs` (`<data>/usage-mode`), `monitor::choose_checks`, `confirm_candidates`, `check_candidate`. CLI `switchboard usage-mode`, MCP `switchboard_usage_mode`.
+- **Decisions.** A header never freshens a per-model window (the existing trap test stands); the account in use may switch on its header figures only at or over the threshold. The provider hold keeps the per-account 900 s floor. An account that only could be switched to is on the idle cadence; the switch checks it fresh first. DEC-0032 is the next number after DEC-0031.
+- **Checks.** See the PR (Studio gate, EXIT line).
+- **Not done.** SB-519: the :03/:33 sweep's source, 60 s spacing per account for people's checks, the group in the rotation log, usage lines in the journal, Codex headers, one machine owning a seat's checks.
+
+**Exact next task.** Review the SB-518 pull request and merge once its gate reads EXIT 0 on the merged head (renumber DEC-0032 if another pull request took it); after the release, measure an hour of `usage_check` lines on the operator's Mac (expected at most about 120 a provider) and the share of switches before a refusal; then SB-519.
+
 ## 2026-11-18: SB-452 a launch keeps its group's route, SB-453 a short rate limit of the key is waited out, on branch `tokens-spend`
 
 - **Asked.** Board thread a9844103 (Fabric Dashboards): a session on the pay-per-token group spent $53.98 by its own estimate while `spent_today_usd` read 0 and the statistics had no row for the key; its nine subagents met `429` and stood still.
