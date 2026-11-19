@@ -55,10 +55,10 @@ pub fn turned_off_home(root: &Path, config: &Path) -> Option<String> {
         .then_some(id)
 }
 
-/// M5-02: refuses to continue `session` when its config folder is the home of an account the
-/// person turned off (`switchboard_core::off::ACCOUNT_OFF`). Every continuation asks it: a
-/// person's Continue, the boot resume, the duty officer's restart, a restart wave and a
-/// recovery claim.
+/// M5-02: refuses to continue a session whose config folder is the home of an account the person
+/// turned off (`switchboard_core::off::ACCOUNT_OFF`). `continue_as` asks it, so a person's Continue
+/// and the boot resume do; the duty officer's restart and a restart wave ask `turned_off_home`
+/// directly, and a recovery claim takes only `usable()` accounts.
 pub fn refuse_if_off(root: &Path, config: &Path) -> Result<(), String> {
     match turned_off_home(root, config) {
         Some(_) => {

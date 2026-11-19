@@ -859,9 +859,10 @@ research notes); the ones still in force that the board cites are seeded below w
     or a call back stays the way home. An account not turned off by the person comes home on
     as before. A call back recorded on a seat is cleared only by the sender's undo; an extension
     that reaches the seat after its call back (the sender's pass reads its snapshot before up to
-    20 s of ssh) never revives it (review round 3), and a seat called back before 0.7.118 takes
-    its record from the journal at the next open while the journal still holds the entry, and is
-    switched off there if 0.7.117 let the person switch it on (review round 4). A seat state the
+    20 s of ssh) never revives it (review round 3), and a seat called back by 0.7.123 or older
+    (which record no call back on the seat) takes its record from the journal at the next open
+    while the journal still holds the entry, and is switched off there if such a version let the
+    person switch it on (review round 4). A seat state the
     store already broke never blocks a write about another account; only a write that breaks it
     is refused.
     `switchboard remote check` does not report the lapsed copy of a seat the person turned off

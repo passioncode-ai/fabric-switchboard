@@ -102,7 +102,10 @@ pub fn list(
                 .filter(|a| a.pool == group.pool && switchboard_core::Snapshot::is_claude_key(a))
             {
                 let chosen = selected == Some(&account.id);
-                let why_not = if !account.usable() {
+                let why_not = if account.off.is_some() {
+                    // W11.7 review round 5: the person's own off, in the words every surface uses.
+                    Some(switchboard_core::off::ACCOUNT_OFF)
+                } else if !account.usable() {
                     Some("This key is disabled. Enable it to launch on it.")
                 } else if group.off {
                     Some(switchboard_core::GROUP_OFF)

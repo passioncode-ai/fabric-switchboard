@@ -1024,7 +1024,7 @@ impl Store {
         // are dropped once, with the same write.
         let pruned = projects::stale_shares_prune(&mut migrated);
         let retired = migrated.retire_domain_rule();
-        // W1.2 review round 3 of PR #821: a seat called back before 0.7.118 takes its record from
+        // W1.2 review round 3 of PR #821: a seat called back by 0.7.123 or older takes its record from
         // the journal while it still holds the entry, before the migration reads it.
         let recorded = delegation::record_old_call_backs(&mut migrated);
         // W1.2 (DEC-0027): an account off for no automatic reason is the person's off.
