@@ -302,7 +302,8 @@ Account list order is display-only; it never selects/activates. Within provider/
   network per provider (`IN_FLIGHT`); `on_demand` makes no check on a
   schedule (no due list, no pull-in: `monitor::Pass::run_with_stop`), while headers, a switch's candidate and
   a person's check work as in `smart` (the setting itself: `usage_mode::tests`); native rotation
-  has no figure there and moves only on a limit. The mode governs the cadence and the budget: the
+  and a Codex group (the proxy reads only Claude's `anthropic-ratelimit-unified-*` headers) have no
+  figure there and move only on a limit. The mode governs the cadence and the budget: the
   account in use's 300 s floor and its switch on header figures (below) hold in every mode.
 - **Headers count as a check.** `Store::observe_generation` with `source: response_headers` whose
   windows include both `HEADER_WINDOWS` (`five_hour`, `seven_day`) and whose account the usage

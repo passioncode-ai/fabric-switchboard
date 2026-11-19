@@ -953,8 +953,9 @@ research notes); the ones still in force that the board cites are seeded below w
   group every 180 s, headers postpone nothing, no budget beyond the provider's holds and 2 checks of one provider
   on the network at once) or `on_demand` (no check
   on a schedule; a switch's candidate and a person's check still ask). The mode governs the checks only: the account in use's 300 s floor and its switch on header figures hold in every mode. In `on_demand` a managed
-  group's account in use is read from its answers' headers, so it still switches before the limit;
-  native rotation of the ordinary Claude Code has no such source and switches only on a limit. Nothing here touches a
+  Claude group's account in use is read from its answers' headers, so it still switches before the
+  limit; a Codex group (Switchboard reads no Codex headers) and native rotation of the ordinary
+  Claude Code have no such source and switch only on a limit. Nothing here touches a
   session's request: DEC-0002's one move of a refused request and DEC-0031's wait stay as they are.
 - **Consequences / affects:** about 120 checks an hour per provider at most instead of up to 480;
   while a 429 holds a provider, no candidate is checked, so its groups switch only on a limit or a

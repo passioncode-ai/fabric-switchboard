@@ -180,7 +180,7 @@ pub enum UsageMode {
     /// of one provider on the network at once.
     Timer,
     /// No background check: the endpoint is asked only for a switch's candidate and when a
-    /// person asks; headers keep the figures of accounts in use.
+    /// person asks; Claude's response headers keep the figures of accounts in use.
     OnDemand,
 }
 impl UsageMode {
