@@ -56,6 +56,9 @@ pub(crate) const CONFLICTS: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
+    // SB-533: a managed session's route header (`X-Switchboard-Launch-Group`, a folder's
+    // capability) never reaches a session it starts; a session of its own gets its own route.
+    "ANTHROPIC_CUSTOM_HEADERS",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
@@ -4603,6 +4606,11 @@ mod tests {
         );
         assert!(s.contains("'/tmp/a'\\''b'"));
         assert!(s.contains("unset ANTHROPIC_API_KEY"));
+        let unset = s.lines().find(|l| l.starts_with("unset ")).unwrap();
+        assert!(
+            unset.split(' ').any(|w| w == "ANTHROPIC_CUSTOM_HEADERS"),
+            "SB-533: a parent session's route header is cleared"
+        );
         assert!(s.contains(".completed"));
         assert!(!s.contains("set -x"));
     }
