@@ -384,11 +384,12 @@ window open beside it (`window_version`, `window_older`, `windows`). Changing an
 Only when the operator asks. Links this `switchboard` into `~/.local/bin`, as the window's *Link the
 CLI* does; it never replaces a file that is not Switchboard's.
 
-### `switchboard_analytics`: `enabled?`
+### `switchboard_analytics`: `enabled?`, `decision?`
 
 Switchboard's own usage analytics (counts and kinds only), as About sets it: `enabled` true or false
-turns them on or off, only when the operator asks; without it, the state (`available`, `enabled`,
-`notice_pending`). Only the installed app sends them.
+turns them on or off, only when the operator asks and with `decision`, the operator's own words
+said within the last day, which the runtime checks and records (SB-560); without `enabled`, the
+state (`available`, `enabled`, `notice_pending`). Only the installed app sends them.
 
 ### `switchboard_github`: `owner?`
 
@@ -753,7 +754,10 @@ is trusted (`machine-keys.json`, public keys only); a later one signed by anothe
 before anything else is sent, and so is a machine with a trusted key whose Switchboard no longer
 proves it. `keys`: the keys trusted, `{machines: [{machine, public_key, pinned_at, by}]}`.
 `trust`: `machine` (as ssh knows it) is trusted with `key`, the key `switchboard settings signer`
-printed on that machine; it needs `decision`, the operator's own words.
+printed on that machine; it needs `decision`, the operator's own words said within the last day,
+which the runtime checks and records (SB-560). Since SB-560 a read of another machine never pins
+a key, an act needs a trusted one, and a machine that answers with another key is listed in
+`switchboard_attention` as `machine_key_changed`.
 
 ### `switchboard_targets`: `probe?`
 

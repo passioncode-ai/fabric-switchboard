@@ -1866,7 +1866,15 @@ async fn arguments_are_checked_against_the_schema_and_the_window_removals_have_t
     assert!(message.contains("1 to 90"), "{message}");
     // A nested object names its path; a decision takes the four fields the runtime reads.
     let decision = |extra: Value| {
-        let mut d = json!({"by": "operator", "instruction": "remove it", "at": "2026-11-19T10:00:00Z", "source": "session test"});
+        // SB-560: the operator's words are fresh (said within the last day).
+        let said = switchboard_runtime::rfc3339(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64,
+        )
+        .unwrap();
+        let mut d = json!({"by": "operator", "instruction": "remove it", "at": said, "source": "session test"});
         d.as_object_mut()
             .unwrap()
             .extend(extra.as_object().unwrap().clone());

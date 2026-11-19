@@ -713,18 +713,15 @@ impl Server {
     /// `change-policy` act that needs the operator's relayed words; reading needs none.
     async fn analytics(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let enabled = args.get("enabled").and_then(Value::as_bool);
-        if enabled.is_some() {
-            let decision: switchboard_runtime::spend::Decision = args
-                .get("decision")
-                .cloned()
-                .ok_or(ANALYTICS_DECISION_REQUIRED.to_string())
-                .and_then(|d| {
-                    serde_json::from_value(d)
-                        .map_err(|_| switchboard_runtime::spend::DECISION_INVALID.to_string())
-                })?;
-            decision.check()?;
+        if enabled.is_none() {
+            return self.call(Operation::Analytics { enabled }).await;
         }
-        self.call(Operation::Analytics { enabled }).await
+        if args.get("decision").is_none() {
+            return Err(ANALYTICS_DECISION_REQUIRED.into());
+        }
+        // SB-560 (M3-07): the words travel with the operation, which checks and records them.
+        self.call(on_operators_word(args, Operation::Analytics { enabled })?)
+            .await
     }
     /// SB-392 K-1: the keys an agent can start on, by name.
     /// SB-404 K2: the saves run as switchboard processes reading the value on stdin.
@@ -1349,20 +1346,18 @@ impl Server {
             },
             "keys" => Operation::MachineKeys,
             "trust" => {
-                // SB-357: trusting another key decides which computer gets sign-ins next.
-                let decision: switchboard_runtime::spend::Decision = args
-                    .get("decision")
-                    .cloned()
-                    .ok_or(MACHINE_TRUST_DECISION_REQUIRED.to_string())
-                    .and_then(|d| {
-                        serde_json::from_value(d)
-                            .map_err(|_| switchboard_runtime::spend::DECISION_INVALID.to_string())
-                    })?;
-                decision.check()?;
-                Operation::MachineTrust {
-                    machine: required(args, "machine")?.into(),
-                    key: required(args, "key")?.into(),
+                // SB-357: trusting another key decides which computer gets sign-ins next; the
+                // words travel with the operation, which checks and records them (SB-560, M3-07).
+                if args.get("decision").is_none() {
+                    return Err(MACHINE_TRUST_DECISION_REQUIRED.into());
                 }
+                on_operators_word(
+                    args,
+                    Operation::MachineTrust {
+                        machine: required(args, "machine")?.into(),
+                        key: required(args, "key")?.into(),
+                    },
+                )?
             }
             _ => return Err("action is adopt, place, forget, keys or trust.".into()),
         })

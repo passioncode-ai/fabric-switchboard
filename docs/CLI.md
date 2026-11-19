@@ -892,13 +892,21 @@ switchboard agents key --service openrouter --dir /work/app --to-pipe   # the ke
 ```
 
 A command that prints a key (`agents key --service openrouter`, `agents anthropic key NAME`)
-takes `--to-pipe` and writes into a pipe, a session script's `$(...)`; without the flag, to a
-terminal or into a file it refuses and prints nothing (SB-420). Session scripts Switchboard writes
-pass it; a script an earlier version wrote (Hermes or OpenCode on a saved key) is written again at
-the next launch. `accounts surrender` is run by `accounts recall` over ssh, which names the
-hand-over in its command (`SWITCHBOARD_TRANSFER=surrender`); to a terminal or a file it refuses.
-These checks keep a value off a screen and out of a file. They are not an access control: a
-program running as the same user can still pass them.
+answers since SB-560 (DEC-0035) only for the one-time ticket a launch wrote into its own session
+script (`SWITCHBOARD_KEY_TICKET`, set for that command alone, ten minutes, once); any other caller
+is refused and nothing is printed, and each answer or refusal is a line in `value-doors.jsonl`.
+`--to-pipe` stays accepted for the scripts that name it. A script an earlier version wrote (Hermes
+or OpenCode on a saved key) is written again at the next launch. `accounts surrender` is run by
+`accounts recall` over ssh, which names the hand-over in its command
+(`SWITCHBOARD_TRANSFER=surrender`); to a terminal or a file it refuses, and each sign-in it hands
+back is journalled. That check keeps a sign-in off a screen and out of a file; it is not an access
+control yet (a program running as the same user can pass it): a call back signed by the recalling
+machine's key is the next part of SB-560.
+
+`machines trust` and `analytics on|off` run from the CLI only with the operator's words
+(`--operator-said`, `--said-at`, `--said-in`, as for a raised ceiling), checked and recorded in
+`spend.json`; so does `accounts update --force` and `accounts assign --force`. Words open an act only
+within a day of when they were said (DEC-0035). A first ceiling above $100 a day needs them too.
 
 A session script names the key slot its start's spending check read (`--pool` or `--machine`),
 never its folder: a folder that joins another group between the launch and the script's first

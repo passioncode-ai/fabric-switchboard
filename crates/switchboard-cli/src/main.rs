@@ -1839,8 +1839,8 @@ enum AgentsCommand {
         /// With --service: exactly the machine's key, never a group's.
         #[arg(long, requires = "service", conflicts_with = "dir")]
         machine: bool,
-        /// With --service: print the key into the pipe the caller reads it from (a session
-        /// script's `$(...)`). Required: without it, or to a terminal or a file, it is refused.
+        /// With --service: kept for the session scripts that name it. Since SB-560 the key is
+        /// answered only for the one-time ticket a launch writes for its own script.
         #[arg(long, requires = "service")]
         to_pipe: bool,
     },
@@ -2089,8 +2089,8 @@ enum AnthropicCommand {
     Key {
         /// The key's name.
         name: String,
-        /// Print the key into the pipe the caller reads it from (a session script's `$(...)`).
-        /// Required: without it, or to a terminal or a file, it is refused.
+        /// Kept for the session scripts that name it. Since SB-560 the key is answered only for
+        /// the one-time ticket a launch writes for its own script.
         #[arg(long)]
         to_pipe: bool,
     },
@@ -2351,9 +2351,14 @@ enum Mode {
     Isolated,
     Managed,
 }
-/// SB-420: printed when a command that prints a key is run without `--to-pipe` or into a
-/// terminal or a file. Names the use, never the key.
-const KEY_TO_PIPE_ONLY: &str = "This prints a key, only for a session script that reads it from a pipe with --to-pipe. See what is saved with `switchboard agents openrouter status` or `switchboard agents anthropic list`.";
+/// SB-560 (M3-01): the one-time ticket a launch wrote for its key command
+/// (`SWITCHBOARD_KEY_TICKET`, set for that command alone), passed to the owner, which hands the
+/// key only for a live one.
+fn key_ticket() -> Option<String> {
+    std::env::var(switchboard_runtime::value_doors::TICKET_ENV)
+        .ok()
+        .filter(|t| t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit()))
+}
 
 /// SB-420: a command that prints a credential writes it only when its caller named the hand-over
 /// (`named`) and reads the value from a pipe or socket: never to a terminal, never into a file,
@@ -3936,7 +3941,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 machine,
                 to_pipe,
             } => {
-                value_output(*to_pipe, KEY_TO_PIPE_ONLY)?;
+                // SB-560 (M3-01): the owner hands the key only for the launch's one-time ticket;
+                // `--to-pipe` stays accepted for the scripts that name it.
+                let _ = to_pipe;
                 use switchboard_runtime::spend::KeySlot;
                 // SB-213: a slot named is the key fetched, whatever group the folder is in now.
                 let slot = match (pool, machine) {
@@ -3953,6 +3960,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                         (None, None) => std::env::current_dir().ok(),
                     },
                     slot,
+                    ticket: key_ticket(),
                 }
             }
             AgentsCommand::Openrouter { command } => match command {
@@ -4008,8 +4016,11 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     Operation::AnthropicKeyRemove { name: name.clone() }
                 }
                 AnthropicCommand::Key { name, to_pipe } => {
-                    value_output(*to_pipe, KEY_TO_PIPE_ONLY)?;
-                    Operation::AnthropicKeyValue { name: name.clone() }
+                    let _ = to_pipe;
+                    Operation::AnthropicKeyValue {
+                        name: name.clone(),
+                        ticket: key_ticket(),
+                    }
                 }
             },
             AgentsCommand::Hermes {

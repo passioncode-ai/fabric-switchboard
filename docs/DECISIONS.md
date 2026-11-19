@@ -707,7 +707,10 @@ research notes); the ones still in force that the board cites are seeded below w
 
 - **Date:** 2026-11-17
 - **Status:** Accepted (built on branch `org-delegation`: SB-403 waves S2 to S4; the live run with a
-  teammate's machine, S5, waits for that machine)
+  teammate's machine, S5, waits for that machine). Its sentence "a process holding the control
+  token can, with the same trust as the person's own Keychain" is amended by
+  [DEC-0035](#dec-0035-a-value-leaves-switchboard-only-through-a-restricted-journalled-door-and-a-loosening-only-on-fresh-words)
+  for saved keys (SB-560); for a sign-in handed back it still holds until the signed call back.
 - **Context:** the operator wants a teammate's computer to use one of an organization's
   subscriptions in console sessions through Switchboard, without the teammate ever signing in with
   it, revocable at any time, more added later; the teammate keeps their own subscription in Claude
@@ -1090,3 +1093,48 @@ research notes); the ones still in force that the board cites are seeded below w
   минуту через свитчборд а не через запросы напрямую к сессиям и на удаленный свитчборд в рамках
   организации то же самое».
 
+### DEC-0035: A value leaves Switchboard only through a restricted, journalled door, and a loosening only on fresh words
+
+- **Date:** 2026-11-19
+- **Status:** Accepted (SB-560, W11.1 part 3 on branch `sb-560-doors`; the signed call back and
+  the per-launch proxy capability are the next parts of SB-560). Amends DEC-0025's trust sentence
+  for saved keys.
+- **Context:** the audit of 2026-11-19 (M3-01, M3-06, M3-07) found that any process of the same
+  user, a prompt-injected agent with full access (SB-515) included, could take a saved provider
+  key out through the CLI by naming the hand-over and reading from a pipe, a guard that keeps a
+  value off a screen but checks nothing about who asks; and that the operator's words that open a
+  loosening were checked for their shape only, could be replayed at any later time, and were
+  checked in one surface (MCP) and dropped, so the CLI path left no record of whose words allowed
+  trusting a machine's key or turning usage counts on or off.
+- **Decision:**
+  - A saved provider key (OpenRouter, a named Anthropic key) is answered only for a one-time
+    ticket the launch that needs it wrote into its own script: 32 random bytes, kept here only as
+    their SHA-256 (`key-tickets.json`, 0600), naming the key's slot, living ten minutes, opened
+    once, set for the key command alone as `SWITCHBOARD_KEY_TICKET` and never as an argument. The
+    CLI's `--to-pipe` stays accepted and guards nothing more.
+  - Every answer or refusal of a key, and every sign-in handed back (`accounts surrender`, a
+    delegated seat's call back), writes one line to `value-doors.jsonl` (0600, the newest 500):
+    the kind, how it ended and when; never a value, a ticket or a name.
+  - The operator's words open an act only within a day of when they were said and never when
+    dated more than five minutes ahead (`spend::Decision::check`). They are checked and recorded
+    where the act runs (`OnOperatorsWord`, `spend.json`'s loosenings), whatever surface sent them:
+    besides the ceilings, groups and keys of DEC-0023 and DEC-0024, now `force` past the
+    moved-away guard, trusting another machine's key and turning usage counts on or off, which the
+    control listener and the offline CLI refuse without them; the window's own controls need
+    none. A first ceiling above $100 a day is a loosening too.
+  - Still open, the next parts of SB-560: a sign-in is handed back only for a call back signed by
+    the recalling machine's key that this computer recorded when it received the account (M3-01,
+    M3-10); a managed launch gets a capability bound to its group and launch instead of the
+    global session token, and the agent token is per group (M3-02); the operator's words bound to
+    a verifiable artefact (a code the window shows, or an answered Fabric question) rather than to
+    their date alone.
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md) (agent keys, Anthropic keys, the
+  operator's words, moves), `AGENTS.md` Lifecycle (the two files), [CLI.md](CLI.md)
+  (`agents key`, `agents anthropic key`, `machines trust`, `analytics`), the MCP descriptions of
+  `switchboard_machine_set` and `switchboard_analytics`, the skill's
+  [tools reference](../plugins/switchboard/skills/switching-accounts/references/tools.md),
+  [CHANGELOG](../CHANGELOG.md), [evidence/backlog.md](evidence/backlog.md) (SB-560).
+- **Source:** the operator's order of 2026-11-19, quoted in the audit report
+  `docs/reports/2026-11-19-lifecycle-remote-access-audit/README.md` (PR #865): «… по каким правилам, делегации, permission, доступ. Вот это все
+  максимально детальный аудит … и все это собираем в один общий репорт. По нему пишем спеку,
+  потом планируем, декомпозируем, все исправляем, выкатываем новую версию.»
