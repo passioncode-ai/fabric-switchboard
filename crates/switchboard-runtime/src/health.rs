@@ -295,7 +295,11 @@ mod tests {
             );
             for c in r["checks"].as_array().unwrap() {
                 let area = c["area"].as_str().unwrap();
-                assert!(areas.iter().any(|a| a == area), "{} uses area {area}", c["id"]);
+                assert!(
+                    areas.iter().any(|a| a == area),
+                    "{} uses area {area}",
+                    c["id"]
+                );
             }
         }
     }
