@@ -241,15 +241,20 @@ enum Command {
     Health,
     /// What another machine reads of this Switchboard every minute over ssh, in one answer: the
     /// accounts (label, provider, on or off, used share and its check), the sessions as ids and
-    /// codes (never a folder, a label or text a session wrote) and the health report. Through a
-    /// restricted entry (`ssh-serve`), only the delegated seats and that group's sessions, with no
-    /// health. Reads only.
+    /// codes (never a folder, a label or text a session wrote), the health report and each group
+    /// with how many accounts that can start a session serve it per provider. Through a
+    /// restricted entry (`ssh-serve`), only the delegated seats, that group and its sessions, with
+    /// no health. Reads only.
     RemoteStatus,
-    /// Report online/offline mode and the proxy address, without its capability.
+    /// Report online/offline mode and the proxy address, without its capability, and whether an
+    /// owner answers on this data folder (its pid, version and how it runs), read without ever
+    /// starting one.
     Status,
     /// The other machines this Switchboard knows, from accounts moved there and runs started
-    /// there: as ssh names each, the switchboard and data folder used there, and when it was last
-    /// used. With --probe, whether each one's Switchboard answers over ssh now and its version.
+    /// there: as ssh names each, the switchboard and data folder used there, when it was last
+    /// used, and from the one-minute reads which groups there hold an account that can start a
+    /// session, per provider. With --probe, whether each one's Switchboard answers over ssh now
+    /// and its version.
     Targets {
         /// Also ask each machine's Switchboard over ssh whether it answers now, and its version.
         #[arg(long)]
@@ -405,6 +410,12 @@ enum Command {
         /// With --target: the data folder there, when its Switchboard runs with --data-dir.
         #[arg(long, requires = "target")]
         remote_data_dir: Option<String>,
+        /// With --target and --provider: the group there the folder belongs to. Before ssh runs,
+        /// the last one-minute read of that machine is checked: a known read with no account of
+        /// the provider that can start a session in that group refuses the launch
+        /// (`no_account_in_group`, exit status 3); a stale or missing read is not a refusal.
+        #[arg(long, requires_all = ["target", "provider"], value_name = "GROUP")]
+        pool: Option<String>,
         /// Arguments for the agent, after `--` (for example `-- --resume <id>`, or `-- -p "…"`
         /// headless); with --in-place or --headless.
         #[arg(last = true)]
@@ -2466,6 +2477,8 @@ async fn serve_ssh(
                 "accounts": remote_usage::accounts_answer(&seats["accounts"]),
                 "sessions": sessions,
                 "health": null,
+                // SB-577: only the group the key line names, counting only its seats.
+                "groups": remote_usage::groups_answer(&snapshot, &seats["accounts"], Some(pool)),
             }))
         }
         Request::AccountsList => Ok(ssh_serve::accounts_view(
@@ -2581,7 +2594,8 @@ async fn serve_ssh(
     }
 }
 /// SB-550: what another machine reads of this Switchboard every minute (`remote-status`): the
-/// accounts, the sessions as ids and codes (`remote_usage::sessions_digest`) and the health report.
+/// accounts, the sessions as ids and codes (`remote_usage::sessions_digest`), the health report and
+/// (SB-577) the groups with their usable accounts per provider (`remote_usage::groups_answer`).
 /// A part that could not be read is null; the accounts are required.
 async fn remote_status(root: &std::path::Path) -> Result<Value, String> {
     use switchboard_runtime::remote_usage;
@@ -2597,6 +2611,8 @@ async fn remote_status(root: &std::path::Path) -> Result<Value, String> {
         "accounts": remote_usage::accounts_answer(&snapshot["accounts"]),
         "sessions": sessions,
         "health": health,
+        // SB-577: each group with how many accounts that can start a session serve it.
+        "groups": remote_usage::groups_answer(&snapshot, &snapshot["accounts"], None),
     }))
 }
 #[cfg(not(unix))]
@@ -3080,7 +3096,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         },
         Command::Usage { id: Some(id) } => Operation::Usage { id: id.clone() },
         Command::Usage { id: None } | Command::Events { .. } => Operation::Snapshot,
-        Command::Status => Operation::Status,
+        // SB-576: answered from the owner, else from files: never offline through the store.
+        Command::Status => return Ok(switchboard_runtime::owner_status::status(&root).await),
         Command::Targets { probe } => Operation::Targets { probe: *probe },
         Command::McpHomes => Operation::McpHomes,
         Command::Attention => Operation::Attention,
@@ -3616,8 +3633,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             target: Some(target),
             remote,
             remote_data_dir,
+            pool,
             ..
         } => {
+            // SB-577: refused before ssh runs when the last read of that machine says its group
+            // has no account of the provider that can start a session.
+            if let (Some(pool), Some(provider)) = (pool, provider) {
+                launch_there_check(&root, target, pool, *provider).await?;
+            }
             return launch_there(
                 &root,
                 target,
@@ -4665,6 +4688,32 @@ struct LaunchThere {
     parent: Option<String>,
     surface: LaunchSurface,
     args: Vec<String>,
+}
+/// SB-577: the last one-minute read of `target` decides a launch of `provider` in `pool` there:
+/// a refusal is `remote_usage::NO_ACCOUNT_IN_GROUP_TEXT`; an unknown or stale read lets it start.
+/// Reads the machine groups and `remote-usage.json` only; nothing is asked over ssh.
+async fn launch_there_check(
+    root: &std::path::Path,
+    target: &str,
+    pool: &str,
+    provider: ProviderArg,
+) -> Result<(), String> {
+    use switchboard_runtime::remote_usage;
+    let check = remote_usage::check_for(
+        root,
+        &call(root, Operation::Snapshot).await?,
+        target,
+        pool,
+        match provider {
+            ProviderArg::Claude => "claude",
+            ProviderArg::Codex => "codex",
+        },
+        switchboard_runtime::session_watch::now(),
+    );
+    if check["state"] == "refused" {
+        return Err(remote_usage::NO_ACCOUNT_IN_GROUP_TEXT.into());
+    }
+    Ok(())
 }
 /// SB-332: replaces this process with `ssh` running the other machine's `switchboard launch`;
 /// with --in-place the session is in this terminal (`ssh -t`), with --headless its output and
@@ -6246,6 +6295,8 @@ fn print_result(value: &Value, cli: &Cli) {
                 text(&value["platform"]),
                 text(&value["proxy_address"])
             );
+            // SB-576: the owner, read without starting one.
+            println!("Owner: {}", owner_line(&value["owner"]));
             // SB-420: a Claude Code Keychain item Switchboard could not write.
             if value["keychain_too_large"]
                 .as_array()
@@ -6257,6 +6308,33 @@ fn print_result(value: &Value, cli: &Cli) {
         Command::Capacity { .. } => print_capacity(value),
         _ => print_value(value, false),
     }
+}
+/// SB-576: `status`'s owner block as one line of text.
+fn owner_line(owner: &Value) -> String {
+    let text = |v: &Value| v.as_str().map(str::to_owned);
+    let mut parts: Vec<String> = Vec::new();
+    match owner["state"].as_str() {
+        Some("answers") => parts.push("answers".into()),
+        Some("not_answering") => parts.push(format!(
+            "runs and does not answer ({})",
+            text(&owner["reason"]).unwrap_or_default()
+        )),
+        Some("gone") => parts.push("gone (its process ended)".into()),
+        Some("absent") => return "not running".into(),
+        _ => return PLACEHOLDER.into(),
+    }
+    if let Some(pid) = owner["pid"].as_u64() {
+        parts.push(format!("pid {pid}"));
+    }
+    if let Some(version) = text(&owner["version"]) {
+        parts.push(format!("version {version}"));
+    }
+    match (text(&owner["kind"]), text(&owner["supervisor"])) {
+        (Some(kind), Some(supervisor)) => parts.push(format!("{kind} under {supervisor}")),
+        (Some(kind), None) => parts.push(kind),
+        _ => {}
+    }
+    parts.join(", ")
 }
 /// `switchboard capacity` as text.
 fn print_capacity(value: &Value) {
@@ -6446,6 +6524,12 @@ const STACK_BYTES: usize = 16 * 1024 * 1024;
 fn failure(error: &str) -> (Option<&'static str>, u8) {
     if switchboard_runtime::projects::is_no_route(error) {
         (Some("no-route"), 3)
+    } else if error == switchboard_runtime::remote_usage::NO_ACCOUNT_IN_GROUP_TEXT {
+        // SB-577: a launch on another machine whose group there has no account to start on.
+        (
+            Some(switchboard_runtime::remote_usage::NO_ACCOUNT_IN_GROUP),
+            3,
+        )
     } else if switchboard_runtime::control::is_timeout(error) {
         (Some("control-timeout"), 4)
     } else {

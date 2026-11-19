@@ -62,6 +62,7 @@ Annotations: `readOnlyHint: true`.
 | Field | Meaning |
 |---|---|
 | `runtime.online`, `runtime.platform`, `runtime.note` | whether the desktop app or `switchboard serve` owns the proxy; offline means managed sessions cannot route and automatic switching is paused |
+| `runtime.owner` | SB-576, read without ever starting an owner: `state` (`answers`; `not_answering` with `reason` `no_answer`, `refused`, `unreadable` or `starting`; `gone` with `reason` `process_ended`; `absent`), and for an owner that proved itself but did not answer the request `reason` `busy`, `timeout`, `version_skew` or `refused_request`; `pid`, `version`, `kind` (`app` or `serve`, null when it did not answer), `supervisor` (`launchd`, `systemd` or null), `started_at` (Unix seconds), `last_run` (`{pid, version, started_at, clean}` from `owner-run.json` when the owner did not answer) |
 | `session` | `{mode: "managed", provider, pool}`, `{mode: "isolated", provider, account_id}` or `{mode: "native", provider}` |
 | `current_cli_accounts` | the accounts signed in to the ordinary CLIs now, or null when unreadable |
 | `routes` | `"<provider>:<pool>" → {account_id, label}`: who handles the next request in each group |
@@ -741,13 +742,24 @@ proves it. `keys`: the keys trusted, `{machines: [{machine, public_key, pinned_a
 `trust`: `machine` (as ssh knows it) is trusted with `key`, the key `switchboard settings signer`
 printed on that machine; it needs `decision`, the operator's own words.
 
-### `switchboard_targets`: `probe?`
+### `switchboard_targets`: `probe?`, `machine?`, `pool?`, `provider?`
 
 The other machines this Switchboard knows, from accounts moved there and runs started there:
 `machine` (as ssh names it), `program` and `data_dir` used there, `last_at`, `known_by`
 (`moves`, `dispatch`), `aliases` (other ssh names of the same account, as `ssh -G` reads them;
 it is listed once). `probe: true` asks each one's Switchboard over ssh whether it answers now
-and its version. A person's session on one starts in a terminal with
+and its version.
+
+SB-577: each machine carries `accounts_by_group` from the one-minute reads of machine groups (no
+new ssh): `state` `known` (a read at most five minutes old), `stale` or `unknown` (`reason`
+`not_read_every_minute` for a machine that is no machine group here, `not_read_yet`,
+`older_switchboard`, or the last read's failure), `as_of`, and `groups`, each `{pool, off, usable:
+{claude, codex}}`: how many accounts that can start a session (on, not used on another machine,
+not given to an agent) serve the group there. `machine`, `pool` and `provider` together add
+`launch_check` (`state` `ok`, `refused` with `reason` `no_account_in_group`, or `unknown`, never a
+refusal, for a stale or missing read; `group_found`, `usable`, `read`, `as_of`): the same check
+`switchboard launch --target MACHINE --provider P --pool GROUP` makes before ssh runs, refusing
+with code `no_account_in_group` and exit status 3. Check it before starting a session there. A person's session on one starts in a terminal with
 `switchboard launch --target MACHINE --provider claude --working-directory FOLDER --in-place`
 (the folder is that machine's; its account comes from the folder's group there). Reads only.
 
@@ -755,8 +767,9 @@ and its version. A person's session on one starts in a terminal with
 
 Reads another machine's Switchboard over ssh (`on`, the machine as ssh knows it). `status`: its
 accounts (label, group, on or off, used elsewhere, used percent, usage check; never a credential),
-groups (accounts and folders each holds, organization), organizations, and whether it is connected
-to PassionCode.ai. `check`: `findings` against the moves recorded here, each with `kind`
+groups (accounts and folders each holds, organization), `accounts_by_group` from the same read
+(the shape `switchboard_targets` gives, `state` `known`), organizations, and whether it is
+connected to PassionCode.ai. `check`: `findings` against the moves recorded here, each with `kind`
 `missing_there`, `off_there`, `refused_there` (needs a sign-in there), `not_marked_here`,
 `held_twice` (the same sign-in used on both machines: call one back or remove it) or `no_record`
 (marked used elsewhere here with no location and no recorded move); an empty list is a clean check.

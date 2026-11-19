@@ -209,6 +209,18 @@ pub fn supervised(
     xpc_service: Option<&std::ffi::OsStr>,
     parent: Option<u32>,
 ) -> bool {
+    supervisor(pid, systemd_exec_pid, xpc_service, parent).is_some()
+}
+
+/// SB-576: which supervisor starts this process again, by the rules of `supervised`: `systemd`
+/// (its unit's own main process), `launchd` (a launchd job's process, the login item's app
+/// included), or none.
+pub fn supervisor(
+    pid: u32,
+    systemd_exec_pid: Option<&std::ffi::OsStr>,
+    xpc_service: Option<&std::ffi::OsStr>,
+    parent: Option<u32>,
+) -> Option<&'static str> {
     let systemd = systemd_exec_pid
         .and_then(|v| v.to_str())
         .and_then(|v| v.trim().parse::<u32>().ok())
@@ -217,16 +229,27 @@ pub fn supervised(
         .and_then(|v| v.to_str())
         .is_some_and(|name| !name.is_empty() && name != "0" && !name.starts_with("application."))
         && parent == Some(1);
-    systemd || launchd
+    if systemd {
+        Some("systemd")
+    } else if launchd {
+        Some("launchd")
+    } else {
+        None
+    }
 }
 
 /// `supervised` for this process.
 pub fn supervised_now() -> bool {
+    supervisor_now().is_some()
+}
+
+/// `supervisor` for this process.
+pub fn supervisor_now() -> Option<&'static str> {
     #[cfg(unix)]
     let parent = Some(std::os::unix::process::parent_id());
     #[cfg(not(unix))]
     let parent = None;
-    supervised(
+    supervisor(
         std::process::id(),
         std::env::var_os("SYSTEMD_EXEC_PID").as_deref(),
         std::env::var_os("XPC_SERVICE_NAME").as_deref(),
@@ -607,6 +630,41 @@ mod tests {
         // a supervisor sets.
         assert!(!supervised(me, None, None, Some(1)));
         assert!(!supervised(me, None, None, None));
+    }
+
+    /// SB-576: `status` names the supervisor by the same rules: systemd's own process, a launchd
+    /// job, or none.
+    #[test]
+    fn the_supervisor_is_named_by_the_rules_that_decide_supervised() {
+        use std::ffi::OsStr;
+        let me = 4242;
+        assert_eq!(
+            supervisor(me, Some(OsStr::new("4242")), None, Some(1)),
+            Some("systemd")
+        );
+        assert_eq!(
+            supervisor(
+                me,
+                None,
+                Some(OsStr::new("ai.passioncode.fabric-switchboard")),
+                Some(1)
+            ),
+            Some("launchd")
+        );
+        assert_eq!(supervisor(me, None, Some(OsStr::new("0")), Some(1)), None);
+        assert_eq!(
+            supervisor(
+                me,
+                None,
+                Some(OsStr::new(
+                    "application.ai.passioncode.fabric-switchboard.1.2"
+                )),
+                Some(1)
+            ),
+            None,
+            "an app opened from Finder is no job"
+        );
+        assert_eq!(supervisor(me, None, None, Some(1)), None);
     }
 
     #[test]

@@ -59,6 +59,15 @@ pub const MAX_ROWS: usize = 100;
 /// The rows that need a person on that machine: a second copy, a board run gone quiet. A gone
 /// run is history there (its own health reads `sessions_gone` as ok), so it is not one.
 pub const TROUBLE: [&str; 2] = ["duplicate", "stuck"];
+/// SB-577: groups kept per machine.
+pub const MAX_GROUPS: usize = 200;
+/// SB-577: a read of a machine's groups this old or newer decides a launch there; an older one is
+/// stale and decides nothing (five one-minute reads).
+pub const GROUPS_FRESH_SECONDS: i64 = 5 * 60;
+/// SB-577: the reason a launch on another machine is refused before it starts.
+pub const NO_ACCOUNT_IN_GROUP: &str = "no_account_in_group";
+/// SB-577: that refusal as `launch --target --pool` answers it (code `no_account_in_group`).
+pub const NO_ACCOUNT_IN_GROUP_TEXT: &str = "The last read of that machine shows no account of this provider that can start a session in that group, so nothing was started there. See switchboard targets (accounts_by_group), sign an account in there or choose another group.";
 /// The file is a few tens of kilobytes; anything larger is not ours.
 const MAX_BYTES: u64 = 1024 * 1024;
 
@@ -108,6 +117,22 @@ pub struct MachineRead {
     pub health_since: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sessions_since: Option<i64>,
+    /// SB-577: the groups there with how many usable accounts each holds per provider, from the
+    /// last read that answered them (`as_of`); none when that Switchboard does not say (older than
+    /// SB-577) or no read worked yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<GroupRead>>,
+}
+
+/// SB-577: one group on another machine: its id there, whether it is switched off, and how many
+/// accounts that can start a session serve it, per provider (`claude`, `codex`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GroupRead {
+    pub pool: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub off: bool,
+    #[serde(default)]
+    pub usable: BTreeMap<String, u32>,
 }
 
 /// One account here as its copy there answered.
@@ -271,6 +296,37 @@ impl HealthRead {
     }
 }
 
+impl GroupRead {
+    /// What another machine answered as its groups (`groups_answer`), checked field by field: a
+    /// group whose id is not an id, or a provider that is not a code, is dropped.
+    pub fn from_answer(answer: &Value) -> Option<Vec<GroupRead>> {
+        let list = answer.as_array()?;
+        Some(
+            list.iter()
+                .filter_map(|g| {
+                    let usable = g["usable"]
+                        .as_object()
+                        .map(|u| {
+                            u.iter()
+                                .filter_map(|(k, v)| {
+                                    let k = code(&json!(k))?;
+                                    Some((k, u32::try_from(v.as_u64()?).ok()?))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    Some(GroupRead {
+                        pool: code(&g["pool"])?,
+                        off: g["off"] == true,
+                        usable,
+                    })
+                })
+                .take(MAX_GROUPS)
+                .collect(),
+        )
+    }
+}
+
 impl MachineRead {
     /// Whether this machine stopped answering: Needs attention names it.
     pub fn unreachable(&self) -> bool {
@@ -394,6 +450,8 @@ pub struct Remote {
     pub status_unknown: bool,
     /// That answer came from a restricted entry (`ssh-serve`).
     pub restricted: bool,
+    /// SB-577: its groups with their usable accounts (`groups_answer`), or none.
+    pub groups: Option<Value>,
 }
 
 /// Records one read of `machine`: on success its accounts here matched to their copies there by
@@ -434,6 +492,7 @@ pub fn record(
                 })
                 .collect();
             entry.sessions = remote.sessions.as_ref().and_then(SessionsRead::from_answer);
+            entry.groups = remote.groups.as_ref().and_then(GroupRead::from_answer);
             entry.health = remote.health.as_ref().and_then(HealthRead::from_answer);
             entry.call = Some(remote.call.to_owned());
             if remote.status_unknown {
@@ -540,6 +599,9 @@ pub fn read_remote(
                     call: "status",
                     status_unknown: false,
                     restricted: false,
+                    groups: answer["groups"]
+                        .is_array()
+                        .then(|| answer["groups"].clone()),
                 });
             }
             Err(error) if unknown_call(&error) => {
@@ -575,6 +637,7 @@ pub fn read_remote(
         call: "accounts",
         status_unknown,
         restricted: restricted_entry,
+        groups: None,
     })
 }
 
@@ -633,6 +696,200 @@ pub fn accounts_answer(accounts: &Value) -> Value {
         })
         .unwrap_or_default();
     Value::Array(list)
+}
+
+/// SB-577: one account as the group count reads it: its id, provider, home group and whether it
+/// can start a session (on, not used on another machine, not given to an agent).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Member {
+    pub id: String,
+    pub provider: String,
+    pub home: String,
+    pub usable: bool,
+}
+/// SB-577: one group as the group count reads it: its id, the accounts at home elsewhere that
+/// serve it too, and whether it is switched off (then it serves nothing).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Group {
+    pub pool: String,
+    pub shared: Vec<String>,
+    pub off: bool,
+}
+/// The providers every group is counted for, a zero included.
+const PROVIDERS: [&str; 2] = ["claude", "codex"];
+
+/// SB-577: per group, how many usable accounts serve it per provider: its own, and those other
+/// groups share with it (unless their own group is switched off); a group switched off counts
+/// none.
+pub fn usable_groups(groups: &[Group], members: &[Member]) -> Vec<Value> {
+    let off = |pool: &str| groups.iter().any(|g| g.pool == pool && g.off);
+    groups
+        .iter()
+        .map(|g| {
+            let mut usable = serde_json::Map::new();
+            for provider in PROVIDERS {
+                let n = if g.off {
+                    0
+                } else {
+                    members
+                        .iter()
+                        .filter(|m| m.usable && m.provider == provider)
+                        .filter(|m| m.home == g.pool || (!off(&m.home) && g.shared.contains(&m.id)))
+                        .count()
+                };
+                usable.insert(provider.into(), json!(n));
+            }
+            json!({"pool": g.pool, "off": g.off, "usable": usable})
+        })
+        .collect()
+}
+
+/// SB-577: the groups of this machine with their usable accounts, for another machine's
+/// one-minute read (`remote-status`): the default group and each group a person made, ids and
+/// counts only. `accounts` are the accounts counted (a restricted entry passes only the seats the
+/// calling key delegated) and `only` keeps one group (the one a restricted entry's key line
+/// names).
+pub fn groups_answer(snapshot: &Value, accounts: &Value, only: Option<&str>) -> Value {
+    let ids = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .map(|l| {
+                l.iter()
+                    .filter_map(|x| x.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut groups = vec![Group {
+        pool: crate::balancing::DEFAULT_POOL.to_owned(),
+        shared: ids(&snapshot["default_shared"]),
+        off: false,
+    }];
+    for p in snapshot["projects"].as_array().into_iter().flatten() {
+        if let Some(pool) = p["pool"].as_str() {
+            groups.push(Group {
+                pool: pool.to_owned(),
+                shared: ids(&p["shared_accounts"]),
+                off: p["off"] == true,
+            });
+        }
+    }
+    let members: Vec<Member> = accounts
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|a| {
+            let id = a["id"].as_str()?.to_owned();
+            let usable = a["enabled"] == true
+                && snapshot["elsewhere"].get(&id).is_none()
+                && snapshot["assigned_to"].get(&id).is_none();
+            Some(Member {
+                provider: a["provider"].as_str()?.to_owned(),
+                home: a["pool"].as_str()?.to_owned(),
+                usable,
+                id,
+            })
+        })
+        .collect();
+    let kept: Vec<Group> = groups
+        .iter()
+        .filter(|g| only.is_none_or(|p| p == g.pool))
+        .cloned()
+        .collect();
+    // Shared accounts whose home is another group are counted against the whole list of groups.
+    let all = usable_groups(&groups, &members);
+    Value::Array(
+        all.into_iter()
+            .filter(|g| kept.iter().any(|k| g["pool"] == k.pool.as_str()))
+            .collect(),
+    )
+}
+
+/// SB-577: the machine group `names` (a target and its aliases) belongs to, by its name here.
+pub fn machine_named<'a>(
+    machines: &'a [switchboard_core::Machine],
+    names: &[&str],
+) -> Option<&'a str> {
+    machines
+        .iter()
+        .find(|m| names.iter().any(|n| m.named(n)))
+        .map(|m| m.name.as_str())
+}
+
+/// SB-577: what the one-minute reads say of a machine's groups: `state` `known` (a read within
+/// `GROUPS_FRESH_SECONDS`), `stale` (an older one) or `unknown` (no read of them: `reason`
+/// `not_read_every_minute` when the machine is not a machine group here, `not_read_yet`, or
+/// `older_switchboard` when its Switchboard answers without them); `as_of`, and `groups` with
+/// each one's usable accounts per provider.
+pub fn accounts_by_group(state: &State, machine: Option<&str>, now: i64) -> Value {
+    let unknown =
+        |reason: &str| json!({"state": "unknown", "reason": reason, "as_of": null, "groups": []});
+    let Some(machine) = machine else {
+        return unknown("not_read_every_minute");
+    };
+    let Some(read) = state.machines.get(machine) else {
+        return unknown("not_read_yet");
+    };
+    let Some(groups) = read.groups.as_ref() else {
+        return match (read.as_of, read.reason.as_deref()) {
+            (Some(_), _) => unknown("older_switchboard"),
+            (None, Some(reason)) => unknown(reason),
+            (None, None) => unknown("not_read_yet"),
+        };
+    };
+    let as_of = read.as_of.unwrap_or(0);
+    let fresh = now >= as_of && now - as_of <= GROUPS_FRESH_SECONDS;
+    json!({
+        "state": if fresh { "known" } else { "stale" },
+        "reason": if fresh { None } else { Some(read.reason.as_deref().unwrap_or("old")) },
+        "as_of": read.as_of,
+        "groups": groups,
+    })
+}
+
+/// SB-577: whether a launch of `provider` in `pool` on `machine` should start, by the last read:
+/// `state` `refused` with `reason` `no_account_in_group` when a known read lists no usable account
+/// of that provider in that group (or no such group), `ok` when it lists one, `unknown` when the
+/// read is stale or there is none (never a refusal).
+pub fn launch_check(
+    state: &State,
+    machine: Option<&str>,
+    pool: &str,
+    provider: &str,
+    now: i64,
+) -> Value {
+    let read = accounts_by_group(state, machine, now);
+    let group = read["groups"]
+        .as_array()
+        .and_then(|g| g.iter().find(|g| g["pool"] == pool));
+    let usable = group.and_then(|g| g["usable"][provider].as_u64());
+    let (verdict, reason) = match read["state"].as_str() {
+        Some("known") if usable.unwrap_or(0) == 0 => ("refused", Some(NO_ACCOUNT_IN_GROUP)),
+        Some("known") => ("ok", None),
+        _ => ("unknown", read["reason"].as_str()),
+    };
+    json!({
+        "state": verdict, "reason": reason, "pool": pool, "provider": provider,
+        "group_found": group.is_some(), "usable": usable, "read": read["state"],
+        "as_of": read["as_of"],
+    })
+}
+
+/// SB-577: `launch_check` for `target` as ssh names it, from a snapshot's machine groups (as JSON,
+/// as the owner or the store answers it) and this data folder's `remote-usage.json`.
+pub fn check_for(
+    root: &Path,
+    snapshot: &Value,
+    target: &str,
+    pool: &str,
+    provider: &str,
+    now: i64,
+) -> Value {
+    let machines: Vec<switchboard_core::Machine> =
+        serde_json::from_value(snapshot["machines"].clone()).unwrap_or_default();
+    let machine = machine_named(&machines, &[target]);
+    let mut check = launch_check(&read(root), machine, pool, provider, now);
+    check["machine"] = json!(target);
+    check
 }
 
 /// SB-403: the seats this machine delegated to `machine` that are still there: accounts in that
@@ -1386,5 +1643,152 @@ mod tests {
         tick(root.path(), &Snapshot::default(), 1000);
         assert!(!root.path().join(FILE).exists());
         assert!(!BUSY.load(Ordering::Acquire));
+    }
+
+    /// SB-577: each group counts the accounts that can start a session there: its own and those
+    /// shared with it, never one turned off, used on another machine or given to an agent; a group
+    /// switched off counts none, and an account at home in it serves no other group.
+    #[test]
+    fn a_group_counts_only_accounts_that_can_start_a_session() {
+        let snapshot = json!({
+            "accounts": [
+                {"id": "c1", "provider": "claude", "pool": "default", "enabled": true},
+                {"id": "c2", "provider": "claude", "pool": "default", "enabled": false},
+                {"id": "c3", "provider": "claude", "pool": "default", "enabled": true},
+                {"id": "c4", "provider": "claude", "pool": "default", "enabled": true},
+                {"id": "x1", "provider": "codex", "pool": "team", "enabled": true},
+                {"id": "t1", "provider": "claude", "pool": "tokens", "enabled": true},
+                {"id": "m1", "provider": "claude", "pool": "machine_studio", "enabled": false}
+            ],
+            "elsewhere": {"c3": 5, "m1": 5},
+            "assigned_to": {"c4": "voc-learn"},
+            "projects": [
+                {"pool": "team", "shared_accounts": ["c1", "t1"]},
+                {"pool": "tokens", "off": true, "shared_accounts": []}
+            ]
+        });
+        let groups = groups_answer(&snapshot, &snapshot["accounts"], None);
+        assert_eq!(
+            groups,
+            json!([
+                {"pool": "default", "off": false, "usable": {"claude": 1, "codex": 0}},
+                {"pool": "team", "off": false, "usable": {"claude": 1, "codex": 1}},
+                {"pool": "tokens", "off": true, "usable": {"claude": 0, "codex": 0}}
+            ])
+        );
+        // A restricted entry: one group, only the accounts it was given.
+        let seats = json!([{"id": "x1", "provider": "codex", "pool": "team", "enabled": true}]);
+        assert_eq!(
+            groups_answer(&snapshot, &seats, Some("team")),
+            json!([{"pool": "team", "off": false, "usable": {"claude": 0, "codex": 1}}])
+        );
+        // Ids and counts only: never a label, a folder or an account id.
+        let text = groups.to_string();
+        assert!(!text.contains("c1") && !text.contains("voc-learn"));
+    }
+
+    /// SB-577: a read keeps the groups the machine answered, checked; an older Switchboard that
+    /// answers none leaves none; a failed read keeps the last good ones.
+    #[test]
+    fn a_read_keeps_the_groups_and_a_failure_keeps_the_last_good_ones() {
+        let s = snapshot();
+        let mut state = State::default();
+        let groups = json!([
+            {"pool": "default", "usable": {"claude": 2, "codex": 0}},
+            {"pool": "Not An Id", "usable": {"claude": 1}},
+            {"pool": "team", "off": true, "usable": {"claude": 0, "Bad Key": 3}}
+        ]);
+        let answered = Remote {
+            accounts: there(),
+            call: "status",
+            groups: Some(groups),
+            ..Remote::default()
+        };
+        record(&mut state, &s, "studio", Ok(answered), 1000);
+        let kept = state.machines["studio"].groups.clone().unwrap();
+        assert_eq!(kept.len(), 2, "a group whose id is not an id is dropped");
+        assert_eq!(kept[0].usable["claude"], 2);
+        assert!(kept[1].off);
+        assert!(!kept[1].usable.contains_key("Bad Key"));
+        record(&mut state, &s, "studio", Err(UNREACHABLE.into()), 1060);
+        assert_eq!(state.machines["studio"].groups, Some(kept));
+        let older = Remote {
+            accounts: there(),
+            call: "accounts",
+            ..Remote::default()
+        };
+        record(&mut state, &s, "studio", Ok(older), 1120);
+        assert_eq!(state.machines["studio"].groups, None);
+    }
+
+    /// SB-577: a known read refuses a launch in a group with no usable account of the provider
+    /// (or no such group); a stale or missing read never refuses.
+    #[test]
+    fn only_a_fresh_read_refuses_a_launch_and_a_missing_one_is_unknown() {
+        let mut state = State::default();
+        state.machines.insert(
+            "studio".into(),
+            MachineRead {
+                tried_at: 1000,
+                as_of: Some(1000),
+                groups: Some(vec![GroupRead {
+                    pool: "team".into(),
+                    off: false,
+                    usable: [("claude".to_owned(), 1), ("codex".to_owned(), 0)].into(),
+                }]),
+                ..MachineRead::default()
+            },
+        );
+        let check = |pool: &str, provider: &str, now: i64| {
+            launch_check(&state, Some("studio"), pool, provider, now)
+        };
+        assert_eq!(check("team", "claude", 1060)["state"], "ok");
+        let refused = check("team", "codex", 1060);
+        assert_eq!(refused["state"], "refused");
+        assert_eq!(refused["reason"], NO_ACCOUNT_IN_GROUP);
+        assert_eq!(refused["usable"], 0);
+        let missing = check("other", "claude", 1060);
+        assert_eq!(missing["state"], "refused");
+        assert_eq!(missing["group_found"], false);
+        let stale = check("team", "codex", 1000 + GROUPS_FRESH_SECONDS + 1);
+        assert_eq!(stale["state"], "unknown");
+        assert_eq!(stale["read"], "stale");
+        let unknown = launch_check(&state, None, "team", "codex", 1060);
+        assert_eq!(unknown["state"], "unknown");
+        assert_eq!(unknown["reason"], "not_read_every_minute");
+        assert_eq!(
+            launch_check(&state, Some("new-box"), "team", "codex", 1060)["reason"],
+            "not_read_yet"
+        );
+        state.machines.insert(
+            "old-box".into(),
+            MachineRead {
+                tried_at: 1000,
+                as_of: Some(1000),
+                ..MachineRead::default()
+            },
+        );
+        assert_eq!(
+            launch_check(&state, Some("old-box"), "team", "codex", 1060)["reason"],
+            "older_switchboard"
+        );
+    }
+
+    /// SB-577: a target is matched to its machine group by the group's name or any alias.
+    #[test]
+    fn a_target_finds_its_machine_group_by_any_of_its_names() {
+        let machines = vec![Machine {
+            pool: "machine_studio".into(),
+            name: "studio".into(),
+            identity: None,
+            aliases: vec!["sshlg@100.69.20.19".into()],
+            created_at: 1,
+        }];
+        assert_eq!(
+            machine_named(&machines, &["sshlg@100.69.20.19"]),
+            Some("studio")
+        );
+        assert_eq!(machine_named(&machines, &["x", "STUDIO"]), Some("studio"));
+        assert_eq!(machine_named(&machines, &["other"]), None);
     }
 }

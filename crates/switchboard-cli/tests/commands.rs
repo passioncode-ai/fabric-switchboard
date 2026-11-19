@@ -2146,3 +2146,206 @@ fn value_printing_commands_need_the_hand_over_named() {
         "{named}"
     );
 }
+
+/// SB-576: `status` says whether an owner answers on the data folder, without starting one: no
+/// owner reads `absent` and creates nothing; a running owner names its pid, version and kind.
+#[tokio::test(flavor = "multi_thread")]
+async fn status_names_the_owner_or_its_absence_without_starting_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("data");
+    let status = |root: &std::path::Path| {
+        let output = binary()
+            .arg("--data-dir")
+            .arg(root)
+            .args(["--json", "status"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()["data"].clone()
+    };
+    let absent = status(&root);
+    assert_eq!(absent["online"], false);
+    assert_eq!(absent["owner"]["state"], "absent");
+    assert!(!root.exists(), "status created the data folder");
+    std::fs::create_dir_all(&root).unwrap();
+    let owner = Owner::start(root.clone(), Arc::new(MemoryVault::default()))
+        .await
+        .unwrap();
+    let live = status(&root);
+    assert_eq!(live["online"], true);
+    assert_eq!(live["owner"]["state"], "answers");
+    assert_eq!(live["owner"]["pid"], std::process::id());
+    assert_eq!(live["owner"]["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(live["owner"]["kind"], "serve");
+    let text = binary()
+        .arg("--data-dir")
+        .arg(&root)
+        .arg("status")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&text.stdout).into_owned();
+    assert!(
+        text.contains(&format!("Owner: answers, pid {}", std::process::id())),
+        "{text}"
+    );
+    drop(owner);
+}
+
+/// SB-577: `launch --target --pool` is refused before ssh runs when the last one-minute read of
+/// that machine shows no account of the provider that can start a session in that group.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_launch_on_a_machine_whose_group_has_no_account_is_refused_before_ssh() {
+    use switchboard_runtime::remote_usage::{self, GroupRead, MachineRead};
+    let tmp = tempfile::tempdir().unwrap();
+    let owner = Owner::start(tmp.path().to_owned(), Arc::new(MemoryVault::default()))
+        .await
+        .unwrap();
+    let mut child = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args([
+            "--json",
+            "accounts",
+            "add",
+            "--provider",
+            "codex",
+            "--kind",
+            "api-key",
+            "--label",
+            "Moved fixture",
+            "--secret-stdin",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"fixture-remote-group-secret")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let added: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id = added["data"]["id"].as_str().unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    owner
+        .runtime
+        .store
+        .join_machine(
+            id,
+            &switchboard_core::MachineRef {
+                target: "studio".into(),
+                identity: None,
+                aliases: vec![],
+            },
+            now,
+        )
+        .unwrap();
+    let mut state = remote_usage::State::default();
+    state.machines.insert(
+        "studio".into(),
+        MachineRead {
+            tried_at: now,
+            as_of: Some(now),
+            groups: Some(vec![
+                GroupRead {
+                    pool: "default".into(),
+                    off: false,
+                    usable: [("claude".to_owned(), 1), ("codex".to_owned(), 1)].into(),
+                },
+                GroupRead {
+                    pool: "team".into(),
+                    off: false,
+                    usable: [("claude".to_owned(), 1), ("codex".to_owned(), 0)].into(),
+                },
+            ]),
+            ..MachineRead::default()
+        },
+    );
+    switchboard_core::private_fs::private_write(
+        &tmp.path().join(remote_usage::FILE),
+        &serde_json::to_vec(&state).unwrap(),
+    )
+    .unwrap();
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let output = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args([
+            "--json",
+            "launch",
+            "--provider",
+            "codex",
+            "--working-directory",
+        ])
+        .arg(&work)
+        .args(["--headless", "--target", "studio", "--pool", "team"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let line = stderr
+        .lines()
+        .rev()
+        .find(|l| l.starts_with('{'))
+        .unwrap_or_else(|| panic!("{stderr}"));
+    let error: serde_json::Value = serde_json::from_str(line).unwrap();
+    assert_eq!(error["code"], "no_account_in_group", "{stderr}");
+    // `targets` gives the same read for the machine (known here by a run started there); the
+    // MCP twin's check refuses the same way.
+    let run = tmp.path().join("remote-dispatch").join("l1");
+    std::fs::create_dir_all(&run).unwrap();
+    switchboard_core::private_fs::private_write(
+        &run.join(".session.json"),
+        br#"{"launched_at":20,"dispatch":{"target":"studio","program":null,"data_dir":null}}"#,
+    )
+    .unwrap();
+    let output = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["--json", "targets"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let targets: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let studio = targets["data"]["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["machine"] == "studio")
+        .unwrap_or_else(|| panic!("{targets}"))
+        .clone();
+    assert_eq!(studio["accounts_by_group"]["state"], "known", "{studio}");
+    assert_eq!(
+        studio["accounts_by_group"]["groups"][1]["usable"]["codex"],
+        0
+    );
+    let snapshot = owner.runtime.store.snapshot().unwrap();
+    let check = remote_usage::check_for(
+        tmp.path(),
+        &serde_json::to_value(&snapshot).unwrap(),
+        "studio",
+        "team",
+        "codex",
+        now,
+    );
+    assert_eq!(check["state"], "refused");
+    assert_eq!(check["reason"], "no_account_in_group");
+    drop(owner);
+}

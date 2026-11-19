@@ -445,6 +445,14 @@ pub enum Probe {
     /// It proved it holds the descriptor's token; its version when it named one.
     Answers { version: Option<String> },
 }
+/// SB-576: the pid `control.json` names, when it names one (descriptors before 0.5.4 do not);
+/// read only, never proved.
+pub fn descriptor_pid(root: &Path) -> Option<u32> {
+    private_fs::read_private_strict(&root.join(FILE), 4096)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Descriptor>(&bytes).ok())
+        .and_then(|d| d.pid)
+}
 /// How long the watchdog waits for the owner, connection and identity together (SB-510).
 pub const PROBE_SECONDS: u64 = 5;
 /// SB-510: asks the owner to prove itself (the identity exchange only, no operation) within
