@@ -53,6 +53,9 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // SB-518 (DEC-0032): monitor::probe's internal refusal when a provider hold began before its
+  // request; check_as answers it as USAGE_RATE_LIMITED, which src/adapter.ts shows verbatim.
+  "usage request not sent: provider held": 'SB-518: internal to monitor::check_as, mapped to the provider wait before any reply',
   // SB-550 (review of PR #861): a background read's failure, kept only as the code `refused` in
   // remote-usage.json (`remote_usage::reason_of`); no renderer request returns it.
   "The other machine's Switchboard refused the read.": 'SB-550: background read only, kept as a reason code',

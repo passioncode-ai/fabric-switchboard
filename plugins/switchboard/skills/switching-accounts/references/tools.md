@@ -12,17 +12,18 @@ group's id is its `pool` (`default` is the default group). **Automatic switching
 names and fields call rotation. Say group and automatic switching to the person.
 
 `switchboard mcp --read-only` lists the 39 tools that only read (every tool under
-[Read tools](#read-tools)) and, since SB-517, the 14 write tools that also have a read form:
+[Read tools](#read-tools)) and, since SB-517, the 15 write tools that also have a read form:
 `switchboard_capacity`, `switchboard_own_sign_in`, `switchboard_boot_resume` (without `on`),
 `switchboard_duty` (a dry run included), `switchboard_watchdog` (without `on` or `run`),
 `switchboard_app` (`updates` and `login_item` without `enabled`), `switchboard_analytics`,
 `switchboard_balance`, `switchboard_feed`, `switchboard_anthropic_keys`,
 `switchboard_codex_route`, `switchboard_project_sources`, `switchboard_machine_set` (`keys`, and
-`adopt` without `apply`) and `switchboard_login` (`status`, `pending`). There they are annotated
+`adopt` without `apply`), `switchboard_login` (`status`, `pending`) and `switchboard_usage_mode`
+(without `mode`). There they are annotated
 as reads and answer only that form: a call with a field that changes something, or any other
 write tool, is refused with `isError: true` and `structuredContent.error.code` `read_only`, never
 as an unknown tool. A session Switchboard launches in isolated mode gets that set. The server
-lists 97 tools; each has a section below.
+lists 98 tools; each has a section below.
 
 Since SB-517 every call is checked against its tool's `inputSchema` before it runs (types,
 `required`, `enum`, `minimum` and `maximum`, `minLength` and `maxLength`, list items and size,
@@ -107,7 +108,12 @@ those used elsewhere.
   whose token has expired, Switchboard first renews that sign-in itself (0.5); the account the
   ordinary Claude Code uses is never renewed, and no credential reaches the agent. Within 60 seconds of the
   last check it answers with the earlier observation and `note` = "Checked less than a
-  minute ago; showing that observation." A read-only server (`switchboard mcp --read-only`)
+  minute ago; showing that observation." Since SB-518 (DEC-0032) a 429 on any check of a provider
+  holds every account of it for at least 15 minutes (longer when the provider asks, doubling on
+  repeats up to an hour): `refresh` then answers "Usage checks are rate limited by the provider.
+  Switchboard waits before the next one." And in the `smart` and `on_demand` modes, past the provider's budget (two checks a minute,
+  a reserve of up to eight) it answers "Usage checks of this provider are paced to keep its usage
+  endpoint answering. Try again in a minute." A read-only server (`switchboard mcp --read-only`)
   never asks the provider: it answers with the stored observation and `note` = "This server is
   read-only: showing the stored observation without asking the provider."
 
@@ -907,6 +913,20 @@ renewed in it, a launch copies no MCP sign-in out of the ordinary home's credent
 session duty officer looks only at sessions in Switchboard's own homes. Claude Desktop is outside
 Switchboard either way. Without `on` it reads `{own_sign_in: "on" | "off", on}`; `on` changes it, only
 when the operator asks. Kept in `<data>/own-sign-in`.
+
+### `switchboard_usage_mode`: `mode?`
+
+How quota figures are kept current on this computer (SB-518, DEC-0032). `smart` (the default): a
+response's rate-limit headers with both the five-hour and the seven-day window count as a check, so
+while requests flow the usage endpoint is asked about once every 30 minutes per account
+(sooner near the limit or after a pause); an account
+that carries no traffic is checked every 10 minutes; a switch checks its candidate fresh first;
+each provider has a budget of 2 checks a minute (a burst of 4, at most 2 at once), and a 429 on any
+usage check holds the whole provider for at least 15 minutes, doubling on repeats up to an hour.
+`timer`: the fixed cadence of 0.7.121. `on_demand`: no check on a schedule, only a switch's
+candidate and a person's check. Without `mode` it reads `{usage_mode, modes}`; `mode` changes it,
+only when the operator asks. Kept in `<data>/usage-mode`. A person's check (`switchboard_usage`
+with `refresh`) runs ahead of the budget by at most 4 checks, then answers that checks are paced.
 
 ### `switchboard_boot_resume`: `on?`
 

@@ -99,7 +99,7 @@ Behaviour and decisions: [PLAN-0.4](PLAN-0.4.md). Code: `crates/switchboard-core
 - **Statistics (SB-145, SB-147).** The proxy counts each relayed request under `day\taccount\tpool\tclient\tfolder` (`switchboard_proxy::stats`: UTC day, account id, pool, client family from `user-agent` such as `claude-code`, `codex`, `opencode`, `hermes`, else `other`, and the group folder the request came from, empty when unknown; a 0.6.52 key without the folder still reads): `requests`, `ok`, `limited`, `failed`, and `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` as the provider reported them in its own response. The folder (SB-147) is the folder whose own capability the request presented, else the deepest group folder holding the folder the request names (`stats::folder_hint`: the newest Codex `<cwd>`, or Claude Code's `Working directory:` line in the body's first MiB; a byte scan, nothing of the body kept), else that named folder itself (SB-157: a session outside every group, or an agent Switchboard launched on a key), which the statistics resolve through Git to the repository whose checkout holds it (`ProjectIndex::with_strays`). The owner passes every group folder with its pool (`ProxyHandle::set_stat_folders`) wherever it sets the folders' capabilities. A 429 that moved (SB-98) counts once on the refusing account; a network failure counts as failed. `ProxyHandle::take_statistics()` hands the counts over and clears them. The owner adds them to `statistics.json` (0600, `{version: 1, tallies}`, 90 days, at most 50 000 rows) every pass, writing at most every 15 min and at stop; an unreadable file starts empty. `Statistics { days? }` (1 to 90, default 30; read fast path, offline reads the file) answers `{days, from, to, since, total, groups[{pool, name}], projects[{project, name, groups[{pool, name}]}], accounts[{account_id, label, provider, kind}], agents[{agent}], routes[group, project, project_name, account and agent], by_day[{day, groups[{pool, requests, tokens}]}]}`, each row with the counts, busiest first, and `switching` (WF-5.3, SB-367: `digest::switching_shares` over the daily operations digests of the last seven closed UTC days: `days` counted, `rotations`, `rotations_failed`, `automatic_switch_failed_share` (`rotation` failed over every outcome), `limit_stops` (`recovery_hook` ok), `limit_stops_resumed` (`recovery_continued` ok), `limit_stop_resumed_share`; a share with nothing to divide is null, never 0; test `digest::tests::switching_shares_read_the_closed_days_and_say_null_when_nothing_happened`). A project (`statistics::ProjectIndex`, built from `roots::tree` per group) is a repository with all its checkouts, keyed by its `origin` identity, or a folder outside Git keyed by its path (DEC-0089 AT-6, AT-7, AT-15); `project: ""` holds requests that named no folder. Not counted: an off-project Codex request passed through on the person's own sign-in (SB-143), and anything that does not go through the proxy. No prompt, answer or header value is kept; folder paths stay in this file on this computer.
 - Only `Owner::native` reads the ordinary CLIs' sign-in; `Owner::start` (tests, smoke) reports current accounts as unavailable.
 - `switchboard mcp [--read-only]`: stdio JSON-RPC 2.0 per the tool table in PLAN-0.4. Tool failures are results with `isError: true`; protocol faults are JSON-RPC errors (-32700 parse/oversize > 1 MiB, -32600 invalid, -32601 method, -32602 unknown tool or `arguments` not an object).
-- **MCP arguments, read forms and refusals (SB-517).** Every `tools/call` is checked against the tool's `inputSchema` before its handler runs (`mcp::validate`: `type`, `required`, `additionalProperties: false`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength`, `items`, `minItems`, `maxItems`; `every_schema_stays_inside_the_checked_keywords` keeps every schema inside that set). A fault answers `isError: true` with `structuredContent.error = {code: "invalid_arguments", field, message}` and runs nothing. A `decision` stays the four fields `spend::Decision` reads (`by`, `instruction`, `at`, `source`; the runtime denies any other), so the schema check and the runtime refuse the same bodies. Thirteen write tools have a read form (`mcp::READ_FORMS`; `mcp::writes` decides per call from the fields given): a read-only server lists them with read annotations and a sentence saying so, and answers that form. A write tool, or a write form, on a read-only server answers `isError: true` with `error.code` `read_only` instead of "Unknown tool.". The full server lists and annotates every tool as before. `switchboard_launch_keys` only reads and is listed as a read. A tool that would answer a refusal as data (`{state: "refused", reason}`, as `remote_dispatch::start` and a dispatch at capacity answer the CLI) answers an MCP caller `isError: true` with `error.code` its `reason`; no tool returns that shape yet (dispatch has no MCP tool, SB-482), so the mapping guards the tools to come, and the CLI's JSON is unchanged. The window's *Remove* of a Kimi Code account and of the OpenRouter key have tools: `switchboard_kimi_remove {id}` (`Operation::KimiRemove`) and `switchboard_openrouter_remove {pool?, decision?}` (`Operation::AgentKeyRemove`, `by: mcp`, wrapped in the operator's words when given), both annotated `destructiveHint` and `idempotentHint` and answering `{removed}`. Calls wait out a held store lock for up to 8 s, asking the owner first (`STORE_WAIT`, SB-181).
+- **MCP arguments, read forms and refusals (SB-517).** Every `tools/call` is checked against the tool's `inputSchema` before its handler runs (`mcp::validate`: `type`, `required`, `additionalProperties: false`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength`, `items`, `minItems`, `maxItems`; `every_schema_stays_inside_the_checked_keywords` keeps every schema inside that set). A fault answers `isError: true` with `structuredContent.error = {code: "invalid_arguments", field, message}` and runs nothing. A `decision` stays the four fields `spend::Decision` reads (`by`, `instruction`, `at`, `source`; the runtime denies any other), so the schema check and the runtime refuse the same bodies. Fifteen write tools have a read form (`mcp::READ_FORMS`, `switchboard_usage_mode` since SB-518; `mcp::writes` decides per call from the fields given): a read-only server lists them with read annotations and a sentence saying so, and answers that form. A write tool, or a write form, on a read-only server answers `isError: true` with `error.code` `read_only` instead of "Unknown tool.". The full server lists and annotates every tool as before. `switchboard_launch_keys` only reads and is listed as a read. A tool that would answer a refusal as data (`{state: "refused", reason}`, as `remote_dispatch::start` and a dispatch at capacity answer the CLI) answers an MCP caller `isError: true` with `error.code` its `reason`; no tool returns that shape yet (dispatch has no MCP tool, SB-482), so the mapping guards the tools to come, and the CLI's JSON is unchanged. The window's *Remove* of a Kimi Code account and of the OpenRouter key have tools: `switchboard_kimi_remove {id}` (`Operation::KimiRemove`) and `switchboard_openrouter_remove {pool?, decision?}` (`Operation::AgentKeyRemove`, `by: mcp`, wrapped in the operator's words when given), both annotated `destructiveHint` and `idempotentHint` and answering `{removed}`. Calls wait out a held store lock for up to 8 s, asking the owner first (`STORE_WAIT`, SB-181).
 - Desktop: `agent_setup() -> { cli_path, bundled_cli, linked_cli, can_link, commands }`; `link_cli()` creates `~/.local/bin/switchboard` → bundled CLI and never replaces a file or a foreign link. The macOS build embeds the signed CLI at `Contents/MacOS/switchboard`, byte-identical to the archived CLI.
 
 ## Other agents (0.6)
@@ -291,7 +291,95 @@ Account list order is display-only; it never selects/activates. Within provider/
 
 - `switchboard uninstall [--keep-data] [--yes]` → `switchboard_runtime::uninstall::uninstall(root, vault, keep_data, apply, places)`. Without `--yes` it returns the plan (`accounts`, `cli_link`, `orphan_keychain_item`, `data_entries`, `kept`, `applied: false`) and changes nothing. The store is opened exclusively, so it refuses while an owner runs.
 - With `--yes`, first (SB-183): the terminal hook's block comes out of every start file it is in (`shell::install::remove_all`, `Places::shell`, the person's home; each file byte for byte as before, whatever the choice; a start file the installer created and that holds nothing else is deleted), and the plan names `shell_hook_files` (start files holding the block). Only the app's own data folder looks at the start files (`uninstall::places(root)`: `Places::shell` is None for any other `--data-dir`, since every data folder writes the same marker into the same home; test `uninstall::tests::only_the_apps_own_data_folder_takes_the_blocks_out`, and on Linux CLI `another_data_folder_never_touches_the_start_files`). `shell-hook` and `shell-hook.json` are owned entries; `<data>/shell/` is kept like a session home: its map and hook scripts go, and in each shell home the credential-shaped files of a session home plus `config.toml` (it names the machine's auto capability) go while the history stays (`--purge` removes it whole). Test: `uninstall::tests::apply_removes_owned_things_and_keeps_the_persons_files` (an injected home).
-- With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then, unless `--keep-data`, only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` (the Kimi Code homes, each the only copy of its login, SB-81), `launches` (the launch records, SB-212), `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
+- With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then, unless `--keep-data`, only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `usage-provider-holds.json` and `usage-mode` (SB-518), `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` (the Kimi Code homes, each the only copy of its login, SB-81), `launches` (the launch records, SB-212), `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
+
+## Smart usage checks (SB-518, DEC-0032)
+
+- **Modes.** `<data>/usage-mode` holds `smart` (absent: the default), `timer` or `on_demand`
+  (`switchboard_core::UsageMode`, `usage_mode::read`); read at owner start and by each offline
+  command, set with `switchboard usage-mode smart|timer|on-demand` or MCP `switchboard_usage_mode`
+  (`Operation::UsageMode`). `timer` is 0.7.121's cadence below, with only the provider holds and the two places on the
+  network per provider (`IN_FLIGHT`); `on_demand` makes no check on a
+  schedule (no due list, no pull-in: `monitor::Pass::run_with_stop`), while headers, a switch's candidate and
+  a person's check work as in `smart` (the setting itself: `usage_mode::tests`); native rotation
+  and a Codex group (the proxy reads only Claude's `anthropic-ratelimit-unified-*` headers) have no
+  figure there and move only on a limit. The mode governs the cadence and the budget: the
+  account in use's 300 s floor and its switch on header figures (below) hold in every mode.
+- **Headers count as a check.** `Store::observe_generation` with `source: response_headers` whose
+  windows include both `HEADER_WINDOWS` (`five_hour`, `seven_day`) and whose account the usage
+  endpoint answered in this process within `PASSIVE_CEILING_SECONDS` = 1800 s
+  (`Store::endpoint_seen`, memory only): `next_check_at = max(existing, min(observed + 180,
+  endpoint + 1800))`, near the limit `observed + HEADER_FRESH_SECONDS` (60) instead of 180. A
+  partial header, a header before the endpoint's first answer, one for a new credential
+  generation (its figure or usage health cleared, which forgets the endpoint's time, a failed
+  first check included) until the endpoint answered it and one past the ceiling keep
+  `max(existing, observed)` as before
+  (`a_complete_header_observation_postpones_the_next_check_up_to_the_ceiling`). The merged usage
+  keeps the oldest age of the windows it holds, as before
+  (`partial_headers_never_freshen_an_unobserved_low_quota_window`); `Store::header_figure` reads
+  the two header windows of the account in use, and the decision takes them only at or over the
+  threshold (`the_account_in_use_switches_on_its_header_figures_while_its_other_windows_age`).
+- **Cadence.** `next_quota_check(in_use || routed, …)`: an account that only could be switched to
+  is on the idle cadence in `smart` and `on_demand` (`timer`: `in_use || routed || rotates`).
+  `monitor::due_at` spreads every schedule of 120 s or more by ± 15 % (`usage_budget::jittered`,
+  SHA-256 of the account and schedule, the same on every platform; not in `timer`), a schedule
+  the ceiling cut included, so the endpoint's check may fall up to 15 % of its span past it.
+- **Budget.** `UsageGate::budget` (`usage_budget::UsageBudget`, unbudgeted in a test's
+  `UsageGate::default()`): per provider a bucket of `TOKEN_SECONDS` = 30 s of refill per check,
+  `BURST` = 4; the pass takes a token per check (`monitor::choose_checks`, at most 4 a pass);
+  a person's check (`check_by_person`) and a candidate's check take one with `DEBT` = 4 of room;
+  every check holds one of `IN_FLIGHT` = 2 places (the background only a free one). Past the debt
+  a person's check answers `usage_budget::USAGE_PACED` and logs `usage_check` `paced`
+  (`the_bucket_allows_its_burst_then_two_a_minute`,
+  `the_budget_holds_an_hour_of_passes_with_32_accounts_to_about_120_checks`: 100 to 130 an hour
+  in `smart`, over 400 in `timer`). A token counts a check: a check whose token the provider
+  refused with 401 and whose renewal succeeded asks once more on the same token. The bucket lives in
+  the process: the offline CLI (no owner running) starts each command with a full one, while the
+  provider holds below are shared through their file.
+- **Provider hold.** A usage check answered 429 records the account's hold (SB-39, unchanged) and
+  `UsageBudget::refused(provider, at, retry_after)`: held until `at + max(retry_after,
+  min(900 · 2^(n-1), 3600))` for the n-th 429 in a row (a 429 more than the last hold's length
+  after it ended counts as the first; a 429 while the hold still runs, from a check in flight
+  beside the one refused, doubles nothing), never shortening a longer hold; a success clears it
+  unless the hold was recorded after that check's request was sent (`UsageBudget::succeeded_since`) (`a_429_holds_the_whole_provider_and_doubles_on_repeats_up_to_an_hour`). While held,
+  `due_now_at` leaves every account of the provider out and `check_as` answers
+  `USAGE_RATE_LIMITED` before any renewal or credential read, logging `usage_check`
+  `provider_held` (`a_429_on_one_accounts_check_holds_every_account_of_the_provider`), and asks
+  again once it has its place on the network and just before the request (`monitor::probe`), so a
+  check that waited or renewed meets a hold set meanwhile, and the answer that ends a hold is to a
+  request sent after it.
+  `usage-provider-holds.json` (0600, `{version: 1, providers: {claude|codex: {until,
+  recorded_at, strikes}}}`), a hold over at start dropped, one stamped ahead of the clock moved
+  to now plus what was left. Log event `usage_provider_held` (provider, seconds, strikes).
+- **Order.** `monitor::order_due`: class 0 the accounts that carry traffic (a value of
+  `routes`, or `Store::is_in_use`), class 1 those never checked or with a schedule shorter than
+  `CHECK_ACTIVE_SECONDS` (near the limit, pulled in, after a reset), class 2 the rest; oldest due
+  first in each (`a_due_accounts_class_puts_traffic_first_then_brought_forward_then_idle`,
+  `the_account_in_use_stays_under_300_s_old_among_32_accounts_on_the_budget`: 32 accounts, the
+  one in use never 300 s old, every idle one checked within two hours).
+- **Fresh candidate.** `Store::rotation_candidate_to_confirm(policy, current, now, held)`: None
+  unless the account in use is at or over its threshold on a current figure (from metadata, no
+  credential read; its header figure counts), not held by a limit (SB-98 takes the last known
+  figure and waits for nothing), and the strict decision found `no_eligible_account`; otherwise
+  the candidates without a figure inside the policy's age, ranked by organization, then healthy
+  before failed or paced, then last known usage (`last_known_usage`: of any age, 99 when never
+  measured, 100 or more never taken, nor one at or past `threshold - hysteresis` none of whose
+  windows reset since), then age and id; the first whose credential is usable.
+  `monitor::confirm_candidates` checks at most 2 such a pass before the rotation transaction
+  (`check_candidate`, log event `usage_confirm`), each with a `Caller::Confirm` token, at most one
+  a minute per provider (`CONFIRM_SPACING_SECONDS`); `rotation_decision_with` still switches only
+  on figures within the policy's age, the account in use within `max(max_age,
+  CURRENT_MAX_AGE_FLOOR_SECONDS = 300)`
+  (`a_candidate_known_only_from_an_older_figure_is_checked_fresh_before_the_switch`,
+  `a_switch_checks_its_candidate_fresh_before_it_moves`). While the provider is held no candidate
+  is checked. The proxy's failover (DEC-0002) is unchanged.
+- **Near the limit.** An endpoint answer near the limit is not checked again before the last
+  complete header plus 60 s, and `pull_in_next_accounts` skips an account whose header is under
+  60 s old (`near_its_limit_the_endpoint_is_asked_only_once_no_header_came_for_a_minute`,
+  `the_pools_next_account_is_not_pulled_in_while_its_headers_are_fresh`).
+- **Writes.** A changed header observation is held in memory (`Store::hold`) and written by
+  `flush_headers_if_older(now, HEADER_FLUSH_SECONDS = 60)` from the pass, or at the drain
+  (`header_observations_reach_the_disk_at_most_once_a_minute`).
 
 ## Near-limit quota checks (SB-106, 2026-10-12)
 
@@ -303,8 +391,8 @@ Account list order is display-only; it never selects/activates. Within provider/
   `CHECK_NEAR_LIMIT_SECONDS` 60; `AT_LIMIT_PERCENT` 98 → `CHECK_AT_LIMIT_SECONDS` 30, one pass
   (LC-08 holds: nothing faster than the pass); 100 → none (full until a reset); both less
   `NEAR_LIMIT_SLACK_SECONDS` (below). Applied in
-  `observe_generation` as `min(next_quota_check, near_limit_check)`; response headers still
-  never move the schedule.
+  `observe_generation` as `min(next_quota_check, near_limit_check)`; since SB-518 a complete
+  header moves it (see [Smart usage checks](#smart-usage-checks-sb-518-dec-0032)).
 - **The next account.** `Store::pull_in_next_accounts(now)`: for each such pool whose current
   account was measured ≥ 95 % within ten minutes, or is held by a limit (`Store::limited`), the
   account a failover would most likely take (`Store::next_to_check`: `failover_candidate`'s order
