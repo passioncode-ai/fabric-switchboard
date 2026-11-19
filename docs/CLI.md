@@ -55,7 +55,9 @@ switchboard keys observatory add alpha-web/prod/OPENROUTER_API_KEY [--pool POOL]
 switchboard agents launch hermes --pool tokens --model claude-sonnet-5-5 --dir /abs/folder   # SB-404 K3: Hermes on the pay-per-token group's selected key, through the proxy, counted against its daily ceiling
 switchboard agents launch claude-code --pool tokens --model claude-sonnet-5-5 --dir /abs/folder   # SB-404 K3: Claude Code on the same key, managed, with its model
 switchboard bugs                                       # SB-379 W3: crashes found at the next start (exception type and signal from macOS's report) and, with usage counts on, the week's error counts
-switchboard attention                                  # SB-365: what needs a person (sign-in, refused renewal, ended seat, failing usage checks, a lost move, a ceiling question, a session copy, a stuck or gone board run), each with the tool that fixes it; the accounts stay in their groups
+switchboard attention                                  # SB-365: what needs a person (sign-in, refused renewal, ended seat, failing usage checks, a lost move, a ceiling question, a session copy, a stuck or gone board run; SB-550: another machine not answering, its failing health, its sessions that need a person), each with the tool that fixes it; the accounts stay in their groups
+switchboard health                                     # SB-393: this Switchboard's agent-health/1 report; SB-550: the check machines counts the other machines that need a look
+switchboard remote-status                              # SB-550 (DEC-0033): what another machine reads of this one every minute over ssh: accounts, sessions as ids and codes, health; read-only
 switchboard mcp-homes                                  # SB-359: which Claude home is signed in to which MCP server (names, URLs, booleans; never a token)
 switchboard sessions --tree                            # SB-379: live sessions with who started them and for which task, the day's launches, counts, the watch's findings
 switchboard sessions --rows [--target studio]           # SB-395: every session in four groups (needs you, running, waiting, ended) with the acts it has; here or there
@@ -69,7 +71,7 @@ switchboard monitor hold --session ID --until UNIX [--reason fabric_claim]    # 
 switchboard sessions close-copy SESSION_ID [--pid N] [--target M]  # SB-388, SB-389 (--pid: the copy attention offers when both work) (--target: the copy on another machine, closed by its Switchboard): one session in two processes: close the copy quiet longest (SIGTERM, SIGKILL after 10 s); never a busy one or one running a command
 switchboard duty [on | off | set … | run [--dry-run]]   # SB-384: the session duty officer: closes a finished session, restarts a stalled one, never one still working
 switchboard capacity [set N [--board M|default] | clear] # SB-378, SB-417: this computer's cap on working coding sessions (a session quiet outside a turn, on a limit stop or on a wait of its own is not counted); launch --hosted waits at it, a board run (dispatch, --hosted --surface fabric) starts inside the board's share M (default a quarter of N, rounded up; set N alone keeps M, clamped to N); the waiting board runs show until one starts
-switchboard machines list [--live]                     # SB-355: each machine group with its accounts, and accounts used elsewhere in none; --live reads each machine over ssh (20 s per call)
+switchboard machines list [--live]                     # SB-355: each machine group with its accounts, and accounts used elsewhere in none; --live reads each machine over ssh (20 s per call); without it, SB-550: the owner's read of every minute, with each machine's sessions and health
 switchboard machines adopt [--apply]                   # SB-355: place accounts already used elsewhere in their machines' groups (recorded move, else location); never guessed
 switchboard machines place ACCOUNT_UUID --on studio-sshlg   # SB-355: record where it lives without ssh; it leaves every group here
 switchboard machines forget studio-sshlg               # SB-355: remove a machine group that holds no account
@@ -193,7 +195,8 @@ switchboard accounts recall ACCOUNT_UUID    # take it back, a seat whose lease r
 ```
 
 `ssh-serve` answers only what a delegation into the group its line names (`--pool`) needs:
-`machines prove`, `accounts list` (only the caller's seats there), `project list` (that group:
+`machines prove`, `accounts list` (only the caller's seats there), `remote-status` (SB-550: the
+caller's seats and that group's sessions as ids and codes, no health), `project list` (that group:
 id, name, organizations; no folder), `org list` (that group's organizations), `org assign` of a
 seat (to those organizations or personal), and the delegation calls `accounts add --delegated`,
 `usage`, `accounts surrender`, `accounts lease` and `accounts remove` with `--sender-key KEY`,
