@@ -9,6 +9,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - The session duty officer now records each act once (SB-505). Before, when its check took longer than a second, the next check finished the same act again: it wrote a second close, offered a closed session twice in Continue, counted a restart twice, and could open a second resume window for a restarted session.
+- A hosted session is no longer closed after an idle hour while it still works (SB-506). The session host now uses the duty officer's rule: it keeps a session that waits for its own launches, whose background agents still write, that runs a command of its own, or that asks you something.
+- A board run that still writes its log at its deadline gets ten more minutes, up to three times its time limit (SB-509). Each extension is recorded in the run's launch record and in the duty officer's journal.
+- Needs attention offers *Continue* once for a session whose process ended without its end being recorded, when its history is on this computer (SB-509). Nothing is continued until you press it.
+- When the proxy had to take a new port and token, Needs attention lists the sessions still sending the old token, with *Restart sessions…* to restart them in a wave (SB-509). Nothing restarts by itself.
+- The duty officer counts a restart toward its limit of three in six hours only when it stopped the session (SB-530). A restart whose process did not stop no longer counts.
 
 ## 0.7.120
 
