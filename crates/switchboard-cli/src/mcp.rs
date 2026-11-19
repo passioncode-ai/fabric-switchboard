@@ -787,7 +787,8 @@ impl Server {
             })
             .await?;
         if let Some((machine, pool, provider)) = check {
-            let snapshot = self.call(Operation::Snapshot).await?;
+            // A snapshot that cannot be read leaves the machine unknown, never a refusal.
+            let snapshot = self.call(Operation::Snapshot).await.unwrap_or(Value::Null);
             value["launch_check"] = switchboard_runtime::remote_usage::check_for(
                 &self.root,
                 &snapshot,
