@@ -299,7 +299,7 @@ Account list order is display-only; it never selects/activates. Within provider/
   (`switchboard_core::UsageMode`, `usage_mode::read`); read at owner start and by each offline
   command, set with `switchboard usage-mode smart|timer|on-demand` or MCP `switchboard_usage_mode`
   (`Operation::UsageMode`). `timer` is 0.7.121's cadence below; `on_demand` makes no check on a
-  schedule (no due list, no pull-in: `monitor::Pass::run`), while headers, a switch's candidate and
+  schedule (no due list, no pull-in: `monitor::Pass::run_with_stop`), while headers, a switch's candidate and
   a person's check work as in `smart` (the setting itself: `usage_mode::tests`); native rotation
   has no figure there and moves only on a limit. The mode governs the cadence and the budget: the
   account in use's 300 s floor and its switch on header figures (below) hold in every mode.
