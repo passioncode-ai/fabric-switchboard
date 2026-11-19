@@ -3413,7 +3413,7 @@ ssh name (lowercase) in `machine-keys.json` (0600, at most 256 KiB: `{machines: 
 |---|---|---|---|
 | `pinned` | a holding signature, nothing trusted yet, an act (its key is trusted from now on) | runs | (a read never pins) |
 | `matched` | a holding signature by the trusted key | runs | runs |
-| `unproven` | nothing trusted and an older Switchboard (its generic `Invalid arguments`), no answer, or a read's holding signature | refused, `PROOF_REQUIRED` (`UNREACHABLE` when the machine never answered) | runs |
+| `unproven` | nothing trusted and an older Switchboard (its generic `Invalid arguments`), a refusal of the challenge (its vault locked), no answer, or a read's holding signature | refused, `PROOF_REQUIRED` (`PROOF_MISSING` after a refusal, `UNREACHABLE` when the machine never answered) | runs |
 | `key_changed` | a holding signature by another key | refused, `KEY_CHANGED` | refused, `KEY_CHANGED` |
 | `refused` | a signature that does not hold (`PROOF_INVALID`), or a trusted machine that proved nothing (`PROOF_MISSING`) | refused | refused |
 
