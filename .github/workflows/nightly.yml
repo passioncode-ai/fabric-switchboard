@@ -6,17 +6,21 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# Per ref (SB-563, M4-02): the release guard's run on a tag is never the pending run that a
+# scheduled run on main (or a second tag's run) replaces.
 concurrency:
-  group: nightly
+  group: nightly-${{ github.ref }}
   cancel-in-progress: false
+# Runner images are pinned, and are the release workflow's own (SB-563, M4-27): what nightly
+# passed is what the release builds on. Actions are pinned by commit, as in release.yml.
 jobs:
   clock:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       run: ${{ steps.clock.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: scripts/nightly_clock.py
           sparse-checkout-cone-mode: false
@@ -31,16 +35,38 @@ jobs:
           if grep -qx 'run=false' clock.out; then
             echo "::notice title=Nightly checks skipped::this cron line is tonight's daylight-saving duplicate; the other line runs the full checks"
           fi
+  # SB-563 (M4-01): a run whose checks were skipped must never read as a passed nightly. The release
+  # guard accepts the newest nightly run on the tagged commit when it concluded `success`, and a run
+  # whose test jobs were all skipped concluded `success`. The duplicate cancels itself instead: the
+  # guard then starts a full run on the tag. Should the cancel fail, this job fails: either way the
+  # run is not a success.
+  duplicate:
+    needs: clock
+    if: needs.clock.outputs.run == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: End the duplicate run as cancelled
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          gh run cancel "$RUN_ID" -R "$GITHUB_REPOSITORY"
+          sleep 180
+          echo "::error::the run was not cancelled within three minutes; failing it so it does not read as a passed nightly"
+          exit 1
   checks:
     needs: clock
     if: needs.clock.outputs.run == 'true'
-    runs-on: macos-15
+    runs-on: macos-26
     # 30 was spent on 2026-11-12: the v0.7.69 run's app build was cut at minute 30 (v0.7.67's whole
     # job took 23); the gate and the build together need room on a busy runner.
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -59,7 +85,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-latest
+          - runner: windows-2025-vs2026
             target: x86_64-pc-windows-msvc
             overlay: ""
           - runner: windows-11-arm
@@ -71,8 +97,8 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -139,17 +165,25 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
+      # SB-563 (M4-04): an Ubuntu mirror answering 503 failed v0.7.122's Linux job; apt retries each
+      # download and the whole install is tried three times before the job fails.
       - name: Build and check dependencies (WebKitGTK 4.1, Secret Service, Xvfb)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libdbus-1-dev \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
-            libssl-dev file xdg-utils dbus-x11 gnome-keyring xvfb xauth
+          for attempt in 1 2 3; do
+            if sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+                pkg-config libdbus-1-dev libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+                libxdo-dev libssl-dev file xdg-utils dbus-x11 gnome-keyring xvfb xauth; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then echo "::error::the package mirror failed 3 times; see the apt-get output above"; exit 1; fi
+            echo "::warning::apt-get failed (attempt $attempt); again in 30 s"
+            sleep 30
+          done
       - name: Rust stable with clippy
         run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
       - run: npm ci

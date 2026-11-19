@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-19: SB-563 release pipeline (W11.4, spec S5.1), on branch `sb-563-release-pipeline`
+
+- **Asked.** Wave W11.4 of the lifecycle and remote-access plan (audit 2026-11-19, findings M4-01..09 and M4-27; report and spec on branch `audit-2026-11-19`, PR #865, where the SB-563 backlog row lives).
+- **Built.** `nightly.yml`: the daylight-saving duplicate cancels itself (job `duplicate`), concurrency per ref, apt retries, images and actions pinned. `release.yml`: guard deadline 120 min (job 135), preflight `--latest`, native suites only on rehearsals (receipts `NIGHTLY`), apt retries, publish in one concurrency group, last job `feed` (`scripts/feed_check.py`, Ed25519 and minisign in the standard library, checked against the published v0.7.122). `release-rerun.yml` with `scripts/release_rerun.py` (classifies failed job logs; checked against the real logs of v0.7.122 attempt 1, v0.7.121 attempt 1 and v0.7.123's guard).
+- **Decisions.** Images pinned to what releases already built on (`macos-26` since at least v0.7.63; nightly moves from `macos-15`), `windows-2025-vs2026`, `windows-11-arm`. The duplicate cancels rather than fails, so the guard dispatches a full run instead of refusing. Publishing jobs are never retried by the watcher unless their log shows only an outside failure; the publish workflow's own draft path makes that retry safe.
+- **Checks.** `actionlint` 1.7.12 (with shellcheck) clean on the three workflows; Python tests in the gate; the Studio gate (see the PR's EXIT line). No CI run was dispatched.
+- **Not done (org repository).** The guard's check of a run's jobs, its handling of a cancelled newest run after a dispatch, and a latest re-check right before publishing belong to passioncode-ai/.github: issue passioncode-ai/.github#51.
+
+**Exact next task.** Review the SB-563 pull request and merge once its gate reads EXIT 0 on the merged head (after PR #864, rebase: it adds `RUST_MIN_STACK` beside the release test steps this change makes rehearsal-only; after PR #865, set the SB-563 row to in review). The first nightly after the merge shows one run per night `cancelled` (the duplicate); the first release after it shows `feed` green.
+
 ## 2026-11-18: SB-450 sessions continued after a restart, SB-451 launch records name their process's session, on branch `boot-resume`
 
 - **Asked.** Fabric Dashboards' board request 737b04e6 (thread a9844103): after the Mac rebooted nothing continued the sessions (SB-450); launch 38e41114 recorded another session's id and a transcript that never existed (SB-451). The coordinator added SB-455 (no login `PATH` in launch scripts, a likely cause of SB-451); it landed separately in #838, and this branch's own one-line PATH change was dropped when main was merged (2026-11-19).

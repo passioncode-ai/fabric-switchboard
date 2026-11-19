@@ -1,0 +1,44 @@
+# Retry a failed release once when every failure was the infrastructure's (SB-563, M4-06): an
+# Ubuntu mirror answering 503 (v0.7.122), a registry, the runner. A test, a compile error, a
+# refusal of the guard or of a check, a timeout, a log that cannot be read: nothing is retried.
+#
+# It starts only when a `release` run on a tag completes with failure, reruns only that run's
+# failed jobs (and the jobs that need them) with `gh run rerun --failed`, and only on the run's
+# first attempt. It is not a push or pull request trigger and dispatches no suite
+# (AGENTS.md: hosted full checks run nightly). The decision and its reason per failed job are in
+# the run's summary: scripts/release_rerun.py.
+name: release rerun
+
+on:
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-rerun-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  rerun:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt == 1 &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write   # gh run rerun
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/release_rerun.py
+          sparse-checkout-cone-mode: false
+      - name: Rerun the failed jobs once when only the infrastructure failed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: python3 scripts/release_rerun.py --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID"

@@ -97,7 +97,7 @@ step nightly-clock-tests python3 -m unittest scripts/test_nightly_clock.py
 step prune-tests python3 -m unittest scripts/test_prune_artifacts.py
 step test-inventory-tests python3 -m unittest scripts/test_test_names.py
 step packaging-tests python3 -m unittest scripts/test_updater_artifacts.py scripts/test_package_linux.py
-step release-tests python3 -m unittest scripts/test_build_macos.py scripts/test_package_windows.py scripts/test_windows_bundle.py scripts/test_release_preflight.py scripts/test_release_bump.py scripts/test_smoke_native.py
+step release-tests python3 -m unittest scripts/test_build_macos.py scripts/test_package_windows.py scripts/test_windows_bundle.py scripts/test_release_preflight.py scripts/test_release_bump.py scripts/test_smoke_native.py scripts/test_release_rerun.py scripts/test_feed_check.py
 step agents-doc python3 scripts/agents_doc.py --check
 step notices python3 scripts/third_party_notices.py --check
 step diff-check git diff --check
