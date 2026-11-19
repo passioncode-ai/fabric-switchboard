@@ -2024,8 +2024,28 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<Value, String> {
     updates::check_now(app).await
 }
 
+/// The stack of every thread the app's async runtime runs on: the size the command line's runtime
+/// threads have had since 0.6.61 (SB-161), because the owner's `execute` runs on these threads
+/// (the window's commands and the control listener's calls) and its futures are large (SB-558).
+const RUNTIME_STACK_BYTES: usize = 16 * 1024 * 1024;
+
 fn main() {
     let Launch { smoke, background } = launch(std::env::args());
+    // Tauri would build its own runtime with the standard 2 MiB threads; this one is set first
+    // and lives until the process ends.
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(RUNTIME_STACK_BYTES)
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => {
+            eprintln!("Switchboard could not start its runtime.");
+            std::process::exit(1);
+        }
+    };
+    tauri::async_runtime::set(runtime.handle().clone());
+    let _runtime = runtime;
     // The folder picker is called from Rust (`pick_folder`); the window holds no dialog or
     // filesystem permission of its own.
     let mut builder = tauri::Builder::default()
