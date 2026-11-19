@@ -238,6 +238,8 @@ jobs:
       - run: npm ci
       - name: Native storage and runtime fixtures
         if: env.NATIVE_TESTS == 'PASS'
+        env:
+          RUST_MIN_STACK: "16777216" # SB-558: the tests' threads get the stack the CLI and the app run on
         run: |
           cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli -p fabric-sessions-core -p fabric-sessions --locked --no-fail-fast
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
