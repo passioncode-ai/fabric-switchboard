@@ -897,9 +897,9 @@ research notes); the ones still in force that the board cites are seeded below w
     session token, not the agents' key, not a group's or folder's capability, not another user's.
     Only its group's Claude Code route serves it. With that capability its requests are Claude
     Code's (a subscription serves them, SB-98 applies), counted in its group.
-  - Allowing, disallowing and rotating take effect at the next connection and request: the proxy
-    reads the list again whenever the file changed, and the salt makes a rotated capability
-    worthless at once.
+  - Allowing, disallowing and rotating through Switchboard take effect at once (the owner reloads
+    the list after each change it saves; a change made by hand within the proxy's 2 s refresh),
+    and the salt makes a rotated capability worthless at once.
   - The capability reaches the user as a Claude Code settings file the person names, written by
     the service user and never printed: 0640 with the user's primary group when the service user
     may set it and that group is the user's own private group, else 0600 with a line that copies

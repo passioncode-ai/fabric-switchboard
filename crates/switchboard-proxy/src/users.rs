@@ -166,13 +166,54 @@ pub struct Users {
     /// Security round 2 (P3): one read of the file at a time, outside `cache`, so the request
     /// path's `find_cached` never waits on file I/O and reads land in the order they ran.
     loading: Mutex<()>,
+    /// Security round 4: the connections open now per named account (`peer::OwnUser`).
+    open: Mutex<std::collections::HashMap<u32, usize>>,
 }
+
+/// Security round 4: connections one named account may hold open at once. Its requests share
+/// the proxy's descriptors and slots with this account's own sessions, so one account that opens
+/// thousands (a compromised agent) must not use up either.
+pub const MAX_CONNECTIONS: usize = 32;
+
+/// One open connection of a named account, counted while it lives.
+pub struct ConnectionSlot {
+    users: Arc<Users>,
+    uid: u32,
+}
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        if let Ok(mut open) = self.users.open.lock() {
+            if let Some(n) = open.get_mut(&self.uid) {
+                *n = n.saturating_sub(1);
+                if *n == 0 {
+                    open.remove(&self.uid);
+                }
+            }
+        }
+    }
+}
+
 impl Users {
+    /// A slot for one more open connection of `uid`, or None when it holds `MAX_CONNECTIONS`
+    /// already (or the count cannot be read: fails closed).
+    pub fn open_connection(self: &Arc<Self>, uid: u32) -> Option<ConnectionSlot> {
+        let mut open = self.open.lock().ok()?;
+        let n = open.entry(uid).or_default();
+        if *n >= MAX_CONNECTIONS {
+            return None;
+        }
+        *n += 1;
+        Some(ConnectionSlot {
+            users: self.clone(),
+            uid,
+        })
+    }
     pub fn new(root: &Path) -> Self {
         Self {
             root: Some(root.to_owned()),
             cache: Mutex::new(None),
             loading: Mutex::new(()),
+            open: Mutex::default(),
         }
     }
     /// A list that is always empty: a system where another account's connection is never let in.
@@ -181,6 +222,7 @@ impl Users {
             root: None,
             cache: Mutex::new(None),
             loading: Mutex::new(()),
+            open: Mutex::default(),
         }
     }
     pub fn current(&self) -> Arc<Vec<NamedUser>> {
@@ -295,6 +337,26 @@ mod tests {
         assert_ne!(base, user_token(&t, "team", 1001, "s2"));
         assert_ne!(base, user_token(&"c".repeat(64), "team", 1001, "s1"));
         assert_ne!(base, crate::pool_token(&t, "team"));
+    }
+
+    /// Security round 4: one named account holds at most `MAX_CONNECTIONS` open at once; a
+    /// connection closed gives its slot back, and another account counts on its own.
+    #[test]
+    fn a_named_account_holds_at_most_its_share_of_open_connections() {
+        let users = Arc::new(Users::none());
+        let mut held: Vec<ConnectionSlot> = (0..MAX_CONNECTIONS)
+            .map(|_| users.open_connection(1001).unwrap())
+            .collect();
+        assert!(users.open_connection(1001).is_none());
+        assert!(
+            users.open_connection(1002).is_some(),
+            "another account counts on its own"
+        );
+        drop(held.pop());
+        let again = users.open_connection(1001);
+        assert!(again.is_some());
+        assert!(users.open_connection(1001).is_none());
+        drop(held);
     }
 
     /// Unix only: on Windows the proxy names nobody (`Users::none`), and a file's stamp there has

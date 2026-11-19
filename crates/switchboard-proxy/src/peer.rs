@@ -692,8 +692,55 @@ pub struct OwnUser {
     pub users: Arc<crate::users::Users>,
 }
 
+/// An accepted connection, and for a named account's its slot among `users::MAX_CONNECTIONS`,
+/// given back when the connection closes (security round 4).
+pub struct Counted {
+    inner: tokio::net::TcpStream,
+    _slot: Option<crate::users::ConnectionSlot>,
+}
+impl tokio::io::AsyncRead for Counted {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
+    }
+}
+impl tokio::io::AsyncWrite for Counted {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
+    }
+    fn poll_write_vectored(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_write_vectored(cx, bufs)
+    }
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
 impl Listener for OwnUser {
-    type Io = tokio::net::TcpStream;
+    type Io = Counted;
     type Addr = Conn;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
@@ -704,8 +751,12 @@ impl Listener for OwnUser {
                 user: None,
             };
             let me = self.me;
+            let counted = |io, slot| Counted {
+                inner: io,
+                _slot: slot,
+            };
             if me == Me::Unchecked {
-                return (io, own);
+                return (counted(io, None), own);
             }
             let local = io.local_addr();
             let users = self.users.clone();
@@ -713,16 +764,25 @@ impl Listener for OwnUser {
                 .await
                 .unwrap_or(Admission::Refused);
             match admission {
-                Admission::Own => return (io, own),
-                Admission::Named(uid) => {
-                    return (
-                        io,
-                        Conn {
-                            addr: peer,
-                            user: Some(uid),
-                        },
-                    )
-                }
+                Admission::Own => return (counted(io, None), own),
+                // Security round 4: a named account holds at most `users::MAX_CONNECTIONS` open,
+                // so it cannot use up the owner's descriptors.
+                Admission::Named(uid) => match self.users.open_connection(uid) {
+                    Some(slot) => {
+                        return (
+                            counted(io, Some(slot)),
+                            Conn {
+                                addr: peer,
+                                user: Some(uid),
+                            },
+                        )
+                    }
+                    None => {
+                        self.refused
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        drop(io);
+                    }
+                },
                 Admission::Refused => {
                     self.refused
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);

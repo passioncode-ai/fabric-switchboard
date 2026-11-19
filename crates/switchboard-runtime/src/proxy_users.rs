@@ -844,18 +844,16 @@ fn change(
 /// When the proxy started on another port or with another token: every recorded settings file is
 /// written again with the new address and capability. Answers how many were written and how many
 /// could not be (a file a person moved to the user with sudo is no longer this account's).
-pub(crate) fn repoint(root: &Path, port: u16, token: &str) -> (usize, usize) {
+pub(crate) fn repoint(root: &Path, port: u16, token: &str) -> Option<(usize, usize)> {
     // Nobody named: nothing to write, and no lock file to make.
     if std::fs::symlink_metadata(root.join(users::FILE)).is_err() {
-        return (0, 0);
+        return Some((0, 0));
     }
     // Security round 2 (P2-1): it writes the list too, so under the same lock as every change.
-    let Ok(_held) = list_lock(root) else {
-        return (0, 0);
-    };
-    let Ok(mut list) = users::load(root) else {
-        return (0, 0);
-    };
+    // Security round 4 (P3): a list that cannot be locked or read is reported, never taken for
+    // an empty one (its files then name the old address, and their users are refused).
+    let _held = list_lock(root).ok()?;
+    let mut list = users::load(root).ok()?;
     let proxy = (port, token.to_owned());
     let (mut written, mut failed) = (0, 0);
     for user in list.iter_mut().filter(|u| u.settings.is_some()) {
@@ -884,7 +882,7 @@ pub(crate) fn repoint(root: &Path, port: u16, token: &str) -> (usize, usize) {
         failed += written;
         written = 0;
     }
-    (written, failed)
+    Some((written, failed))
 }
 
 /// SB-421 review (P2-4): whether `account`, the password database's account for the listed uid
@@ -1181,7 +1179,7 @@ mod tests {
         assert_eq!(written["env"]["ANTHROPIC_AUTH_TOKEN"], fresh.as_str());
         assert!(!rotated.to_string().contains(&fresh));
         // A new port and token after a restart: the file follows.
-        assert_eq!(repoint(&root, 4777, &"e".repeat(64)), (1, 0));
+        assert_eq!(repoint(&root, 4777, &"e".repeat(64)), Some((1, 0)));
         let written: Value = serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
         assert_eq!(
             written["env"]["ANTHROPIC_BASE_URL"],
@@ -1498,7 +1496,7 @@ mod tests {
         };
         assert_eq!(run("allow"), Err(UID_REUSED.into()));
         assert_eq!(run("rotate"), Err(UID_REUSED.into()));
-        assert_eq!(repoint(&root, 4777, &"e".repeat(64)), (0, 1));
+        assert_eq!(repoint(&root, 4777, &"e".repeat(64)), Some((0, 1)));
         assert!(!settings.exists());
         assert!(
             run("disallow").is_ok(),

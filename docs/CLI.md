@@ -359,7 +359,7 @@ with the one group whose accounts it may use (Linux, and macOS before 27, where 
 
 ```sh
 switchboard proxy allow-user agent-a --group team --folder /srv/agents/a \
-  --write-settings /srv/agents/a/claude-settings.json   # lists it and writes its settings file
+  --write-settings /var/lib/switchboard-users/agent-a.json   # lists it and writes its settings file
 switchboard proxy users                                 # who is served, in which group, and their files
 switchboard proxy rotate-user agent-a                   # a new capability, the file written again
 switchboard proxy disallow-user agent-a                 # off the list at once
@@ -376,7 +376,7 @@ mode 0640 when the user's primary group is its own private group and you are a m
 must belong to root or the service account and be writable by no one else, none may be a link
 (give `/private/var/...`, not `/var/...`, on macOS), and a file already there is replaced only when
 it holds exactly what Switchboard wrote there last. The agent runs
-`claude --settings /srv/agents/a/claude-settings.json -p "..."`. The list is
+`claude --settings <its copy of the file> -p "..."`. The list is
 `<data>/proxy-users.json` (0600, no secret). A systemd example is in
 [MOVING.md](MOVING.md#several-users-on-one-linux-host).
 

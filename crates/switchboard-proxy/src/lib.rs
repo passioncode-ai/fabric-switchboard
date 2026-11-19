@@ -96,6 +96,9 @@ struct Gateway {
     address: SocketAddr,
     client: reqwest::Client,
     slots: Arc<Semaphore>,
+    /// SB-421 security round 4: the slots named accounts may hold among `slots`, so the owner's
+    /// own sessions always keep `SLOTS - NAMED_SLOTS`.
+    named_slots: Arc<Semaphore>,
     /// When the last managed request started, Unix seconds.
     last_request: Arc<std::sync::atomic::AtomicI64>,
     claude: String,
@@ -172,6 +175,8 @@ pub struct ProxyHandle {
 /// Requests relayed at once; each holds a slot until its response stream ends. 16 was too few for
 /// a machine with two dozen agent sessions streaming at once (2026-10-18): the rest got 503.
 const SLOTS: usize = 64;
+/// SB-421 security round 4: requests the named accounts of this host may relay at once, in all.
+const NAMED_SLOTS: usize = SLOTS / 4;
 /// Notes that a managed request started now on `last` (`ProxyHandle::last_request_at`).
 fn note_request(last: &std::sync::atomic::AtomicI64) {
     let now = std::time::SystemTime::now()
@@ -350,6 +355,7 @@ impl ProxyHandle {
             address,
             client,
             slots: Arc::new(Semaphore::new(SLOTS)),
+            named_slots: Arc::new(Semaphore::new(NAMED_SLOTS)),
             last_request: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             claude,
             openai,
@@ -637,6 +643,8 @@ struct AuditedStream {
     spend_pool: String,
     spend_root: Option<std::path::PathBuf>,
     _permit: tokio::sync::OwnedSemaphorePermit,
+    /// A named account's slot among `NAMED_SLOTS`, held as long as its answer streams.
+    _named_permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 impl AuditedStream {
     fn settle(&mut self) {
@@ -1000,6 +1008,20 @@ async fn relay_as(
             .insert("retry-after", axum::http::HeaderValue::from_static("5"));
         return response;
     }
+    // SB-421 security round 4: named accounts share at most `NAMED_SLOTS` of the slots, so the
+    // owner's own sessions keep the rest whatever they do.
+    let named_permit = match &named {
+        Some(_) => match g.named_slots.clone().try_acquire_owned() {
+            Ok(p) => Some(p),
+            Err(_) => {
+                return error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Proxy is busy. Retry later.",
+                )
+            }
+        },
+        None => None,
+    };
     let permit = match g.slots.clone().try_acquire_owned() {
         Ok(p) => {
             note_request(&g.last_request);
@@ -1385,6 +1407,7 @@ async fn relay_as(
                 .then(|| g.store.root().to_owned()),
             spend_pool: account.pool.clone(),
             _permit: permit,
+            _named_permit: named_permit,
         };
     response
         .body(Body::from_stream(stream))

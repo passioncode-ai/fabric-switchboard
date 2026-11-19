@@ -3025,6 +3025,13 @@ subscriptions. SB-273 closes their connections, and the agents' key never reache
   unprivileged process read only its own account's sockets (SB-330), so there another account's
   connection still reads as nobody's and is closed: the feature serves Linux hosts (and macOS
   before 27, which lists every socket's owner).
+- **Its share of the proxy (security round 4).** A named account's connections and requests
+  share the proxy with this account's own sessions, so they are capped: each named account holds
+  at most `users::MAX_CONNECTIONS` (32) connections open (`peer::Counted` gives its slot back
+  when one closes; one more is closed at once, `a_named_account_holds_at_most_its_share_of_open_connections`),
+  and all named accounts together relay at most `NAMED_SLOTS` (16 of the 64) requests at once
+  (503 "Proxy is busy. Retry later." beyond), so the owner's own sessions always keep 48 slots
+  and their descriptors.
 - **One change at a time (security round 2, P2-1).** Every change of the list (allow,
   disallow, rotate, and a removed group's entries) holds `<data>/proxy-users.lock` (0600) from its
   read to its write, so two calls at once (the window, MCP, the CLI) never lose a disallow or a

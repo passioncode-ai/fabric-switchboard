@@ -3739,15 +3739,21 @@ async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, Stri
             let _ = switchboard_core::private_fs::private_write(&root.join(PROXY_FILE), &bytes);
         }
         // SB-421: the named accounts' settings files name the old address or capability.
-        let (written, failed) = proxy_users::repoint(root, port, proxy.token());
-        if written + failed > 0 {
-            oplog::event(
+        // Security round 4 (P3): it waits for the list's lock and asks the password database,
+        // so never on an async worker.
+        match blocking::run(|| proxy_users::repoint(root, port, proxy.token())) {
+            Some((0, 0)) => {}
+            Some((written, failed)) => oplog::event(
                 "proxy_user_settings_repointed",
                 &[
                     ("written", oplog::Field::Number(written as i64)),
                     ("failed", oplog::Field::Number(failed as i64)),
                 ],
-            );
+            ),
+            None => oplog::event(
+                "proxy_user_settings_repointed",
+                &[("outcome", oplog::Field::Code("list_unread"))],
+            ),
         }
     }
     if let Some(old) = record.filter(|r| r.port != port) {
