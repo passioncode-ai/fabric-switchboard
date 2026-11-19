@@ -336,8 +336,15 @@ export function createDemoAdapter(): Adapter {
   // on, the demo shows one account lent between them.
   let demoCap: number | null = null;
   let demoBoard: number | null = null;
+  // SB-417 (SCN-094 step 4b): `?board-waiting=1` starts the demo with a limit of 2 and three board
+  // runs it refused, so the Needs attention item and its Settings line can be walked.
+  const demoBoardWaiting = new URLSearchParams(location.search).get('board-waiting') === '1';
+  let demoRefused: { count: number; since: number; last_at: number; freed: boolean } | null = demoBoardWaiting ? { count: 3, since: Math.floor(Date.now() / 1000) - 5400, last_at: Math.floor(Date.now() / 1000) - 300, freed: false } : null;
+  if (demoBoardWaiting) { demoCap = 2; demoBoard = 0; }
+  const demoShare = (cap: number) => demoBoard ?? Math.min(cap, Math.max(1, Math.ceil(cap / 4)));
   let demoDutyOn = true;
   let demoOwnSignIn = true;
+  let demoBootResume = true;
   let balanceGroups: string[] = []; let balanceAllNew = false; let balanceBackup: string[] = [];
   const balanceStatus = () => {
     const pools = ['default', ...(state.projects ?? []).map((p) => p.pool)];
@@ -348,6 +355,18 @@ export function createDemoAdapter(): Adapter {
     const lender = from ? state.accounts.find((a) => a.pool === from && a.provider === 'claude') : undefined;
     const lent = lender && to ? [{ account_id: lender.id, label: lender.label, provider: lender.provider, from, from_name: name(from), to, to_name: name(to), at: now() - 1800 }] : [];
     return { on: balanceGroups.length > 0, groups: balanceGroups.map((pool) => ({ pool, name: name(pool) })), available: pools.map((pool) => ({ pool, name: name(pool), chosen: balanceGroups.includes(pool), backup: balanceBackup.includes(pool) })), all_new: balanceAllNew, pass_minutes: 15, lent, recent: [], backup: balanceBackup.map((pool) => { const own = state.accounts.filter((a) => a.pool === pool); return { pool, name: name(pool), accounts: own.length, lent: lent.filter((l) => l.from === pool).length }; }) };
+  };
+  // SB-419 (DEC-0028, SCN-104): groups fed from the default group, none until the person turns
+  // one on; a fed group shows one account placed from the default group.
+  let feedGroups: { pool: string; priority: number }[] = []; let feedReady = 2; let feedLookahead = 30;
+  const feedStatus = () => {
+    const name = (pool: string) => pool === 'default' ? 'default' : (state.projects ?? []).find((p) => p.pool === pool)?.name ?? pool;
+    feedGroups = feedGroups.filter((f) => (state.projects ?? []).some((p) => p.pool === f.pool));
+    const order = [...feedGroups].sort((a, b) => a.priority - b.priority || a.pool.localeCompare(b.pool));
+    const spare = state.accounts.filter((a) => a.pool === 'default' && a.provider === 'claude');
+    const moved = order.flatMap((f, i) => spare[i] ? [{ account_id: spare[i].id, label: spare[i].label, provider: spare[i].provider, from: 'default', from_name: 'default', to: f.pool, to_name: name(f.pool), at: now() - 900, kind: 'placed' as const }] : []);
+    const recent = moved.map((m) => ({ at: m.at, account: m.account_id, provider: m.provider, from: m.from, to: m.to, action: 'lend' as const, reason: 'feed', outcome: 'done', feed: { priority: order.find((f) => f.pool === m.to)?.priority ?? 1, ready: 0, want: feedReady, used_percent: 20 } }));
+    return { on: order.length > 0, ready: feedReady, lookahead_minutes: feedLookahead, pass_minutes: 15, fed: order.map((f) => ({ pool: f.pool, name: name(f.pool), priority: f.priority, off: false, providers: [{ provider: 'claude' as const, ready: moved.filter((m) => m.to === f.pool).length, accounts: moved.filter((m) => m.to === f.pool).length }] })), available: (state.projects ?? []).filter((p) => !p.tokens).map((p) => { const f = feedGroups.find((g) => g.pool === p.pool); return { pool: p.pool, name: p.name, fed: !!f, priority: f?.priority ?? null }; }), reservoir: [{ provider: 'claude' as const, accounts: spare.length, placed: moved.length, ready: Math.max(0, spare.length - moved.length), parked: 0 }], moved, recent };
   };
   // SB-183 (node A-7): the terminal hook, every state of SCN-075 by `?shell=` (default_on, on,
   // off, default_off, held (SB-222: the organization's folders belong to another group), inactive,
@@ -395,6 +414,7 @@ export function createDemoAdapter(): Adapter {
         ...(demoDuplicate ? [{ account_id: null, label: 'alpha-web', provider: null, pool: null, reason: 'session_duplicate' as const, detail: 'Synthetic: one session in two processes.', since: null, session_id: demoDuplicate, action: { tool: 'switchboard_session_close_copy', window: 'close_copy' as const } }] : []),
         ...[...signInRequired].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'sign_in' as const, detail: 'Synthetic: the sign-in ended.', since: now() - 3600, action: { tool: 'switchboard_login', window: 'sign_in' as const } })),
         ...[...failingChecks].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'usage_failing' as const, detail: 'Synthetic: the usage check fails.', since: now() - 5400, action: { tool: 'switchboard_usage', window: 'check_usage' as const } })),
+        ...(demoRefused ? [{ account_id: null, label: null, provider: null, pool: null, reason: 'dispatch_refused' as const, detail: "Board runs are waiting: this computer's session limit refused them, and none has started since.", since: demoRefused.since, count: demoRefused.count, freed: demoRefused.freed, action: { tool: 'switchboard_capacity', window: 'open_capacity' as const } }] : []),
         ...demoQuestions.map(() => ({ account_id: null, label: null, provider: null, pool: null, reason: 'ceiling_question' as const, detail: 'Synthetic: a ceiling was reached.', since: now() - 600, action: { tool: 'switchboard_ceiling_answer', window: 'answer_ceiling' as const } })),
       ];
       return { count: items.length, items };
@@ -477,7 +497,10 @@ export function createDemoAdapter(): Adapter {
     },
     async recallAccount(id, _from, pool) { await pause(); const item = account(id); delete state.elsewhere?.[id]; delete state.locations?.[id]; item.enabled = true; if (item.pool.startsWith('machine_')) { item.pool = pool ?? state.returns_to?.[id] ?? 'default'; delete state.returns_to?.[id]; log('machine', id, 'left'); } else log('account.updated', id, 'Called back from another machine'); },
     // SB-366: the last background read; `?remote=failed` shows a machine that did not answer.
-    async machinesList() { await pause(); const failed = new URLSearchParams(location.search).get('remote') === 'failed'; const at = now() - 12 * 60; return { machines: (state.machines ?? []).map((m) => ({ pool: m.pool, name: m.name, read: { as_of: at, tried_at: failed ? now() - 60 : at, reason: failed ? 'unreachable' : null, failures: failed ? 1 : 0 }, accounts: state.accounts.filter((a) => a.pool === m.pool).map((a) => ({ id: a.id, there: { used_percent: 42, usage_status: 'ok', enabled: true, as_of: at, tried_at: failed ? now() - 60 : at, reason: failed ? 'unreachable' : null } })) })) }; },
+    async machinesList() { await pause(); const failed = new URLSearchParams(location.search).get('remote') === 'failed'; const at = now() - 12 * 60; return { machines: (state.machines ?? []).map((m) => ({ pool: m.pool, name: m.name, read: { as_of: at, tried_at: failed ? now() - 60 : at, reason: failed ? 'unreachable' : null, failures: failed ? 3 : 0, call: 'status', sessions: { counts: { needs_you: 0, running: 2, waiting: 1, ended: 4 }, troubled: [] }, health: { state: 'ok', failing: [] } }, accounts: state.accounts.filter((a) => a.pool === m.pool).map((a) => ({ id: a.id, there: { used_percent: 42, observed_at: at - 120, usage_status: 'ok', enabled: true, as_of: at, tried_at: failed ? now() - 60 : at, reason: failed ? 'unreachable' : null } })) })) }; },
+    // SB-473, SB-474: the known machines and a machine's groups; `?remote=failed` makes the read fail.
+    async targets() { await pause(); return { targets: (state.machines ?? []).map((m) => ({ machine: m.name, aliases: m.aliases ?? [], known_by: ['moves'], last_at: m.created_at, program: null })) }; },
+    async remoteStatus(target) { await pause(); if (new URLSearchParams(location.search).get('remote') === 'failed') throw new Error('The other machine did not answer over ssh.'); return { target, groups: [{ pool: 'passioncode', name: 'PassionCode', organization: 'PassionCode.ai', accounts: 3, folders: 4 }, { pool: 'apps', name: 'Apps', organization: null, accounts: 1, folders: 2 }] }; },
     async machinesLive() { await pause(); return { machines: (state.machines ?? []).map((m) => ({ pool: m.pool, name: m.name, live: { reachable: true }, accounts: state.accounts.filter((a) => a.pool === m.pool).map((a) => ({ id: a.id, there: { pool: 'default', enabled: true, used_percent: 23, usage_status: 'ok' } })) })) }; },
     async handOverAccount(id, to) { await pause(); (state.elsewhere ??= {})[id] = now(); (state.locations ??= {})[id] = to; account(id).enabled = false; log('account.updated', id, 'Handed over'); return { saved: '/Users/demo/Desktop/handover.switchboard-handover.json', location: to, public_key: 'MCowBQYDK2VwAyEAdemoDemoDemoDemoDemoDemoDemoDemoDemoDemoDemo=' }; },
     async openHandover() { await pause(); return { record: { format: 'switchboard-handover/1', provider: 'claude', label: 'colleague@example.com', email: 'colleague@example.com', to: 'This Mac', at: now() } }; },
@@ -763,22 +786,33 @@ export function createDemoAdapter(): Adapter {
         ],
         counts: { live: 3, working: 2, quiet: 1, managed: 2, by_pool: { 'alpha-web': 2, unmanaged: 1 }, by_surface: { fabric: 1, fallback: 1, unmanaged: 1 } },
         findings: [{ kind: 'gone', launch_id: 'L-gone', folder: '/Users/demo/work/tools-cli' }],
-        capacity: { cap: demoCap, used: 2, free: demoCap === null ? null : Math.max(0, demoCap - 2), at_capacity: demoCap !== null && demoCap <= 2, total: 3, quiet: 1, quiet_after_minutes: 30, on_limit_stop: 0, on_waits: 0, board_share: demoCap === null ? null : (demoBoard ?? Math.max(2, Math.floor(demoCap / 4))), board_share_set: demoBoard !== null, board_used: 1, board_admitted: true, waiting: 0, refused_waiting: null },
+        capacity: { cap: demoCap, used: 2, free: demoCap === null ? null : Math.max(0, demoCap - 2), at_capacity: demoCap !== null && demoCap <= 2, total: 3, quiet: 1, quiet_after_minutes: 30, on_limit_stop: 0, on_waits: 0, board_share: demoCap === null ? null : demoShare(demoCap), board_share_set: demoBoard !== null, board_used: 1, board_admitted: demoRefused === null, waiting: demoRefused?.count ?? 0, refused_waiting: demoRefused },
         // SB-382: the first organization's folders, when the demo has one.
         context: { hook: 'default_on' as const, map: 'read', organizations: state.organizations?.[0] ? [{ context: `org:${state.organizations[0].id}`, live: 2, managed: 1, other: 1 }] : [] },
       };
     },
     async capacity(change) {
+      let clamped = false;
       if (change?.clear) { demoCap = null; demoBoard = null; }
       else if (typeof change?.cap === 'number') {
         if (!Number.isInteger(change.cap) || change.cap < 1 || change.cap > 500) throw new Error('Give the session limit as a whole number from 1 to 500.');
         if (typeof change.board === 'number' && (!Number.isInteger(change.board) || change.board < 0 || change.board > change.cap)) throw new Error("Give the board's share as a whole number from 0 to the session limit, with a limit set.");
+        clamped = typeof change.board !== 'number' && !change.boardDefault && demoBoard !== null && demoBoard > change.cap;
         demoCap = change.cap; demoBoard = typeof change.board === 'number' ? change.board : change.boardDefault ? null : (demoBoard === null ? null : Math.min(demoBoard, change.cap));
       }
       // The same two working sessions the demo's session tree shows; one of them is a board run.
       const used = 2;
-      const share = demoCap === null ? null : (demoBoard ?? Math.max(2, Math.floor(demoCap / 4)));
-      return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30, on_limit_stop: 1, on_waits: 1, board_share: share, board_share_set: demoBoard !== null, board_used: 1, board_admitted: demoCap === null || used < demoCap || (share ?? 0) > 1, waiting: 0, refused_waiting: null };
+      const share = demoCap === null ? null : demoShare(demoCap);
+      const admitted = demoCap === null || used < demoCap || (share ?? 0) > 1;
+      // A board run the pool would admit now ends the demo's wait, as `dispatch_refusals::admitted` does once one starts.
+      if (admitted) demoRefused = null;
+      return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30, on_limit_stop: 1, on_waits: 1, board_share: share, board_share_set: demoBoard !== null, board_share_clamped: clamped, board_used: 1, board_admitted: admitted, waiting: demoRefused?.count ?? 0, refused_waiting: demoRefused };
+    },
+    async bootResume(on) {
+      await pause(); if (typeof on === 'boolean') demoBootResume = on;
+      const now = Math.floor(Date.now() / 1000);
+      return { settings: { on: demoBootResume }, boot_time: now - 3600, window_minutes: 120, max_per_boot: 5, supported: true,
+        recent: [{ at: now - 3500, boot: now - 3600, session: 'demo-s7', folder: '/Users/demo/Code/site', outcome: 'continued', new_launch_id: 'demo-launch-7' }] };
     },
     async ownSignIn(on) { await pause(); if (typeof on === 'boolean') demoOwnSignIn = on; return { own_sign_in: demoOwnSignIn ? 'on' : 'off', on: demoOwnSignIn }; },
     async duty(change) {
@@ -806,6 +840,16 @@ export function createDemoAdapter(): Adapter {
       }
       if (change?.backup_remove?.length) balanceBackup = balanceBackup.filter((g) => !change.backup_remove?.includes(g));
       return balanceStatus();
+    },
+    async feed(change) {
+      await pause();
+      if (change?.pool === 'default') throw new Error('The default group feeds the others, so it cannot be fed itself.');
+      if (change?.pool && change.on === true) { const f = feedGroups.find((g) => g.pool === change.pool); if (f) { if (change.priority) f.priority = change.priority; } else feedGroups.push({ pool: change.pool, priority: change.priority ?? Math.max(0, ...feedGroups.map((g) => g.priority)) + 1 }); }
+      else if (change?.pool && change.on === false) feedGroups = feedGroups.filter((g) => g.pool !== change.pool);
+      else if (change?.pool && change.priority) { const f = feedGroups.find((g) => g.pool === change.pool); if (!f) throw new Error('That group is not fed from the default group. Turn its feed on first, then set its priority.'); f.priority = change.priority; }
+      if (change?.ready) feedReady = change.ready;
+      if (typeof change?.lookahead_minutes === 'number') feedLookahead = change.lookahead_minutes;
+      return feedStatus();
     },
     async codexRoute(enabled) {
       await pause();

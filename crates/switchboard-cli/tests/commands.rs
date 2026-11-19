@@ -1842,6 +1842,32 @@ fn the_history_and_one_launch_with_its_chain_read_from_the_command_line() {
         text.contains("Launched by:") && text.contains("Then:"),
         "{text}"
     );
+    // SB-423 (FD-316): only the named launches, in the order given, a repeat once, and the ids
+    // with no record named.
+    let missing = "5b7f2c1e-0000-4000-8000-0000000000ff";
+    let picked: serde_json::Value = serde_json::from_str(&run(&[
+        "--json",
+        "sessions",
+        "--history",
+        "--launch",
+        a,
+        "--launch",
+        c,
+        "--launch",
+        a,
+        "--launch",
+        missing,
+    ]))
+    .unwrap();
+    let ids: Vec<&str> = picked["data"]["launches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["launch_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [a, c]);
+    assert_eq!(picked["data"]["total"], 2);
+    assert_eq!(picked["data"]["missing"], serde_json::json!([missing]));
 }
 #[test]
 fn a_launcher_name_or_parent_that_is_not_one_is_refused_before_anything_is_asked() {
@@ -2001,8 +2027,35 @@ fn a_key_observatory_holds_is_added_by_name_through_a_pipe() {
     assert_eq!(added["saved"][1]["target"], "anthropic");
     assert_eq!(added["saved"][1]["answer"]["name"], "alpha-web");
     // The value reached the vault: the named key reads back (as a session script reads it).
-    let key = run(&["agents", "anthropic", "key", "alpha-web"]);
+    let key = run(&["agents", "anthropic", "key", "alpha-web", "--to-pipe"]);
     assert_eq!(json(&key)["key"], "sk-ant-api03-synthetic-fixture");
+    // SB-420: without --to-pipe, or into a file, the key is refused and never printed.
+    let refused = run(&["agents", "anthropic", "key", "alpha-web"]);
+    assert!(!refused.status.success());
+    let everything = format!(
+        "{}{}",
+        String::from_utf8_lossy(&refused.stdout),
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(!everything.contains("synthetic-fixture"), "{everything}");
+    assert!(
+        everything.contains("only for a session script"),
+        "{everything}"
+    );
+    let file = tmp.path().join("printed");
+    let status = binary()
+        .arg("--data-dir")
+        .arg(&data)
+        .args(["agents", "anthropic", "key", "alpha-web", "--to-pipe"])
+        .stdin(Stdio::null())
+        .stdout(std::fs::File::create(&file).unwrap())
+        .stderr(Stdio::null())
+        .status()
+        .unwrap();
+    assert!(!status.success());
+    assert!(!std::fs::read_to_string(&file)
+        .unwrap()
+        .contains("synthetic-fixture"));
     // The record names the slot, never the value; the list shows where it went.
     let record = std::fs::read_to_string(data.join("observatory-keys.json")).unwrap();
     assert!(record.contains("alpha-web/prod/ANTHROPIC_API_KEY"));
@@ -2057,4 +2110,39 @@ fn a_key_observatory_holds_is_added_by_name_through_a_pipe() {
         .output()
         .unwrap();
     assert_eq!(json(&absent)["state"], "absent");
+}
+
+/// SB-420: a command that prints a provider key or a sign-in refuses unless its caller names the
+/// hand-over, and checks that before it reads anything: an OpenRouter key without `--to-pipe`,
+/// a surrender without the variable the calling machine's ssh command sets.
+#[test]
+fn value_printing_commands_need_the_hand_over_named() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = |args: &[&str], transfer: bool| {
+        let mut command = binary();
+        command
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .args(args)
+            .env_remove("SWITCHBOARD_TRANSFER")
+            .stdin(Stdio::null());
+        if transfer {
+            command.env("SWITCHBOARD_TRANSFER", "surrender");
+        }
+        let output = command.output().unwrap();
+        assert!(!output.status.success(), "{args:?}");
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    let key = ["agents", "key", "--service", "openrouter", "--machine"];
+    assert!(run(&key, false).contains("only for a session script"));
+    // Named: the guard passes and the command answers as before (no key is saved here).
+    let named = run(&[&key[..], &["--to-pipe"]].concat(), false);
+    assert!(named.contains("No OpenRouter key is saved"), "{named}");
+    let surrender = ["accounts", "surrender", "synthetic-id"];
+    assert!(run(&surrender, false).contains("Only the machine that calls the account back"));
+    let named = run(&surrender, true);
+    assert!(
+        !named.contains("Only the machine that calls the account back"),
+        "{named}"
+    );
 }

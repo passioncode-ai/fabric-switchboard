@@ -116,6 +116,16 @@ impl Statistics {
     /// it absorbed and the day counts of the UTC days the stretch touches: an upper bound, so a
     /// fresh start never reads a group as quieter than it was.
     pub(crate) fn window(&self, seconds: i64, now: i64) -> Window {
+        self.window_from(seconds, now, true)
+    }
+    /// SB-419 (review round 2 of PR #824): the same counts from this owner's own quarters only,
+    /// never the day counts: a lower bound, for a question where erring high would act on an
+    /// old count as a new one ("refusing now" right after a restart). Empty until this owner
+    /// has counted something.
+    pub(crate) fn window_in_memory(&self, seconds: i64, now: i64) -> Window {
+        self.window_from(seconds, now, false)
+    }
+    fn window_from(&self, seconds: i64, now: i64, days: bool) -> Window {
         let from = now - seconds;
         let Ok(s) = self.inner.lock() else {
             return Window::new();
@@ -128,7 +138,7 @@ impl Statistics {
                 cell.1 += limited;
             }
         }
-        if s.since > from {
+        if days && s.since > from {
             let first = stats::day_of(from);
             let last = stats::day_of(now);
             let mut days = Window::new();
@@ -815,6 +825,15 @@ mod tests {
         assert_eq!(
             s.window(2 * 3600, now)[&("agents".into(), "a".into())],
             (9, 2)
+        );
+        // Review round 2 (SB-419): the in-memory read never takes the day counts, so a refusal
+        // this morning is not read as one now right after a restart.
+        assert!(!s
+            .window_in_memory(2 * 3600, now)
+            .contains_key(&("agents".into(), "a".into())));
+        assert_eq!(
+            s.window_in_memory(15 * 60, now)[&("apps".into(), "b".into())],
+            (1, 1)
         );
         // The 7 days before today: today's counts are not among them.
         let yesterday = stats::day_of(now - 86_400);

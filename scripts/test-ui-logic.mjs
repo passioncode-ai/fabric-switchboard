@@ -1000,7 +1000,7 @@ check(() => {
   // SB-227: the minute's background pass reads the PassionCode.ai status again while Organizations
   // is on screen (a local file read), so a mark a background read made shows without reopening it.
   assert.deepEqual(logic.backgroundReads('orgs'), ['onboarding', 'passioncode']);
-  assert.deepEqual(logic.backgroundReads('accounts'), ['onboarding']);
+  assert.deepEqual(logic.backgroundReads('accounts'), ['onboarding', 'machines']);
   assert.deepEqual(logic.backgroundReads('activity'), ['sessions']);
   assert.deepEqual(logic.backgroundReads('agents'), ['ceilings']);
   assert.deepEqual(logic.backgroundReads('tokens'), ['ceilings']);
@@ -1687,6 +1687,51 @@ check(() => {
   assert.equal(logic.balancingView({ on: true, groups: [], available: chosen.map((g) => ({ ...g, chosen: g.pool === 'agents' })), all_new: false, pass_minutes: 15, lent: [], recent: [] }).line, 'Включено: участвует 1 группа.');
   i18nForShell.setLocale('en');
 });
+// SB-419 (SCN-104, DEC-0028), the_feed_reads_every_state: reading, failed, off, on with the fed
+// groups highest priority first, the rule with the person's targets, each move's line, the notices,
+// the priority field and the arrows' geometry.
+check(() => {
+  i18nForShell.setLocale('en');
+  assert.equal(logic.feedView(null).state, 'reading');
+  const failed = logic.feedView(null, 'Switchboard could not read its own state.');
+  assert.equal(failed.state, 'failed'); assert.ok(failed.retry);
+  const base = { ready: 2, lookahead_minutes: 30, pass_minutes: 15, reservoir: [], moved: [], recent: [] };
+  const off = logic.feedView({ ...base, on: false, fed: [], available: [{ pool: 'agents', name: 'Agents', fed: false, priority: null }] });
+  assert.equal(off.line, 'No group is fed from the default group.');
+  assert.deepEqual(off.arrows, []);
+  assert.deepEqual(off.groups.get('agents'), { fed: false, priority: null });
+  const fed = [{ pool: 'apps', name: 'Apps', priority: 2, off: false, providers: [] }, { pool: 'agents', name: 'Agents', priority: 1, off: false, providers: [] }];
+  const on = logic.feedView({ ...base, on: true, fed, available: [{ pool: 'agents', name: 'Agents', fed: true, priority: 1 }, { pool: 'apps', name: 'Apps', fed: true, priority: 2 }] });
+  assert.equal(on.state, 'on'); assert.equal(on.line, '2 groups are fed from the default group.');
+  assert.deepEqual(on.arrows.map((a) => [a.pool, a.priority]), [['agents', 1], ['apps', 2]]);
+  assert.match(on.rule, /^A fed group keeps 2 ready accounts: the default group lends it .* within 30 minutes, and takes back one that runs out once another serves the group\.$/);
+  assert.equal(logic.feedBadge(1), 'Fed from Default · priority 1');
+  const name = (pool) => ({ agents: 'Agents', default: 'Default group' })[pool] ?? pool;
+  const line = (reason, from, to, outcome = 'done') => logic.feedMoveLine({ reason, from, to, outcome }, 'Work', name);
+  assert.equal(line('feed', 'default', 'agents'), 'Work was placed in Agents from the default group.');
+  assert.equal(line('park', 'agents', 'default'), 'Work ran out in Agents and is shared with the default group until its limit resets.');
+  assert.equal(line('spent', 'default', 'agents'), 'Work ran out in Agents and went back; another ready account serves the group.');
+  assert.equal(line('surplus', 'default', 'agents'), 'Work went back: Agents has more ready accounts than it keeps.');
+  assert.equal(line('sign_in', 'default', 'agents'), 'Work went back: it waits for a sign-in.');
+  assert.equal(line('rested', 'agents', 'default'), 'Work has room again and is no longer shared with the default group.');
+  assert.equal(line('feed_off', 'agents', 'default'), 'Work went back: Agents is no longer fed.');
+  assert.match(line('priority', 'default', 'agents'), /higher priority/);
+  assert.equal(line('account_gone', 'default', 'agents'), 'Work went back to its own group.');
+  assert.equal(line('feed', 'default', 'agents', 'failed'), 'Work could not be moved. The next pass tries again.');
+  assert.equal(line('spent', 'default', 'agents', 'held'), 'Work ran out in Agents and stays: the account that would replace it was not placed.');
+  assert.equal(logic.feedNotice({ group: 'Agents', on: true, priority: 1 }), 'Agents is fed from the default group, priority 1.');
+  assert.match(logic.feedNotice({ group: 'Agents', on: false }), /back in their own groups/);
+  assert.equal(logic.feedNotice({ group: 'Agents', priority: 3 }), 'Agents has priority 3 now.');
+  assert.deepEqual(['1', ' 7 ', '99', '0', '100', '2.5', '', 'x'].map(logic.feedPriority), [1, 7, 99, null, null, null, null, null]);
+  // Every arrow starts at the source's middle and ends 6 px before the edge, at its row's middle.
+  assert.deepEqual(logic.feedArrows(2, 32, 56), ['M0 32 C28 32 28 16 50 16', 'M0 32 C28 32 28 48 50 48']);
+  assert.deepEqual(logic.feedArrows(0, 32, 56), []);
+  i18nForShell.setLocale('ru');
+  assert.equal(on.line === '2 groups are fed from the default group.', true);
+  assert.equal(logic.feedView({ ...base, on: true, fed: fed.slice(0, 1), available: [] }).line, 'Из группы по умолчанию подпитывается 1 группа.');
+  assert.equal(logic.feedBadge(2), 'Подпитка · приоритет 2');
+  i18nForShell.setLocale('en');
+});
 // SB-355 (SCN-092, DEC-0013), the_machine_groups_read_every_state: an account on another machine is
 // in its machine's group, the accounts whose machine is not known are named, a machine pool is never
 // offered as a group here, and a live read says what each copy there is.
@@ -1797,9 +1842,14 @@ check(() => {
   const offer = logic.duplicateOffer(both);
   assert.equal(offer.pid, 84681); assert.equal(offer.label, 'Close the older copy'); assert.ok(offer.line.includes('2 h'), offer.line); assert.ok(!offer.disabled);
   const busy = logic.duplicateOffer(logic.attentionView({ items: [{ reason: 'session_duplicate', session_id: 's-3', close: null, action: { tool: 't', window: 'close_copy' } }] }).items[0]);
-  assert.ok(busy.disabled, 'both answering: nothing to press'); assert.equal(busy.pid, null);
+  // SB-472: both answering offers no button at all (never a disabled one) and says when it will.
+  assert.equal(busy.label, null, 'both answering: no button'); assert.equal(busy.pid, null);
+  assert.ok(busy.line.includes('finishes its turn'), busy.line); assert.ok(!busy.line.includes('\u2014'));
+  assert.equal(logic.duplicateOffer({ session_id: null, close: null }).label, null, 'no session: no button');
+  assert.ok(logic.duplicateOffer({ session_id: null, close: null }).line.includes('in its own window'), 'without a session the line says what the person can do');
+  assert.equal(logic.duplicateOffer({ session_id: null, close: { pid: 1, why: 'older', command_age: 5 } }).label, null, 'no session: no button even with an offer');
   assert.equal(logic.duplicateOffer(dup.items[0]).label, 'Close the quiet copy', 'an older owner sends no offer: the quiet copy as before');
-  assert.ok(!logic.duplicateOffer(dup.items[0]).disabled, 'no offer is not "both answering"');
+  assert.ok(!('disabled' in logic.duplicateOffer(dup.items[0])), 'the offer has no disabled state');
   assert.equal(logic.attentionView({ items: [{ reason: 'session_duplicate', session_id: 's', close: { pid: 'x', why: 'older' }, action: { tool: 't', window: 'close_copy' } }] }).items[0].close, null, 'a malformed offer is none');
   // SB-407: a stuck or gone board run carries its launch id and offers *Stop the run*.
   const gone = logic.attentionView({ items: [{ reason: 'session_gone', label: 'beta', launch_id: 'L-3', action: { tool: 'switchboard_dispatch_stop', window: 'dispatch_stop', command: 'switchboard dispatch stop --launch-id L-3' } }] }).items[0];
@@ -1808,16 +1858,45 @@ check(() => {
   const goneOnly = logic.attentionView({ items: [{ reason: 'session_gone', launch_id: 'L-4', action: { tool: 'switchboard_dispatch_stop', window: 'dispatch_stop', if_gone: true } }] }).items[0];
   assert.equal(goneOnly.action.if_gone, true, 'a gone run only records its end');
   assert.equal(logic.attentionActionLabel(gone.action.window), 'Stop the run');
+  // SB-420: a Claude Code item too large to write is kept, with no button (window none).
+  const big = logic.attentionView({ items: [{ reason: 'keychain_too_large', provider: 'claude', item: 'ordinary', during: 'renewal', since: 9000, action: { tool: 'switchboard_status', window: 'none' } }] }).items[0];
+  assert.equal(big.reason, 'keychain_too_large'); assert.equal(big.action.window, 'none'); assert.equal(big.since, 9000);
+  assert.equal(logic.attentionActionLabel('none'), '', 'no button label');
+  assert.ok(logic.attentionReasonText('keychain_too_large').startsWith("Claude Code's sign-in is too large to write to the Keychain safely"));
+  assert.ok(!logic.attentionReasonText('keychain_too_large').includes('\u2014'));
   assert.ok(!logic.attentionReasonText('session_gone').includes('\u2014'));
+  // SB-510: a watchdog finding keeps its code; one this window does not know is left out.
+  const watched = logic.attentionView({ items: [
+    { reason: 'watchdog', code: 'act_unfinished', count: 2, since: 7000, action: { tool: 'switchboard_duty', window: 'open_sessions' } },
+    { reason: 'watchdog', code: 'something_new', action: { tool: 'switchboard_watchdog', window: 'open_sessions' } },
+  ] }).items;
+  assert.equal(watched.length, 1); assert.equal(watched[0].code, 'act_unfinished'); assert.equal(watched[0].since, 7000);
+  assert.equal(logic.watchdogLine('act_unfinished'), "An act of the duty officer or a board run's stop was left half done more than 10 minutes ago.");
+  assert.equal(logic.watchdogLine(undefined), logic.attentionReasonText('watchdog'));
+  for (const code of ['owner_down', 'owner_not_answering', 'owner_stopped', 'act_unfinished', 'board_run_gone', 'duplicate_session']) {
+    assert.ok(!logic.watchdogLine(code).includes('\u2014'), code);
+  }
   assert.equal(logic.dispatchStopNotice('stopped'), 'Stopped the board run.');
   assert.equal(logic.dispatchStopNotice('already_ended'), 'The board run had already ended. Its end is recorded now.');
   assert.equal(logic.dispatchStopLineText({ reason: 'deadline', folder: '/w/app' }, 'app'), 'Stopped a board run in app: it reached its deadline.');
   assert.equal(logic.dispatchStopLineText({ reason: 'person', folder: '/w/app' }, 'app'), 'Stopped a board run in app at your request.');
   assert.equal(logic.dutyOutcomeText('already_ended'), 'it had already ended');
+  // SB-509: a gone session with its history offers Continue; sessions on the proxy's old token offer a restart wave.
+  const resume = logic.attentionView({ items: [{ reason: 'session_continuable', label: 'gamma', session_id: 's-2', launch_id: 'L-2', action: { tool: 'switchboard_session_continue', window: 'continue_session', command: 'switchboard sessions continue s-2' } }] }).items[0];
+  assert.equal(resume.reason, 'session_continuable'); assert.equal(resume.session_id, 's-2');
+  assert.equal(logic.attentionActionLabel(resume.action.window), 'Continue');
+  const rotated = logic.attentionView({ items: [{ reason: 'token_rotated', since: 9000, count: 2, action: { tool: 'switchboard_sessions_restart_plan', window: 'restart_wave' } }] }).items[0];
+  assert.equal(rotated.reason, 'token_rotated'); assert.equal(rotated.count, 2);
+  assert.equal(logic.attentionActionLabel(rotated.action.window), 'Restart sessions\u2026');
+  for (const reason of ['session_continuable', 'token_rotated']) assert.ok(!logic.attentionReasonText(reason).includes('\u2014'), reason);
+  assert.equal(logic.dispatchExtendLineText('app'), 'Gave a board run in app ten more minutes: it still writes its log.');
   // SB-412, SB-417: the refused dispatches that still wait, one item that opens the session limit.
   const refused = logic.attentionView({ items: [{ reason: 'dispatch_refused', count: 3, freed: false, since: 9900, action: { tool: 'switchboard_capacity', window: 'open_capacity' } }] }).items[0];
   assert.equal(refused.count, 3); assert.equal(refused.freed, false);
   assert.equal(logic.attentionActionLabel('open_capacity'), 'Open the session limit');
+  // SB-417 (design review 2026-11-17): the default share is a quarter of the limit rounded up, never above the limit.
+  for (const [limit, share] of [[1, 1], [2, 1], [4, 1], [5, 2], [8, 2], [12, 3], [20, 5], [500, 125]]) assert.equal(logic.defaultBoardShare(limit), share, `limit ${limit}`);
+  assert.equal(logic.defaultBoardShare(0), 1);
   assert.equal(logic.dispatchRefusedLine(refused), "3 board runs are waiting: this computer's session limit refused them. No session has ended since.");
   assert.equal(logic.dispatchRefusedLine({ count: 1, freed: true }), "A board run is waiting: this computer's session limit refused it. A session has ended since, so the next run can start.");
   assert.equal(logic.dutyOutcomeText('stopped'), null);
@@ -1935,6 +2014,8 @@ check(() => {
   assert.equal(logic.restartTone('failed'), 'danger');
   assert.equal(logic.restartTone('pending'), 'muted');
   assert.equal(logic.sessionWhyText({ why: 'closed_restart' }, 0), 'Ended by a restart and not back, can continue');
+  assert.equal(logic.sessionWhyText({ why: 'ended_seen' }, 0), 'Ended outside Switchboard, can continue');
+  assert.equal(logic.sessionWhyText({ why: 'reboot' }, 0), 'Cut by a computer restart, continued after it');
   assert.equal(logic.sessionWhyText({ why: 'moved_on' }, 0), 'Went on after its limit stop and ended, can continue');
   assert.equal(logic.sessionWhyText({ why: 'no_transcript' }, 0), 'Stopped on a limit, its history is gone');
   assert.equal(logic.restartStateText('failed', 'gone'), 'Not back: it ended before its turn did');
@@ -1966,8 +2047,8 @@ check(() => {
   assert.ok(logic.tokensSpendLine(null, true).text.startsWith('On, but refusing every request'));
   assert.equal(logic.ceilingQuestion({ value: 5, kind: 'project', scope: 'Pay-per-token keys', tokens: true }).text, 'The daily ceiling of Pay-per-token keys, $5.00, is reached.');
   // Groups reads the ceilings again only while the pay-per-token group shows its spending.
-  assert.deepEqual(logic.backgroundReads('projects'), []);
-  assert.deepEqual(logic.backgroundReads('projects', true), ['ceilings']);
+  assert.deepEqual(logic.backgroundReads('projects'), ['machines']);
+  assert.deepEqual(logic.backgroundReads('projects', true), ['ceilings', 'machines']);
   // A move the pay-per-token rule refuses is locked: a key goes only there, nothing else goes there, its keys stay.
   const groups = [{ pool: 'apps', name: 'Apps' }, { pool: 'tokens', name: 'Pay-per-token keys', tokens: true }];
   const pick = (targets) => Object.fromEntries(targets.map((x) => [x.pool, x.blocked]));
@@ -2009,5 +2090,84 @@ check(() => {
   assert.equal(logic.poolChoices([], groups).find((c) => c.pool === 'tokens').name, 'Ключи с оплатой за токены');
   assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys' }), 'Pay-per-token keys', 'a group the person named so stays as typed');
   i18n.setLocale('en');
+});
+// SB-473 to SB-476: a move to another machine is chosen, read and batched.
+check(() => {
+  const machines = [{ pool: 'machine_nicegram', name: 'nicegram@10.0.0.2', aliases: ['ng'], created_at: 50 }, { pool: 'machine_studio', name: 'studio', created_at: 10 }];
+  const targets = [{ machine: 'ng', known_by: ['moves'], last_at: 90 }, { machine: 'linux-box', known_by: ['moves'], last_at: 80, program: '/usr/bin/switchboard' }, { machine: 'gpu', known_by: ['dispatch'], last_at: 70 }];
+  const choices = logic.machineChoices(machines, targets);
+  assert.deepEqual(choices.map((c) => c.name), ['ng', 'linux-box', 'gpu', 'studio'], 'each machine once, newest first; an alias of a machine group is that group');
+  assert.equal(choices[0].detail, 'accounts live there'); assert.equal(choices[1].detail, 'accounts moved there before'); assert.equal(choices[2].detail, 'runs started there');
+  assert.deepEqual(logic.machineChoices(machines, targets, machines[0]).map((c) => c.name), ['linux-box', 'gpu', 'studio'], 'the machine the account is on is left out, by any of its names');
+  assert.deepEqual(logic.machineChoices([], []), [], 'nothing known: only the typed entry is left');
+  const status = { target: 'ng', groups: [{ pool: 'machine_mac', name: 'mac', organization: null, accounts: 2, folders: 0 }, { pool: 'zeta', name: 'Zeta', organization: 'PassionCode.ai', accounts: 1, folders: 2 }, { pool: 'default', name: null, organization: null, accounts: 3, folders: 0 }, { pool: 'apps', name: 'Apps', organization: null, accounts: 2, folders: 1 }] };
+  const read = logic.remoteGroupChoices(status, 'zeta');
+  assert.deepEqual(read.choices.map(([pool]) => pool), ['default', 'apps', 'zeta'], 'the default group first, machine groups there left out, the rest by name');
+  assert.equal(read.choices[0][1], 'Default group · 3 accounts'); assert.equal(read.choices[2][1], 'Zeta · PassionCode.ai · 1 account');
+  assert.equal(read.chosen, 'zeta', "the account's own group when that machine has it");
+  assert.equal(logic.remoteGroupChoices(status, 'nowhere').chosen, 'default'); assert.equal(logic.remoteGroupChoices({ target: 'x', groups: [] }, null).choices.length, 1);
+  const accounts = [{ id: 'a', kind: 'oauth', enabled: true, pool: 'default' }, { id: 'b', kind: 'api_key', enabled: true, pool: 'tokens' }, { id: 'c', kind: 'oauth', enabled: false, pool: 'default' }, { id: 'd', kind: 'oauth', enabled: false, pool: 'machine_studio' }, { id: 'e', kind: 'oauth', enabled: true, pool: 'apps' }];
+  const snap = { accounts, machines, elsewhere: { d: 1, e: 2 } };
+  assert.deepEqual(logic.movableAccounts(snap).map((a) => a.id), ['a', 'd'], 'a subscription that is on here, or one on another machine; never a key, one off or one marked elsewhere without a machine');
+  assert.deepEqual(logic.movableAccounts(snap, machines[1]).map((a) => a.id), ['a'], 'never one already on the machine it goes to');
+  for (const c of choices) assert.ok(!c.detail.includes('\u2014'));
+});
+// SB-550 (DEC-0033): an account on another machine shows its copy there: bar, share and age from
+// the last read, the read's age under it; this computer's own older check only while there is no
+// read, and said so. The machine card says what the last read found; Needs attention takes the
+// machine reasons.
+check(() => {
+  i18nForShell.setLocale('en');
+  const now = 100_000;
+  const read = (over) => ({ used_percent: 42, observed_at: now - 300, usage_status: 'ok', enabled: true, as_of: now - 120, tried_at: now - 120, reason: null, ...over });
+  const own = { used: 17, observedAt: now - 8 * 86400 };
+  const shared = logic.remoteUsageView(read({}), own, 'studio', now);
+  assert.deepEqual([shared.percent, shared.at, shared.tone, shared.ownCheck], [42, now - 300, 'available', false], "the copy there, never this computer's old check");
+  assert.equal(shared.line, 'On studio, read 2 min ago');
+  assert.equal(logic.remoteUsageView(read({ as_of: now - 20 }), own, 'studio', now).line, 'On studio, read just now');
+  assert.equal(logic.remoteUsageView(read({ observed_at: undefined }), null, 'studio', now).at, now - 120, 'without its own time, the read time');
+  assert.equal(logic.remoteUsageView(read({ used_percent: 85 }), null, 'studio', now).tone, 'low');
+  assert.equal(logic.remoteUsageView(read({ used_percent: 100 }), null, 'studio', now).tone, 'blocked');
+  const rejected = logic.remoteUsageView(read({ usage_status: 'rejected' }), null, 'studio', now);
+  assert.deepEqual([rejected.tone, rejected.line], ['failed', 'Needs a sign-in on studio']);
+  const silent = logic.remoteUsageView(read({ reason: 'unreachable', as_of: now - 3 * 3600 }), own, 'studio', now);
+  assert.deepEqual([silent.percent, silent.tone, silent.line], [42, 'stale', 'Not read: studio did not answer, last read 3 h ago']);
+  // Review of PR #861 (P2-4): once that machine answered, its read speaks alone, with or without a
+  // figure: this computer's own 17% from 8 days ago never comes back.
+  const signIn = logic.remoteUsageView(read({ used_percent: null, usage_status: 'rejected' }), own, 'studio', now);
+  assert.deepEqual([signIn.percent, signIn.tone, signIn.ownCheck, signIn.line], [null, 'failed', false, 'Needs a sign-in on studio']);
+  const unmeasured = logic.remoteUsageView(read({ used_percent: null }), own, 'studio', now);
+  assert.deepEqual([unmeasured.percent, unmeasured.at, unmeasured.tone, unmeasured.ownCheck, unmeasured.line], [null, null, 'unknown', false, 'studio has no usage figure for it yet']);
+  const noCopy = logic.remoteUsageView(read({ used_percent: null, usage_status: null, enabled: null, listed: false }), own, 'studio', now);
+  assert.deepEqual([noCopy.percent, noCopy.ownCheck, noCopy.line], [null, false, 'Not in the account list of studio at its last read']);
+  const offThere = logic.remoteUsageView(read({ used_percent: null, enabled: false }), own, 'studio', now);
+  assert.deepEqual([offThere.percent, offThere.ownCheck, offThere.line], [null, false, 'Turned off on studio']);
+  const neverAnswered = logic.remoteUsageView(read({ used_percent: null, as_of: null, reason: 'unreachable' }), own, 'studio', now);
+  assert.deepEqual([neverAnswered.percent, neverAnswered.ownCheck, neverAnswered.line], [17, true, "This computer's last check · Not read yet: studio did not answer"]);
+  const before = logic.remoteUsageView(null, own, 'studio', now);
+  assert.deepEqual([before.percent, before.tone, before.ownCheck], [17, 'stale', true]);
+  assert.equal(before.line, "This computer's last check · Not read on studio yet");
+  const nothing = logic.remoteUsageView(null, null, 'studio', now);
+  assert.deepEqual([nothing.percent, nothing.tone, nothing.line], [null, 'unknown', 'Not read on studio yet']);
+  // The machine card's line.
+  const machineRead = (over) => ({ as_of: now - 30, tried_at: now - 30, reason: null, failures: 0, call: 'status', sessions: { counts: { needs_you: 1, running: 3, waiting: 0, ended: 9 }, troubled: [] }, health: { state: 'ok', failing: [] }, ...over });
+  assert.equal(logic.machineReadLine(machineRead({}), now), 'Sessions: 3 running, 0 waiting, 1 need you. No failing health check there. Read just now.');
+  assert.equal(logic.machineReadLine(machineRead({ health: { state: 'fail', failing: ['crashes', 'owner'] } }), now), 'Sessions: 3 running, 0 waiting, 1 need you. Needs a look there: it crashed in the last day, its Switchboard is not running. Read just now.');
+  assert.equal(logic.machineReadLine(machineRead({ call: 'accounts', sessions: null, health: null, as_of: now - 600 }), now), 'Its Switchboard is older and does not report its sessions. Update it there. Read 10 min ago.');
+  assert.equal(logic.machineReadLine(machineRead({ failures: 3, reason: 'unreachable', as_of: now - 7200 }), now), 'Not answering: three reads in a row failed. Last answer 2 h ago.');
+  assert.equal(logic.machineReadLine(machineRead({ failures: 3, as_of: null }), now), 'Not answering: three reads in a row failed.');
+  assert.equal(logic.machineReadLine(null, now), '');
+  assert.equal(logic.healthCheckText('something_new'), 'something_new', 'an unknown check by its id');
+  // Needs attention keeps the machine items and words them.
+  const items = logic.attentionView({ items: ['machine_unreachable', 'machine_health', 'machine_sessions'].map((reason, i) => ({ account_id: null, label: 'studio', provider: null, pool: null, reason, since: 9000, count: i, action: { tool: 'switchboard_machines', window: reason === 'machine_sessions' ? 'open_sessions' : 'open_machines' } })) }).items;
+  assert.deepEqual(items.map((i) => i.reason), ['machine_unreachable', 'machine_health', 'machine_sessions']);
+  assert.equal(items[0].label, 'studio');
+  for (const item of items) { const line = logic.attentionReasonText(item.reason); assert.ok(line && !line.includes('\u2014') && !line.includes('studio'), item.reason); }
+  for (const v of [shared, silent, before, nothing, signIn, unmeasured, noCopy, offThere, neverAnswered]) assert.ok(!v.line.includes('\u2014'));
+  assert.equal(logic.attentionReasonText('machine_sessions'), 'Sessions on this machine need a look: a second copy, or a board run that has gone quiet.');
+  i18nForShell.setLocale('ru');
+  assert.equal(logic.remoteUsageView(read({}), own, 'studio', now).line, 'На машине studio, прочитано 2 мин назад');
+  assert.equal(logic.attentionReasonText('machine_unreachable'), 'Switchboard на этой машине не ответил на три чтения подряд. Проверьте, что машина включена и доступна по ssh.');
+  i18nForShell.setLocale('en');
 });
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

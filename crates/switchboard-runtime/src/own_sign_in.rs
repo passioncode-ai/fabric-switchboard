@@ -62,6 +62,7 @@ pub(crate) fn mask(sources: NativeSources, off: bool) -> NativeSources {
         fresh: None,
         activate: |_, _, _, _| Err(OFF_LIMITS.into()),
         live: no_live,
+        live_stamp: || None,
         swap: crate::no_swap,
         swap_activity: external::SwapActivity::none,
         swap_signature: || None,

@@ -1,5 +1,5 @@
 {
- "about": "Copied from fabric-agent-contract fixtures/vectors/agent-health.json at db0d8f15 (DEC-0179); never edited here. Refresh with scripts/sync_health_vectors.py. Their own note: Vectors for agent-health/1 (DEC-0179), written by tools/vectors/agent-health.ts, never by hand. worst: worstState(input), the worst of a list of states in the order ok < unknown < warn < fail, unknown for an empty list or for a value that is no state (HL-2). read: readHealth(input), what a reader counts from one answer, input null standing for no answer: {state} of a report valid by schemas/agent-health.schema.json and FAC-SEM-181, otherwise {state: unknown, reason: no-answer | schema | FAC-SEM-181} (HL-5). episodes: episodeKey(product, checkId, at), the key <product>:<check id>@<YYYY-MM-DD> with the UTC day of the reading that opened the episode, at in Unix seconds (HL-6).",
+ "about": "Copied from fabric-agent-contract fixtures/vectors/agent-health.json at db0d8f15 (DEC-0179), with areas: the check area enum of schemas/agent-health.schema.json at the same commit; never edited here. Refresh with scripts/sync_health_vectors.py. Their own note: Vectors for agent-health/1 (DEC-0179), written by tools/vectors/agent-health.ts, never by hand. worst: worstState(input), the worst of a list of states in the order ok < unknown < warn < fail, unknown for an empty list or for a value that is no state (HL-2). read: readHealth(input), what a reader counts from one answer, input null standing for no answer: {state} of a report valid by schemas/agent-health.schema.json and FAC-SEM-181, otherwise {state: unknown, reason: no-answer | schema | FAC-SEM-181} (HL-5). episodes: episodeKey(product, checkId, at), the key <product>:<check id>@<YYYY-MM-DD> with the UTC day of the reading that opened the episode, at in Unix seconds (HL-6).",
  "contract": "db0d8f15",
  "worst": [
   {
@@ -288,5 +288,16 @@
    ],
    "expected": "observatory:leaked_keys@1970-01-01"
   }
+ ],
+ "areas": [
+  "lifecycle",
+  "sessions",
+  "accounts",
+  "crash",
+  "errors",
+  "update",
+  "environment",
+  "security",
+  "connection"
  ]
 }

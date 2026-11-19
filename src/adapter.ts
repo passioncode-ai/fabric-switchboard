@@ -26,6 +26,11 @@ export function onSpendChanged(callback: () => void) {
   if (!native) return;
   void import('@tauri-apps/api/event').then(({ listen }) => listen('spend-changed', () => callback())).catch(() => { /* read again with the minute's refresh */ });
 }
+/** SB-550: the owner wrote a new one-minute read of the other machines; the window reads it again. */
+export function onMachinesChanged(callback: () => void) {
+  if (!native) return;
+  void import('@tauri-apps/api/event').then(({ listen }) => listen('machines-changed', () => callback())).catch(() => { /* read again with the minute's refresh */ });
+}
 export const demo = !native && new URLSearchParams(location.search).get('demo') === '1';
 /** SB-192 (UX-27): `?demo=1&empty=1` shows a first run: the tour and the terms notice ignore what this browser stored. */
 export const demoFirstRun = demo && new URLSearchParams(location.search).get('empty') === '1';
@@ -46,6 +51,8 @@ export const nativeAdapter: Adapter = {
   sendAccount: (id, to, pool, delegate) => invoke('send_account', { id, to, pool, delegate: delegate ? true : null, leaseHours: delegate?.leaseHours ?? null }),
   recallAccount: (id, from, pool) => invoke('recall_account', { id, from, pool: pool ?? null }),
   machinesLive: () => invoke('machines', { live: true }),
+  targets: (probe) => invoke('targets', { probe: probe ?? false }),
+  remoteStatus: (target) => invoke('remote_status', { target }),
   machinesList: () => invoke('machines', { live: false }),
   // WF-3 (SB-365): an owner without the command yet, or a read that fails, is an empty list: the page never breaks on it.
   attention: () => readWithDeadline(invoke('attention')).then(attentionView, () => attentionView(null)),
@@ -91,7 +98,9 @@ export const nativeAdapter: Adapter = {
   capacity: (change) => invoke('capacity', { cap: change?.cap ?? null, clear: change?.clear ?? false, board: change?.board ?? null, boardDefault: change?.boardDefault ?? false }),
   duty: (change) => invoke('duty', { on: change?.on ?? null, run: change?.run ?? false }),
   ownSignIn: (on) => invoke('own_sign_in', { on: on ?? null }),
+  bootResume: (on) => invoke('boot_resume', { on: on ?? null }),
   balance: (change) => invoke('balance', { add: change?.add ?? [], remove: change?.remove ?? [], allNew: change?.all_new ?? null, backupAdd: change?.backup_add ?? [], backupRemove: change?.backup_remove ?? [] }),
+  feed: (change) => invoke('feed', { pool: change?.pool ?? null, on: change?.on ?? null, priority: change?.priority ?? null, ready: change?.ready ?? null, lookaheadMinutes: change?.lookahead_minutes ?? null }),
   repositoryMap: (under) => readWithDeadline(invoke('repository_map', { under }), 60_000),
   statistics: (days) => invoke('statistics', { days }),
   moveAccount: (id, pool) => invoke('move_account', { id, pool }),
@@ -194,6 +203,7 @@ const safeErrors = new Set([
   "A session host runs on macOS and Linux for now.",
   "Switchboard has no record of that session. Refresh the list, then retry.",
   "That session is still running in a process. Open its window, or close it there first.",
+  "The running sessions could not be read, so it is not known whether that session still runs. Try again in a moment.",
   "That session's folder is gone, so it cannot be continued there.",
   "That session's history is not on this computer any more, so it cannot be continued as the same session.",
   "Claude Code was not found on this computer.",
@@ -235,6 +245,14 @@ const safeErrors = new Set([
   'No group has that id. Run switchboard project list to see the groups, or name default.',
   'The default group cannot be a backup group: it holds every folder that is in no group.',
   'Balancing settings could not be saved. Check that the data folder is writable, then try again.',
+  // SB-419: the feed's own refusals.
+  'The default group feeds the others, so it cannot be fed itself.',
+  'That group is not fed from the default group. Turn its feed on first, then set its priority.',
+  'Give the priority as a whole number from 1 (highest) to 99.',
+  'Give the number of ready accounts as a whole number from 1 to 10.',
+  'Give the look-ahead in minutes, from 0 to 720.',
+  'Name the group whose feed changes.',
+  'A group whose feed is turned off has no priority. Turn the feed off without one.',
   'Group not found.',
   // Moving a sign-in to another machine (SB-283).
   "Name the other machine as ssh knows it: letters, digits, dots, hyphens, @ and : only.",
@@ -271,6 +289,8 @@ const safeErrors = new Set([
   "The other machine removed the seat's sign-in 30 days after its lease ran out. The sign-in kept here did not answer; sign in to this account again.",
   "Switchboard does not read or change your own Claude Code or Codex sign-in on this computer (own sign-in is off). Turn it on with switchboard own-sign-in on to use it here.",
   "The own sign-in setting could not be saved. Check Switchboard's data folder, then retry.",
+  // The watchdog's switch (SB-510).
+  "The watchdog setting could not be saved. Check Switchboard's data folder, then retry.",
   // Safe moves and call backs between machines (SB-312).
   "The ordinary Claude Code or Codex here is signed in to this account. Sign it in to another account first.",
   "This sign-in is also saved in another group here. Remove or move that copy first, so only one machine renews it.",
@@ -288,6 +308,8 @@ const safeErrors = new Set([
   "Give the duty officer's limits in range: stuck, waiting and idle minutes from 10 to 1440, maximum age hours from 1 to 72.",
   "The duty officer's settings (duty.json) could not be read. Set them again, or delete duty.json for the defaults.",
   "The duty officer's settings could not be saved.",
+  "The setting for continuing sessions after a restart (boot-resume.json) could not be read. Set it again, or delete the file for the default.",
+  "The setting for continuing sessions after a restart could not be saved.",
   "At capacity: this computer runs as many coding sessions as its limit allows. The start waits until one ends.",
   "Claude Code here is signed in to this account and no other Claude account here can take its place. Add one, then move this one.",
   "This account was not given back by a call back here, so its mark stays. Nothing changed.",
@@ -524,6 +546,9 @@ const safeErrors = new Set([
   "Switchboard's account store is in use by another Switchboard (a second window, 'switchboard serve' or a command still running). Close it, then retry.",
   "Switchboard is renewing this account's sign-in. Retry in a moment.",
   'Usage checks are rate limited by the provider. Switchboard waits before the next one.',
+  'Usage checks of this provider are paced to keep its usage endpoint answering. Try again in a minute.',
+  'Choose smart, timer or on_demand.',
+  "The usage check mode could not be saved. Check Switchboard's data folder, then retry.",
   'This backup was made with another key and cannot be opened on this machine.',
   'Choose a backup from the backup folder.',
   'Backup not found. Refresh the list and choose another.',

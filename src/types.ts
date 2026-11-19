@@ -56,17 +56,29 @@ export interface Snapshot { accounts: Account[]; routes: Record<string, string>;
 export interface Machine { pool: string; name: string; identity?: string | null; aliases?: string[]; created_at: number }
 /** SB-355: an account's copy on its machine, as a live read found it. */
 export interface MachineCopy { pool: string | null; enabled: boolean | null; used_percent: number | null; usage_status: string | null }
+/** SB-473: a machine this computer knows, as `switchboard targets` lists it (moves and runs). */
+export interface Target { machine: string; aliases?: string[]; known_by?: string[]; last_at?: number | null; program?: string | null; probe?: { answered: boolean; online?: boolean; owner_version?: string | null } }
+/** SB-474: one group on another machine, as `switchboard remote status` reads it. */
+export interface RemoteGroup { pool: string; name: string | null; organization: string | null; accounts: number; folders: number }
+/** SB-474: another machine's groups, read over ssh. */
+export interface RemoteStatus { target: string; groups: RemoteGroup[] }
 /** SB-366 (DEC-0017): the last background read of one account's copy on its machine. */
-export interface RemoteRead { used_percent: number | null; usage_status: string | null; enabled: boolean | null; as_of: number | null; tried_at: number; reason: string | null }
+export interface RemoteRead { used_percent: number | null; /** SB-550: when that machine observed it by its own check. */ observed_at?: number | null; /** Review of PR #861: whether its copy was in that machine's last answer. */ listed?: boolean; usage_status: string | null; enabled: boolean | null; as_of: number | null; tried_at: number; reason: string | null }
+/** SB-550: a machine's sessions at its last read: rows per group, and the rows that need a person. */
+export interface MachineSessionsRead { counts: Record<string, number>; troubled: { why: string; session_id: string | null; launch_id: string | null; since: number | null }[]; degraded?: string[] }
+/** SB-550: the last background read of a machine (every minute), with its sessions and health. */
+export interface MachineRead { as_of: number | null; tried_at: number; reason: string | null; failures: number; /** Review of PR #861: when a read that worked first saw a failing check there, or sessions there that need a person; null otherwise. */ health_since?: number | null; sessions_since?: number | null; call?: string | null; sessions?: MachineSessionsRead | null; health?: { state: string; failing: string[] } | null }
 /** SB-366: `machines` without `live`: each machine group with its last background read. */
-export interface MachinesList { machines: { pool: string; name: string; read?: { as_of: number | null; tried_at: number; reason: string | null; failures: number } | null; accounts: { id: string; there?: RemoteRead | null }[] }[] }
+export interface MachinesList { machines: { pool: string; name: string; read?: MachineRead | null; accounts: { id: string; there?: RemoteRead | null }[] }[] }
 /** SB-355: `machines --live`: each machine group, read over ssh. */
 export interface MachinesLive { machines: { pool: string; name: string; accounts: { id: string; there?: MachineCopy | null }[]; live?: { reachable: boolean; error?: string } }[] }
 /** WF-3 (SB-365, DEC-0015): why an account (or a ceiling) needs a person; the Tauri command `attention`, the same list as MCP `switchboard_attention`. */
-export type AttentionReason = 'session_duplicate' | 'session_stuck' | 'session_gone' | 'dispatch_refused' | 'sign_in' | 'seat_ended' | 'renewal_refused' | 'usage_failing' | 'move_unknown' | 'refused_there' | 'key_outside_tokens' | 'ceiling_question';
+export type AttentionReason = 'watchdog' | 'keychain_too_large' | 'token_rotated' | 'session_duplicate' | 'session_stuck' | 'session_gone' | 'session_continuable' | 'dispatch_refused' | 'sign_in' | 'seat_ended' | 'renewal_refused' | 'usage_failing' | 'move_unknown' | 'refused_there' | 'machine_unreachable' | 'machine_health' | 'machine_sessions' | 'key_outside_tokens' | 'ceiling_question';
 /** WF-3: the window flow that fixes an item; `tool` is the MCP tool that does the same. */
-export type AttentionWindow = 'sign_in' | 'answer_ceiling' | 'check_usage' | 'open_machines' | 'open_sessions' | 'close_copy' | 'dispatch_stop' | 'open_capacity' | 'move_tokens';
-export interface AttentionItem { account_id: string | null; label: string | null; provider: Provider | null; pool: string | null; reason: AttentionReason; detail: string; since: number | null; action: { tool: string; window: AttentionWindow; /** SB-407: a gone board run's act only records its end. */ if_gone?: boolean }; /** SB-388: a duplicate's session id, for *Close the quiet copy*. */ session_id?: string | null; /** SB-407: a stuck or gone board run's launch id, for *Stop the run*. */ launch_id?: string | null; /** SB-412: the dispatches refused at the session limit in the last hour, and whether a session ended since. */ count?: number; freed?: boolean; /** SB-389: the copy offered: a quiet one, or the older one when every copy works; null when every copy is answering. */ close?: { pid: number; why: 'quiet' | 'older'; command_age: number | null } | null }
+export type AttentionWindow = 'sign_in' | 'answer_ceiling' | 'check_usage' | 'open_machines' | 'open_sessions' | 'close_copy' | 'dispatch_stop' | 'continue_session' | 'restart_wave' | 'open_capacity' | 'move_tokens' | 'none';
+export interface AttentionItem { account_id: string | null; label: string | null; provider: Provider | null; pool: string | null; reason: AttentionReason; detail: string; since: number | null; action: { tool: string; window: AttentionWindow; /** SB-407: a gone board run's act only records its end. */ if_gone?: boolean }; /** SB-388: a duplicate's session id, for *Close the quiet copy*. */ session_id?: string | null; /** SB-407: a stuck or gone board run's launch id, for *Stop the run*. */ launch_id?: string | null; /** SB-412: the dispatches refused at the session limit in the last hour, and whether a session ended since. */ count?: number; freed?: boolean; /** SB-389: the copy offered: a quiet one, or the older one when every copy works; null when every copy is answering. */ close?: { pid: number; why: 'quiet' | 'older'; command_age: number | null } | null; /** SB-510: what the watchdog found, by its code. */ code?: WatchdogCode }
+/** SB-510: the watchdog's finding codes the window knows. */
+export type WatchdogCode = 'owner_down' | 'owner_not_answering' | 'owner_stopped' | 'act_unfinished' | 'board_run_gone' | 'duplicate_session';
 export interface Attention { count: number; items: AttentionItem[] }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
@@ -89,6 +101,8 @@ export interface Adapter {
   /** SB-283: moves a sign-in to another machine over ssh; `pool` is its group there. SB-403: `delegate` delegates it to a teammate's machine with a lease of `leaseHours` (48 by default). */ sendAccount(id: string, to: string, pool: string, delegate?: { leaseHours?: number } | null): Promise<void>;
   /** SB-315: takes a moved sign-in back from `from`, the machine the move named (null: its machine group's); SB-355: into group `pool` here (null: the one it left). */ recallAccount(id: string, from: string | null, pool?: string | null): Promise<Placement | void>;
   /** SB-355: the machine groups read over ssh, each with its accounts' copies there. */ machinesLive(): Promise<MachinesLive>;
+  /** SB-473: the machines this computer knows (`switchboard targets`). */ targets(probe?: boolean): Promise<{ targets: Target[] }>;
+  /** SB-474: another machine's groups, read over ssh (`switchboard remote status`). */ remoteStatus(target: string): Promise<RemoteStatus>;
   /** SB-366: the machine groups with their last background read, from a file (no ssh). */ machinesList(): Promise<MachinesList>;
   /** WF-3 (SB-365): what needs a person now; an empty list when nothing does (or the command is missing). */ attention(): Promise<Attention>;
   /** SB-318: hands an account over: a save picker for the signed record, then the account is used by `to`; `saved` null when the picker was closed. */ handOverAccount(id: string, to: string, name: string): Promise<HandOverResult>;
@@ -147,6 +161,8 @@ export interface Adapter {
   codexRoute(enabled?: boolean | null): Promise<CodexRoute>;
   /** SB-352: the groups that take part in balancing; with no change, the state. */
   balance(change?: BalanceChange | null): Promise<BalanceStatus>;
+  /** SB-419 (DEC-0028): groups fed from the default group; with no change, the state. */
+  feed(change?: FeedChange | null): Promise<FeedStatus>;
   /** SB-379: live sessions with their launches, the day's launches, counts and the watch's findings. */
   sessionTree(): Promise<SessionTree>;
   /** SB-395: the Sessions page: this computer's sessions in four groups, and every other machine's. */
@@ -175,6 +191,8 @@ export interface Adapter {
   duty(change?: { on?: boolean; run?: boolean } | null): Promise<DutyStatus>;
   /** SB-403 S3: whether Switchboard reads or changes the person's own Claude Code and Codex sign-in here; `on` changes it. */
   ownSignIn(on?: boolean | null): Promise<OwnSignIn>;
+  /** SB-450 (DEC-0030): whether the sessions a restart of this computer cut are continued; `on` changes it. */
+  bootResume(on?: boolean | null): Promise<BootResumeStatus>;
   repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;
   /** SB-145: what the proxy relayed in the last `days` days. */
   statistics(days: number): Promise<import('./ui-logic').Statistics>;
@@ -331,6 +349,8 @@ export interface OpenrouterModel { id: string; name?: string | null; context?: n
 export interface OpenrouterModels { recommended: RecommendedModel[]; models: OpenrouterModel[]; available: boolean }
 /** SB-143: whether Codex sessions in project folders use the projects' Codex accounts. */
 /** SB-352: a change of the groups that take part in balancing (pool ids, `default` included). */
+/** SB-419: a group's feed on or off with its priority, or the targets for every fed group. */
+export interface FeedChange { pool?: string; on?: boolean; priority?: number; ready?: number; lookahead_minutes?: number }
 export interface BalanceChange { add?: string[]; remove?: string[]; all_new?: boolean | null; backup_add?: string[]; backup_remove?: string[] }
 /** SB-379: one task a launch serves. */
 export interface SessionTask { workflow: string | null; request: string | null; project: string | null }
@@ -356,9 +376,13 @@ export interface SessionsEverywhere { here: SessionRows; machines: MachineSessio
 /** SB-378: `switchboard capacity`, this computer's cap on working coding sessions. */
 /** SB-403 S3 (DEC-0025): the person's own sign-in, read and changed by Switchboard or off limits. */
 export interface OwnSignIn { own_sign_in: 'on' | 'off'; on: boolean }
+/** SB-450 (DEC-0030): one outcome of continuing a session a restart cut. */
+export interface BootResumeLine { at: number; boot: number; /** Absent on `too_late`, which names no session. */ session?: string; folder?: string; outcome: 'continued' | 'failed' | 'interrupted' | 'at_capacity' | 'over_limit' | 'too_late' | string; new_launch_id?: string; reason?: string }
+/** SB-450 (DEC-0030): continuing the sessions a restart of this computer cut. */
+export interface BootResumeStatus { settings: { on: boolean }; boot_time: number | null; window_minutes: number; max_per_boot: number; recent: BootResumeLine[]; supported: boolean }
 /** SB-384 (DEC-0021): the session duty officer. */
 export interface DutySettings { on: boolean; stuck_minutes: number; waiting_minutes: number; idle_minutes: number; max_age_hours: number }
-export interface DutyLine { at?: number; /** SB-407: `dispatch_stop`, a board run stopped at its deadline (`by: duty`) or by a person. */ action: 'restart' | 'close' | 'dispatch_stop'; reason: string; outcome?: string; session?: string; folder: string; pid?: number; host?: string; by?: string; launch_id?: string }
+export interface DutyLine { at?: number; /** SB-407: `dispatch_stop`, a board run stopped at its deadline (`by: duty`) or by a person. */ action: 'restart' | 'close' | 'dispatch_stop' | 'dispatch_extend'; reason: string; outcome?: string; session?: string; folder: string; pid?: number; host?: string; by?: string; launch_id?: string; /** SB-509: a board run's deadline moved while its log grew. */ extended_until?: number }
 /** SB-392 K-1: one key an agent can start on, by name; never a value. */
 export interface LaunchKey { kind: 'openrouter' | 'anthropic' | 'group'; scope?: 'machine' | 'group'; pool?: string | null; name: string; model: string | null; usable: boolean; default: boolean; why_not: string | null; /** SB-404: whether a ceiling counts this key. */ metered?: boolean; /** SB-404 K3, kind group: the pay-per-token group's name, the key's account and whether it is the group's selected key. */ group?: string; account_id?: string; selected?: boolean }
 /** SB-404: where a key from Observatory was saved here. */
@@ -378,6 +402,17 @@ export interface BalanceLoan { account_id: string; label: string | null; provide
 export interface BalanceEntry { at: number; account: string; provider: Provider; from: string; to: string; action: 'lend' | 'return'; reason: string; outcome: string }
 /** SB-352: `balance status`, as `switchboard balance status --json` answers it. */
 export interface BalanceStatus { on: boolean; groups: { pool: string; name: string }[]; available: { pool: string; name: string; chosen: boolean; backup?: boolean }[]; all_new: boolean; pass_minutes: number; lent: BalanceLoan[]; recent: BalanceEntry[]; changed?: boolean; /** WF-6, DEC-0016. */ backup?: { pool: string; name: string; accounts: number; lent: number }[] }
+/** SB-419: one feed move in `balancing.jsonl`, with its figures; ids and numbers only. */
+export interface FeedEntry extends BalanceEntry { feed: { priority: number; ready: number; want: number; used_percent?: number; resets_in?: number } }
+/** SB-419 (DEC-0028): `feed status`, as `switchboard feed status --json` answers it. */
+export interface FeedStatus {
+  on: boolean; ready: number; lookahead_minutes: number; pass_minutes: number;
+  fed: { pool: string; name: string; priority: number; off: boolean; providers: { provider: Provider; ready: number; accounts: number }[] }[];
+  available: { pool: string; name: string; fed: boolean; priority: number | null }[];
+  reservoir: { provider: Provider; accounts: number; placed: number; ready: number; parked: number }[];
+  moved: (BalanceLoan & { kind: 'placed' | 'parked' })[];
+  recent: FeedEntry[]; changed?: boolean;
+}
 export interface CodexRoute { on: boolean; applied: boolean; config: string | null; conflict: string | null; projects: string[] }
 /** SB-144: saved OpenRouter keys by project (`pool: null` is the machine's key). */
 export interface OpenrouterKeys { service: 'openrouter'; keys: { pool: string | null; project: string | null; saved_at: number; model: string | null }[]; projects: { pool: string; name: string; own: boolean }[] }

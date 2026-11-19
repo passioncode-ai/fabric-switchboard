@@ -20,15 +20,20 @@ def main() -> int:
     run = lambda *args: subprocess.run(["git", "-C", str(checkout), *args], check=True, capture_output=True, text=True).stdout
     short = run("rev-parse", "--short=8", commit).strip()
     vectors = json.loads(run("show", f"{commit}:fixtures/vectors/agent-health.json"))
+    # SB-550 (review round 3 of PR #861): the closed list of check areas (HL-3), so a test can hold
+    # every area our report emits to the contract's schema.
+    schema = json.loads(run("show", f"{commit}:schemas/agent-health.schema.json"))
+    areas = schema["$defs"]["check"]["properties"]["area"]["enum"]
     out = {
-        "about": f"Copied from fabric-agent-contract fixtures/vectors/agent-health.json at {short} (DEC-0179); never edited here. Refresh with scripts/sync_health_vectors.py. Their own note: {vectors['about']}",
+        "about": f"Copied from fabric-agent-contract fixtures/vectors/agent-health.json at {short} (DEC-0179), with areas: the check area enum of schemas/agent-health.schema.json at the same commit; never edited here. Refresh with scripts/sync_health_vectors.py. Their own note: {vectors['about']}",
         "contract": short,
         "worst": vectors["worst"],
         "read": vectors["read"],
         "episodes": vectors["episodes"],
+        "areas": areas,
     }
     TARGET.write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    print(f"{TARGET.relative_to(ROOT)}: {short}, worst {len(out['worst'])}, read {len(out['read'])}, episodes {len(out['episodes'])}")
+    print(f"{TARGET.relative_to(ROOT)}: {short}, worst {len(out['worst'])}, read {len(out['read'])}, episodes {len(out['episodes'])}, areas {len(out['areas'])}")
     return 0
 
 

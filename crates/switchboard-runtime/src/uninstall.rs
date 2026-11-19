@@ -22,6 +22,9 @@ const OWNED: &[&str] = &[
     "proxy.json",
     "renewal-state.json",
     "usage-holds.json",
+    // The provider-wide holds after a 429 and the person's usage check mode (SB-518).
+    "usage-provider-holds.json",
+    "usage-mode",
     "limit-evidence.json",
     "recovery.json",
     // Events pruned from recovery.json lately, ids only (N1 round 1).
@@ -44,6 +47,11 @@ const OWNED: &[&str] = &[
     "capacity.json",
     // The one-minute watch of live sessions (SB-379).
     "session-watch.json",
+    // Every live Claude Code session seen in the last week, for a continuation (SB-508).
+    "live-sessions.json",
+    // The watchdog's switch and its last report (SB-510); its system job is removed below.
+    "watchdog",
+    "watchdog.json",
     // The session duty officer's settings, journal and resume scripts (SB-384).
     "duty.json",
     "duty.jsonl",
@@ -131,6 +139,8 @@ pub struct Places {
     pub remove_orphan_key: fn() -> Result<(), String>,
     /// Removes the desktop app's login item (SB-28); absent is success.
     pub remove_login_item: fn() -> Result<(), String>,
+    /// Removes the watchdog's system job (SB-510); absent is success.
+    pub remove_watchdog: fn() -> Result<(), String>,
     /// The person's home for the terminal hook's start-file blocks (SB-183); None: not looked at.
     pub shell: Option<crate::shell::install::Host>,
 }
@@ -153,6 +163,12 @@ fn places_for(root: &Path, default: Option<&Path>) -> Places {
         bin: dirs::home_dir().map(|h| h.join(".local/bin")),
         remove_orphan_key,
         remove_login_item,
+        // SB-510: the job the app's own data folder installed; another folder's uninstall leaves it.
+        remove_watchdog: if crate::shell::install::same_root(root, default) {
+            remove_watchdog
+        } else {
+            keep_watchdog
+        },
         shell: crate::shell::install::same_root(root, default)
             .then(|| crate::shell::install::Host::process(None))
             .flatten(),
@@ -204,6 +220,15 @@ fn remove_login_item() -> Result<(), String> {
 }
 #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 fn remove_login_item() -> Result<(), String> {
+    Ok(())
+}
+/// SB-510: the watchdog's LaunchAgent or systemd user units, unloaded and removed.
+fn remove_watchdog() -> Result<(), String> {
+    crate::watchdog_job::Host::process(None)
+        .map_or(Ok("absent"), |host| crate::watchdog_job::remove(&host))
+        .map(|_| ())
+}
+fn keep_watchdog() -> Result<(), String> {
     Ok(())
 }
 #[cfg(target_os = "macos")]
@@ -275,6 +300,14 @@ pub fn uninstall_with(
         "accounts": accounts.len(),
         "cli_link": link,
         "orphan_keychain_item": cfg!(target_os = "macos").then_some(ORPHAN_KEY.0),
+        // SB-510: the watchdog's system job, on macOS and Linux.
+        "watchdog_job": if cfg!(target_os = "macos") {
+            Some(crate::watchdog_job::MACOS_PLIST)
+        } else if cfg!(target_os = "linux") {
+            Some(crate::watchdog_job::LINUX_UNIT)
+        } else {
+            None
+        },
         "login_item": if cfg!(windows) {
             LOGIN_ITEM_WINDOWS
         } else if cfg!(target_os = "linux") {
@@ -348,6 +381,9 @@ pub fn uninstall_with(
     }
     if let Err(error) = (places.remove_login_item)() {
         failures.push(json!({"item": "login_item", "error": error}));
+    }
+    if let Err(error) = (places.remove_watchdog)() {
+        failures.push(json!({"item": "watchdog_job", "error": error}));
     }
     if let Some(link) = &link {
         if std::fs::remove_file(link).is_err() {
@@ -466,6 +502,7 @@ mod tests {
             bin: Some(temp.path().join("bin")),
             remove_orphan_key: removed_ok,
             remove_login_item: removed_ok,
+            remove_watchdog: removed_ok,
             shell: None,
         };
         let plan = uninstall(&root, vault.clone(), false, false, &places).unwrap();
@@ -540,6 +577,7 @@ mod tests {
             bin: Some(bin.clone()),
             remove_orphan_key: removed_ok,
             remove_login_item: removed_ok,
+            remove_watchdog: removed_ok,
             shell: Some(host),
         };
         let plan = uninstall(&root, vault.clone(), false, false, &places).unwrap();
@@ -595,6 +633,7 @@ mod tests {
             bin: Some(bin.clone()),
             remove_orphan_key: removed_ok,
             remove_login_item: removed_ok,
+            remove_watchdog: removed_ok,
             shell: None,
         };
         let done = uninstall(&root, vault, true, true, &places).unwrap();
@@ -604,6 +643,42 @@ mod tests {
             std::fs::symlink_metadata(bin.join("switchboard")).is_ok(),
             "a link to another program stays"
         );
+    }
+
+    #[test]
+    fn the_watchdogs_job_and_files_go_and_a_failure_is_reported_not_fatal() {
+        // SB-510: its switch, report and the live-session ledger are Switchboard's own files; its
+        // system job is removed through `remove_watchdog` (a temporary home's in its own tests).
+        fn refused() -> Result<(), String> {
+            Err("Could not remove the watchdog's job.".into())
+        }
+        let (_temp, root, vault) = setup();
+        for name in ["watchdog", "watchdog.json", "live-sessions.json"] {
+            std::fs::write(root.join(name), "{}").unwrap();
+        }
+        let places = Places {
+            bin: None,
+            remove_orphan_key: removed_ok,
+            remove_login_item: removed_ok,
+            remove_watchdog: refused,
+            shell: None,
+        };
+        let plan = uninstall(&root, vault.clone(), false, false, &places).unwrap();
+        for name in ["watchdog", "watchdog.json", "live-sessions.json"] {
+            assert!(
+                plan["data_entries"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!(name)),
+                "{name}"
+            );
+        }
+        let done = uninstall(&root, vault, false, true, &places).unwrap();
+        assert_eq!(
+            done["failures"],
+            json!([{"item": "watchdog_job", "error": "Could not remove the watchdog's job."}])
+        );
+        assert!(!root.join("watchdog.json").exists());
     }
 
     #[test]
@@ -629,6 +704,7 @@ mod tests {
                 bin: None,
                 remove_orphan_key: removed_ok,
                 remove_login_item: counted,
+                remove_watchdog: removed_ok,
                 shell: None,
             },
         )
@@ -653,6 +729,7 @@ mod tests {
                 bin: None,
                 remove_orphan_key: removed_ok,
                 remove_login_item: refused,
+                remove_watchdog: removed_ok,
                 shell: None,
             },
         )
@@ -671,6 +748,7 @@ mod tests {
             bin: None,
             remove_orphan_key: removed_ok,
             remove_login_item: removed_ok,
+            remove_watchdog: removed_ok,
             shell: None,
         };
         assert!(
@@ -730,6 +808,7 @@ mod tests {
             bin: None,
             remove_orphan_key: removed_ok,
             remove_login_item: removed_ok,
+            remove_watchdog: removed_ok,
             shell: None,
         }
     }

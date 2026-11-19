@@ -420,10 +420,84 @@ pub async fn request(root: &Path, operation: &Operation) -> Result<Option<Value>
         answer => answer,
     }
 }
+/// The answer when the owner did not answer within `limit_secs`: the owner may still do the act
+/// after the caller gave up. The CLI tells it apart by its code `control-timeout` and exit status
+/// 4 (Fabric board finding, thread 36572ae0), so a caller never matches this text.
+pub const CONTROL_TIMED_OUT: &str =
+    "Control request timed out. Check state before retrying a mutation.";
+/// Whether `error` is `CONTROL_TIMED_OUT`.
+pub fn is_timeout(error: &str) -> bool {
+    error == CONTROL_TIMED_OUT
+}
+/// SB-510: what the watchdog finds at the owner's control port.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Probe {
+    /// No `control.json`: no owner published one.
+    NoDescriptor,
+    /// A `control.json` that cannot be read, or one no owner of this version writes.
+    Unreadable,
+    /// The process that wrote `control.json` is gone.
+    OwnerGone,
+    /// Nothing listens on its port.
+    Refused,
+    /// Its process runs and its port took the connection, but it did not prove itself in time.
+    NoAnswer,
+    /// It proved it holds the descriptor's token; its version when it named one.
+    Answers { version: Option<String> },
+}
+/// How long the watchdog waits for the owner, connection and identity together (SB-510).
+pub const PROBE_SECONDS: u64 = 5;
+/// SB-510: asks the owner to prove itself (the identity exchange only, no operation) within
+/// `limit`. Never a mutation, never an offline fallback.
+pub async fn probe(root: &Path, limit: Duration) -> Probe {
+    let path = root.join(FILE);
+    match std::fs::symlink_metadata(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Probe::NoDescriptor,
+        Err(_) => return Probe::Unreadable,
+        Ok(_) => {}
+    }
+    let Some(descriptor) = private_fs::read_private_strict(&path, 4096)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Descriptor>(&bytes).ok())
+        .filter(|d| {
+            d.protocol == 1
+                && d.address.ip() == IpAddr::V4(Ipv4Addr::LOCALHOST)
+                && d.address.port() != 0
+                && d.token.len() == 64
+                && d.token.bytes().all(|b| b.is_ascii_hexdigit())
+        })
+    else {
+        return Probe::Unreadable;
+    };
+    if !owner_alive(descriptor.pid) {
+        return Probe::OwnerGone;
+    }
+    let exchange = async {
+        let stream = match tokio::net::TcpStream::connect(descriptor.address).await {
+            Ok(stream) => stream,
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+                return Probe::Refused;
+            }
+            Err(_) => return Probe::NoAnswer,
+        };
+        match proved(stream, &descriptor).await {
+            Ok((_, _, version)) => Probe::Answers { version },
+            Err(_) => Probe::NoAnswer,
+        }
+    };
+    tokio::time::timeout(limit, exchange)
+        .await
+        .unwrap_or(Probe::NoAnswer)
+}
 /// How long the client waits for the owner's answer to `operation`, in seconds.
-fn limit_secs(operation: &Operation) -> u64 {
+pub(crate) fn limit_secs(operation: &Operation) -> u64 {
     let inner = match operation {
         Operation::OnOperatorsWord { inner, .. } => inner.as_ref(),
+        other => other,
+    };
+    // SB-440: a launch from the command line arrives wrapped with who asked for it.
+    let inner = match inner {
+        Operation::Launched { inner, .. } => inner.as_ref(),
         other => other,
     };
     match inner {
@@ -461,6 +535,12 @@ fn limit_secs(operation: &Operation) -> u64 {
         | Operation::MoveRoot { .. }
         | Operation::MoveAccount { .. }
         | Operation::RepositoryMap { .. } => 180,
+        // SB-440: a launch reads the sign-ins to carry (Keychain, 5 s a call), may check a paid
+        // key's spending (up to 20 s) and renews an isolated account's sign-in; a continuation also
+        // reads and offers its workflow through Observatory. On a busy machine a 30 s client gave
+        // up on a launch the owner went on to prepare (2026-11-18). `launch::UNCLAIMED_TTL` must
+        // stay longer than this wait.
+        Operation::Launch { .. } | Operation::Continue { .. } => 120,
         _ => 30,
     }
 }
@@ -505,7 +585,7 @@ async fn request_once(root: &Path, operation: &Operation) -> Result<Option<Value
     .await
     {
         Ok(result) => result.map(Some),
-        Err(_) => Err("Control request timed out. Check state before retrying a mutation.".into()),
+        Err(_) => Err(CONTROL_TIMED_OUT.into()),
     }
 }
 
@@ -532,17 +612,19 @@ async fn read_response(
     }
     Ok(bytes)
 }
-async fn request_on_connection(
+type Sender = hyper::client::conn::http1::SendRequest<Full<Bytes>>;
+/// The owner proved on `stream`: the connection's sender, the task driving it (kept alive while
+/// it is used) and the owner's version. Nothing but the identity exchange is sent.
+async fn proved(
     stream: tokio::net::TcpStream,
-    descriptor: Descriptor,
-    operation: &Operation,
-) -> Result<Value, String> {
+    descriptor: &Descriptor,
+) -> Result<(Sender, ConnectionTask, Option<String>), String> {
     // One raw HTTP/1 connection, never a pooling client: a proved listener cannot
     // be swapped for a rebound port by an implicit reconnect before the mutation.
     let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
         .await
         .map_err(|_| "Control handshake failed. No operation was attempted.")?;
-    let _connection = ConnectionTask(tokio::spawn(async move {
+    let connection = ConnectionTask(tokio::spawn(async move {
         let _ = connection.await;
     }));
     let nonce = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
@@ -590,6 +672,14 @@ async fn request_on_connection(
     ) {
         return Err("Control authentication refused. No offline operation was attempted.".into());
     }
+    Ok((sender, connection, owner_version))
+}
+async fn request_on_connection(
+    stream: tokio::net::TcpStream,
+    descriptor: Descriptor,
+    operation: &Operation,
+) -> Result<Value, String> {
+    let (mut sender, _connection, owner_version) = proved(stream, &descriptor).await?;
     let bytes =
         serde_json::to_vec(operation).map_err(|_| "Control request serialization failed.")?;
     if bytes.len() > REQUEST_LIMIT {
@@ -654,6 +744,33 @@ mod tests {
         assert_eq!(limit_secs(&edit), 180);
         assert_eq!(limit_secs(&Operation::Snapshot), 30);
         assert_eq!(limit_secs(&Operation::VestaConnect), 420);
+        // SB-440: a launch, bare or with who asked for it, waits for a busy owner to prepare it.
+        let launch = Operation::Launch {
+            id: "a".into(),
+            mode: "managed".into(),
+            working_directory: "/tmp".into(),
+            in_place: true,
+            args: vec![],
+        };
+        assert_eq!(limit_secs(&launch), 120);
+        let by = crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli);
+        let wrapped = crate::launched(launch, by.clone());
+        assert_eq!(limit_secs(&wrapped), 120);
+        let resume = Operation::Continue {
+            workflow_id: "wf_0123456789abcdef".into(),
+            id: "a".into(),
+            mode: "isolated".into(),
+            working_directory: "/tmp".into(),
+            in_place: true,
+            queued: false,
+        };
+        assert_eq!(limit_secs(&crate::launched(resume, by)), 120);
+        // SB-440 review round 1: a script handed to a caller outlives the caller's longest wait
+        // for the answer that hands it over, with a margin.
+        assert!(
+            crate::launch::UNCLAIMED_TTL
+                > std::time::Duration::from_secs(limit_secs(&wrapped) + 60)
+        );
     }
     #[test]
     fn an_operation_kind_is_its_tag_and_never_its_arguments() {
@@ -675,10 +792,38 @@ mod tests {
                 mode: "managed".into(),
                 working_directory: "/work".into(),
                 in_place: true,
+                queued: false,
             },
             crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli),
         );
         assert_eq!(operation_kind(&wrapped), "continue");
+    }
+    /// SB-449: `queued` is the owner's own: it never travels, and a request that names it is
+    /// refused, so a caller cannot ask for the console queue's longer hold.
+    #[test]
+    fn a_continues_queued_flag_never_crosses_the_wire() {
+        let sent = serde_json::to_value(Operation::Continue {
+            workflow_id: "wf_0123456789abcdef".into(),
+            id: "acct".into(),
+            mode: "isolated".into(),
+            working_directory: "/work".into(),
+            in_place: true,
+            queued: true,
+        })
+        .unwrap();
+        assert!(sent.get("queued").is_none(), "{sent}");
+        let read: Operation = serde_json::from_value(sent.clone()).unwrap();
+        assert!(matches!(
+            read,
+            Operation::Continue {
+                in_place: true,
+                queued: false,
+                ..
+            }
+        ));
+        let mut asked = sent;
+        asked["queued"] = json!(true);
+        assert!(serde_json::from_value::<Operation>(asked).is_err());
     }
     use super::*;
     use crate::Owner;
@@ -959,6 +1104,7 @@ mod tests {
                 launch_id: None,
                 limit: None,
                 before: None,
+                launch_ids: None,
             },
             Operation::MonitorStatus,
         ] {
@@ -986,6 +1132,7 @@ mod tests {
                 launch_id: None,
                 limit: None,
                 before: None,
+                launch_ids: None,
             })
             .await
             .unwrap();
@@ -2157,5 +2304,72 @@ mod tests {
         let other = tempfile::tempdir().unwrap();
         symlink(tmp.path().join(FILE), other.path().join(FILE)).unwrap();
         assert!(request(other.path(), &Operation::Snapshot).await.is_err());
+    }
+
+    /// SB-510: the watchdog's look at the owner names each state and never sends an operation.
+    #[tokio::test]
+    async fn the_watchdogs_probe_tells_an_answering_owner_from_a_gone_or_silent_one() {
+        // Windows refuses a closed port only after about two seconds of retries.
+        let limit = Duration::from_secs(8);
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(probe(empty.path(), limit).await, Probe::NoDescriptor);
+        let (tmp, _owner, desc) = fixture().await;
+        assert_eq!(
+            probe(tmp.path(), limit).await,
+            Probe::Answers {
+                version: Some(env!("CARGO_PKG_VERSION").to_owned())
+            }
+        );
+        // A descriptor whose port nobody listens on, written by this (live) process.
+        let closed = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut stale = Descriptor {
+            protocol: 1,
+            address: listener.local_addr().unwrap(),
+            token: desc.token.clone(),
+            pid: Some(std::process::id()),
+        };
+        drop(listener);
+        private_fs::private_write(
+            &closed.path().join(FILE),
+            &serde_json::to_vec(&stale).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(probe(closed.path(), limit).await, Probe::Refused);
+        // A port that takes the connection and never answers.
+        let silent = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        stale.address = silent.local_addr().unwrap();
+        let hung = tempfile::tempdir().unwrap();
+        private_fs::private_write(
+            &hung.path().join(FILE),
+            &serde_json::to_vec(&stale).unwrap(),
+        )
+        .unwrap();
+        let held = tokio::spawn(async move {
+            let kept = silent.accept().await;
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            drop(kept);
+        });
+        assert_eq!(
+            probe(hung.path(), Duration::from_millis(500)).await,
+            Probe::NoAnswer
+        );
+        held.abort();
+        // Not JSON, or not a loopback capability: unreadable, never an answer.
+        let broken = tempfile::tempdir().unwrap();
+        private_fs::private_write(&broken.path().join(FILE), b"{").unwrap();
+        assert_eq!(probe(broken.path(), limit).await, Probe::Unreadable);
+        #[cfg(unix)]
+        {
+            // A pid no process holds: the owner that wrote it is gone.
+            let gone = tempfile::tempdir().unwrap();
+            stale.pid = Some(i32::MAX as u32 - 7);
+            private_fs::private_write(
+                &gone.path().join(FILE),
+                &serde_json::to_vec(&stale).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(probe(gone.path(), limit).await, Probe::OwnerGone);
+        }
     }
 }

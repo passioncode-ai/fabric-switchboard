@@ -15,7 +15,8 @@
 //! `account_send::remote` writes), never given to a shell, and answered only when it is one of the
 //! calls a delegation needs: the machine's proof, the account, group and organization lists (each
 //! cut to the delegated seats and to names, no folder), saving a delegated seat, its usage check,
-//! its lease, its call back and its removal. Every call that names a seat must name the key the
+//! its lease, its call back and its removal, and (SB-550) the one-minute read `remote-status`, cut
+//! to the delegated seats and the sessions of that group as ids and codes, with no health. Every call that names a seat must name the key the
 //! forced command names, and acts only on seats that key delegated. Anything else is refused
 //! before the store is opened.
 use serde_json::{json, Value};
@@ -40,6 +41,8 @@ pub enum Request {
         nonce: String,
     },
     AccountsList,
+    /// SB-550: the one-minute read of the seats and that group's sessions.
+    RemoteStatus,
     ProjectList,
     OrgList,
     OrgAssign {
@@ -197,6 +200,7 @@ pub fn parse(
             nonce: (*nonce).to_owned(),
         },
         ["accounts", "list"] => Request::AccountsList,
+        ["remote-status"] => Request::RemoteStatus,
         ["project", "list"] => Request::ProjectList,
         ["org", "list"] => Request::OrgList,
         ["org", "assign", id, contexts @ ..] if !contexts.is_empty() && contexts.len() <= 16 => {
@@ -454,6 +458,11 @@ mod tests {
             ok(&["--json", "project", "list"]).unwrap(),
             Request::ProjectList
         );
+        // SB-550: the one-minute read.
+        assert_eq!(
+            ok(&["--json", "remote-status"]).unwrap(),
+            Request::RemoteStatus
+        );
         assert_eq!(ok(&["--json", "org", "list"]).unwrap(), Request::OrgList);
         assert!(matches!(
             ok(&["--json", "machines", "prove", "--nonce", "ab"]).unwrap(),
@@ -550,6 +559,8 @@ mod tests {
             vec!["--json", "ssh-serve", "--sender-key", KEY],
             vec!["accounts", "list"],
             vec!["--json", "accounts", "list", "--extra"],
+            vec!["--json", "remote-status", "--all"],
+            vec!["remote-status"],
             vec!["--json", "usage", "../../etc/passwd"],
         ] {
             assert_eq!(ok(&refused).unwrap_err(), NOT_ALLOWED, "{refused:?}");
@@ -700,6 +711,39 @@ mod tests {
             &organizations,
             &allowed
         ));
+    }
+
+    /// SB-550: the one-minute read through this entry carries only the caller's seats and the
+    /// sessions of the group its line names, as ids and codes: never a folder, another account or
+    /// another group's session.
+    #[test]
+    fn the_one_minute_read_shows_only_the_seats_and_the_groups_sessions() {
+        use switchboard_runtime::remote_usage::{accounts_answer, sessions_digest};
+        let snapshot = json!({
+            "accounts": [
+                {"id": "a", "label": "mine", "provider": "claude", "pool": "p", "enabled": true,
+                 "usage": {"used_percent": 99.0}},
+                {"id": "b", "label": "seat", "provider": "claude", "pool": "org", "enabled": true,
+                 "usage": {"used_percent": 12.0, "observed_at": 5}, "usage_health": {"status": "ok"}}
+            ],
+            "delegated": {"b": {"sender_key": KEY, "pool": "org", "granted_at": 1, "lease_until": 9}}
+        });
+        let accounts = accounts_answer(&accounts_view(&snapshot, KEY, "org")["accounts"]);
+        assert_eq!(accounts.as_array().unwrap().len(), 1);
+        assert_eq!(accounts[0]["label"], "seat");
+        assert_eq!(accounts[0]["usage"]["used_percent"], 12.0);
+        let rows = json!({"rows": [
+            {"id": "pid:1", "group": "running", "why": "working", "pool": "org",
+             "folder": "/Users/teammate/org-work", "account": "seat"},
+            {"id": "pid:2", "group": "needs_you", "why": "stuck", "pool": "own",
+             "folder": "/Users/teammate/private"},
+            {"id": "pid:3", "group": "running", "why": "working", "pool": null}
+        ]});
+        let sessions = sessions_digest(&rows, Some("org"));
+        assert_eq!(sessions["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(sessions["counts"]["needs_you"], 0);
+        let text = sessions.to_string();
+        assert!(!text.contains("/Users/") && !text.contains("seat") && !text.contains("own"));
     }
 
     /// Review P1-1: the documented key line survives sshd's `$SHELL -c`: the program's path with
