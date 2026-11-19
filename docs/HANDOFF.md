@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-19: SB-576 status names the owner, SB-577 groups with an account on other machines, on branch `sb-576-owner-status` ([#877](https://github.com/passioncode-ai/fabric-switchboard/pull/877))
+
+- **Asked.** Fabric Dashboards' board request `31261095` (thread `7f9d0a09`), items 2 and 5, promised in reply `5ec57522` by 2026-11-24: whether an owner answers on a data folder without starting one, and which groups on another machine hold an account so Dashboards refuses a launch before it starts.
+- **Built.** `crates/switchboard-runtime/src/owner_status.rs` (the `owner` block; files only when the owner does not answer), `serve_update::supervisor`, `control::descriptor_pid`, the owner's `Status` with `owner_pid`, `owner_supervisor`, `owner_started_at`; `remote_usage::{groups_answer, GroupRead, accounts_by_group, launch_check, check_for}`, `remote-status` with `groups`, `targets` with `accounts_by_group`, `remote_check` with the same from its own read, `launch --target --pool` refused with code `no_account_in_group`, MCP `switchboard_targets {machine, pool, provider}` as its twin.
+- **Decisions.** A known read is at most five minutes old (`GROUPS_FRESH_SECONDS`); a stale or missing read never refuses. A busy owner that proves itself reads `online: true`, so no caller starts a second owner beside it. `--pool` is checked here and not passed on: the session's group there stays its folder's. No decision record: both follow DEC-0033 and the existing owner rules.
+- **Checks.** See the PR: the Mac Studio gate (`sb-gate.sh`, EXIT line); `scripts/check_docs.py` and `scripts/check_plugin.py` passed locally (no build on this MacBook, its disk is full).
+- **Not done.** Items 1, 3 and 4 of the request (embeddable binary, ownership hand-over, attribution by config home) are answered on the thread for 2026-11-26.
+
+**Exact next task.** Merge #877 once its gate reads EXIT 0 on the merged head; after the release that carries it, reply on thread `7f9d0a09` with the shapes (`owner`, `accounts_by_group`, `launch_check`, code `no_account_in_group`) so Fabric Dashboards switches its pre-launch check to them.
+
 ## 2026-11-18: SB-450 sessions continued after a restart, SB-451 launch records name their process's session, on branch `boot-resume`
 
 - **Asked.** Fabric Dashboards' board request 737b04e6 (thread a9844103): after the Mac rebooted nothing continued the sessions (SB-450); launch 38e41114 recorded another session's id and a transcript that never existed (SB-451). The coordinator added SB-455 (no login `PATH` in launch scripts, a likely cause of SB-451); it landed separately in #838, and this branch's own one-line PATH change was dropped when main was merged (2026-11-19).
