@@ -371,7 +371,7 @@ export interface SessionsEverywhere { here: SessionRows; machines: MachineSessio
 /** SB-403 S3 (DEC-0025): the person's own sign-in, read and changed by Switchboard or off limits. */
 export interface OwnSignIn { own_sign_in: 'on' | 'off'; on: boolean }
 /** SB-450 (DEC-0030): one outcome of continuing a session a restart cut. */
-export interface BootResumeLine { at: number; boot: number; session: string; folder?: string; outcome: 'continued' | 'failed' | 'interrupted' | 'at_capacity' | 'over_limit' | string; new_launch_id?: string; reason?: string }
+export interface BootResumeLine { at: number; boot: number; /** Absent on `too_late`, which names no session. */ session?: string; folder?: string; outcome: 'continued' | 'failed' | 'interrupted' | 'at_capacity' | 'over_limit' | 'too_late' | string; new_launch_id?: string; reason?: string }
 /** SB-450 (DEC-0030): continuing the sessions a restart of this computer cut. */
 export interface BootResumeStatus { settings: { on: boolean }; boot_time: number | null; window_minutes: number; max_per_boot: number; recent: BootResumeLine[]; supported: boolean }
 /** SB-384 (DEC-0021): the session duty officer. */

@@ -894,9 +894,13 @@ when the operator asks. Kept in `<data>/own-sign-in`.
 Continuing sessions after this computer restarts (SB-450, DEC-0030). The owner's first pass after
 a restart continues each Claude Code session the restart cut, as itself (`claude --resume <id>`
 with a prompt to go on) in a session host of its own, attachable by its launch id: Switchboard
-launched it, it was running at the owner's last look before the restart, its transcript was last
-written in the two hours before the restart and not since, it has no end, and no process, session
-host or later launch holds it. At most five after one restart, newest first, inside the session
+launched it, it was running at the owner's last look before the restart, the restart cut it in a
+turn (its transcript written after its last turn ended, in the two hours before the restart and not
+since, its last words not the person's `/exit`), it has no end (or one by the shutdown's signal),
+nobody closed it on purpose (the person, the duty officer, a session host), it is not a dispatched
+board run, and no process, session host or later launch holds it; with the person's own sign-in
+off, only sessions in Switchboard's own homes; a first pass more than six hours after the restart
+continues nothing (`too_late`). At most five after one restart, newest first, inside the session
 pool; each intent and outcome is journalled in `<data>/boot-resume.jsonl` and never repeated.
 Without `on` it reads `{settings: {on}, boot_time, last_look, window_minutes, max_per_boot, recent,
 supported}`; `on` changes it, only when the operator asks. Kept in `<data>/boot-resume.json`, on

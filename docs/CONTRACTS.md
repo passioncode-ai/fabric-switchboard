@@ -3425,7 +3425,7 @@ WF-3.1). Code: [attention.rs](../crates/switchboard-runtime/src/attention.rs).
   | `session_duplicate` | the one-minute watch's `duplicate` finding (SB-388) | `switchboard_session_close_copy` | `close_copy` |
   | `session_stuck` | the watch's `stuck` finding: a board run quiet for 30 minutes, its log included (SB-379, SB-407); `launch_id` the run's | `switchboard_dispatch_stop` | `dispatch_stop` |
   | `session_gone` | the watch's `gone` finding of a dispatched run here: its process ended with no end recorded (SB-407); `launch_id` the run's; `action.if_gone: true` | `switchboard_dispatch_stop` with `if_gone` | `dispatch_stop` |
-  | `session_continuable` | the watch's `gone` finding of a launch that is not a dispatched run, whose Claude Code session (`session_id`, the record's `provider_session_id`) was cut in a turn: its folder is here, no live process holds it, its transcript was written more than `CUT_MARGIN_SECONDS` (30) after the record's `last_turn_at` (else its start) and its last lines are not the person's `/exit` or `/quit` (`session_watch::cut_turn`); a session closed on purpose in the last day (a `resumable.jsonl` line, a duty officer's act in `duty.jsonl`; `session_watch::closed_on_purpose`) is not offered, since a Terminal launch records no end of its own (`session_watch::offer`, SB-509; tests `only_a_turn_cut_by_the_process_ending_is_offered_never_a_session_ended_on_purpose`, `a_session_closed_on_purpose_is_not_offered`); offered once per session: `continue-offers.json` records it when first offered and takes it once the session runs again or is continued (`session_watch::continued`), so it is never offered again; `action.command` `switchboard sessions continue <session>` | `switchboard_session_continue` | `continue_session` |
+  | `session_continuable` | the watch's `gone` finding of a launch that is not a dispatched run, whose Claude Code session (`session_id`, the record's `provider_session_id`) was cut in a turn: its folder is here, no live process holds it, its transcript was written more than `CUT_MARGIN_SECONDS` (30) after the record's `last_turn_at` (else its start) and its last lines are not the person's `/exit` or `/quit` (`session_watch::cut_turn`); a session closed on purpose in the last day at or after its launch began (a `resumable.jsonl` line, a duty officer's act in `duty.jsonl`; `session_watch::closed_on_purpose`, compared with the finding's `launched_at` by `session_watch::closed_since`: a close before the launch was the session closed and then continued as it) is not offered, since a Terminal launch records no end of its own (`session_watch::offer`, SB-509; tests `only_a_turn_cut_by_the_process_ending_is_offered_never_a_session_ended_on_purpose`, `a_session_closed_on_purpose_is_not_offered`); offered once per session: `continue-offers.json` records it when first offered and takes it once the session runs again or is continued (`session_watch::continued`), so it is never offered again; `action.command` `switchboard sessions continue <session>` | `switchboard_session_continue` | `continue_session` |
   | `token_rotated` | `proxy-rotated.json` names when the proxy took a new port and token because its port was taken (SB-269), and the live Claude Code or Codex sessions started before then that run through the proxy (a `managed` launch, a Claude Code session in a folder whose route `bindings.json` records, a Codex session in a group folder while the Codex route is on) are listed with `count`, `sessions` (`pid`, `agent`, `folder`, `launch_id`) and `since` (the rotation); the file is removed once the process table shows none (`token_rotation::sessions`, SB-509). Nothing restarts by itself: the fix is a restart wave the person or agent plans and applies; `action.command` `switchboard sessions restart plan` | `switchboard_sessions_restart_plan` | `restart_wave` |
   | `dispatch_refused` | board runs refused `at_capacity` that still wait (SB-412, SB-417: since the pool last admitted a board start, with no one-hour cutoff): one item with `count`, `since` (the first refusal that waits), `last_at` (the newest), `newest_request`, `freed` and `freed_at` (a session ended since, read by the one-minute watch) | `switchboard_capacity` | `open_capacity` |
 
@@ -3909,10 +3909,13 @@ the window's `boot_resume` command (Settings → Sessions after a restart, SCN-1
   A home's `.session-pid` written before this boot, or older than the process now holding its pid
   by more than 60 s (`launch::marker_outlived`), joins no process to its launch, and a
   `sessions/<pid>.json` last written more than 60 s before its process started is not that
-  process's session (`fabric_sessions_core::machine_sessions::written_before_start`): after a
-  restart a reused pid never reads as an old session.
+  process's session (`fabric_sessions_core::machine_sessions::written_before_start`, applied to
+  the live session pairs and to `session_files`, which the duty officer, the session pool and the
+  launch records read): after a restart a reused pid never reads as an old session.
   Boot time: `sysctl kern.boottime` (macOS), `btime` of `/proc/stat` (Linux), read once a process.
-- **The pass.** Once per owner process, the first watch pass that read the process table decides:
+- **The pass.** Once per owner process, the first watch pass that read the process table decides
+  (more than `MAX_AFTER_BOOT_SECONDS`, 6 hours, after the boot it continues nothing and journals
+  one `too_late` line for that boot):
   with `boot-resume.json` saying on (absent: on) and a ledger from an earlier boot it runs
   `boot_resume::run`; a pass that could not read the table waits for the next one. `run` it first settles each
   intent of this boot with no outcome (`continued` when a live process holds the session or it is
@@ -3925,8 +3928,11 @@ the window's `boot_resume` command (Settings → Sessions after a restart, SCN-1
   and its continuation refused (`not_ours`) when `resumable::locate` finds it outside the data
   folder; cut in a turn (SB-509's rule: transcript written more than
   `session_watch::CUT_MARGIN_SECONDS` after `last_turn_at`, else `launched_at`, and its last
-  lines not the person's `/exit`), not closed on purpose since 2 hours before the boot
-  (`session_watch::closed_on_purpose`, and a duty officer's close intent not finished yet); in the ledger, the
+  lines not the person's `/exit`), not closed on purpose at or after its launch began
+  (`session_watch::closed_on_purpose` since 2 hours before the boot, each session's latest close,
+  and a duty officer's close intent not finished yet, compared by `session_watch::closed_since`
+  with the record's `launched_at`: a close before it was the session closed and then continued as
+  this launch); in the ledger, the
   ledger at most 2 hours older than the boot and its last look neither older than that nor older
   than the transcript's last write minus 120 s, the last look being `stopped_at`, or, with none
   (no drain: a crash, a power cut), the ledger's `at` plus `REFRESH_SECONDS`; transcript last written in `[boot - 7200, boot]`
@@ -3947,7 +3953,7 @@ the window's `boot_resume` command (Settings → Sessions after a restart, SCN-1
   file grown past that is read up to 4 MiB and cut to its newest lines, never emptied): `at`, `boot`, `session`,
   `launch_id`, `folder`, `phase` (`intent` before a start; `outcome` after) and `outcome`
   (`continued` with `new_launch_id`, `failed` with `reason`, `interrupted`, `at_capacity`,
-  `over_limit`). Logged once a pass as `boot_resume` with the counts.
+  `over_limit`, and `too_late` with no session). Logged once a pass as `boot_resume` with the counts.
 - **Never twice (SB-507).** `continue_as` serializes continuations with an in-process mutex
   (`resumable::CONTINUING`: one owner, one continuation at a time; it does not span processes) and
   refuses (`LIVE`) a session `resumable::being_continued` names, beside the live-process check it

@@ -172,9 +172,10 @@ enum Command {
         command: Option<DutyCmd>,
     },
     /// Whether Switchboard continues, after this computer restarts, the Claude Code sessions the
-    /// restart cut: those it launched that were running, wrote in the two hours before the restart
-    /// and have no end, at most five, each in a session host you can attach to. Without a
-    /// subcommand: the setting and what was continued.
+    /// restart cut in the middle of a turn: those it launched that were running and wrote in the
+    /// two hours before the restart, never one closed on purpose or a board run (with your own
+    /// sign-in off, only its own homes), at most five, each in a session host you can attach to.
+    /// Without a subcommand: the setting and what was continued.
     BootResume {
         #[command(subcommand)]
         command: Option<BootResumeCmd>,

@@ -747,12 +747,13 @@ function bootResumeLineText(line: BootResumeLine): string {
     case 'at_capacity': return t('Not continued in {folder}: the session pool was full.', { folder });
     case 'over_limit': return t('Not continued in {folder}: five sessions were already continued.', { folder });
     case 'interrupted': return t('Not continued in {folder}: Switchboard stopped while starting it.', { folder });
+    case 'too_late': return t('Nothing was continued: Switchboard first ran more than six hours after the restart.');
     default: return t('Not continued in {folder}: it could not start.', { folder });
   }
 }
 function bootResumeSection() {
   const section = el('div', 'fold-content');
-  section.append(el('p', 'surface-note', t('After this computer restarts, Switchboard continues the Claude Code sessions the restart cut: those it launched that were running and wrote in the two hours before. Each opens as itself in a session you can attach to from Fabric Dashboards. At most five after one restart.')));
+  section.append(el('p', 'surface-note', t('After this computer restarts, Switchboard continues the Claude Code sessions the restart cut in the middle of a turn: those it launched that were working and wrote in the two hours before. It leaves alone the sessions that waited for you, those you or Switchboard closed, and board runs. While Switchboard leaves your own sign-in alone, only sessions in its own homes are continued. Each opens as itself in a session you can attach to from Fabric Dashboards. At most five after one restart.')));
   if (bootResumeError) { section.append(el('p', 'form-error', bootResumeError)); return section; }
   if (!bootResumeState) { if (!bootResumeLoading) loadBootResume(); section.append(el('p', 'form-note', t('Reading the setting…'))); return section; }
   const state = bootResumeState;

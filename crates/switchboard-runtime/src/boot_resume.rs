@@ -9,8 +9,13 @@
 //! with when it stopped), and the first watch pass of an owner after a restart reads the ledger the previous boot left and continues,
 //! as itself and in a session host of its own, each session the restart cut:
 //!
-//! - its launch has no end recorded, has not been continued, ran Claude Code and started before
-//!   the boot (a dispatched board run is continued only when it has no end either);
+//! - its launch names that session, ran Claude Code, started before the boot, has not been
+//!   continued and is not a dispatched board run (Fabric starts those again); it has no end
+//!   recorded, or an `exited` end by a shutdown signal recorded after the last look;
+//! - the restart cut it in a turn (`session_watch::cut_turn`'s rule: written after its last turn
+//!   ended, its last words not the person's `/exit`), and nobody closed it on purpose since that
+//!   launch began (a `resumable.jsonl` line, a duty officer's close, finished or begun);
+//! - with the person's own sign-in off limits (SB-403 S3), it runs in Switchboard's own home;
 //! - it was live at the owner's last look before the boot, and that look was no older than
 //!   `WINDOW_SECONDS` before the boot, nor older than the session's last transcript write (when the
 //!   owner stopped before the session last wrote, nobody saw it still running);
@@ -18,7 +23,8 @@
 //! - no process and no session host holds it now, no launch names it since the boot, and this
 //!   boot's journal does not name it yet;
 //! - at most `MAX_PER_BOOT` of them, newest transcript first, each inside the session pool
-//!   (`capacity`): a start the pool refuses ends the pass.
+//!   (`capacity`): a start the pool refuses ends the pass; an owner that first runs more than
+//!   `MAX_AFTER_BOOT_SECONDS` after the boot continues nothing and journals `too_late` once.
 //!
 //! A continuation is `resumable::continue_as` hosted (`claude --resume <id>` with its prompt, in
 //! its own config and working folders), started with `session_host::start_detached`, so Fabric
@@ -40,6 +46,9 @@ pub const LIVE: &str = "boot-live.json";
 pub const WINDOW_SECONDS: i64 = 2 * 3600;
 /// At most this many sessions are continued after one boot.
 pub const MAX_PER_BOOT: usize = 5;
+/// An owner that first runs later than this after the boot continues nothing: the work is stale,
+/// and the person has likely moved on (review round 4 of #836).
+pub const MAX_AFTER_BOOT_SECONDS: i64 = 6 * 3600;
 /// While sessions run, the ledger's look is renewed this often even when nothing changed, so a
 /// set that held for hours still reads as seen shortly before the boot.
 pub const REFRESH_SECONDS: i64 = 1800;
@@ -283,10 +292,11 @@ pub trait Machine {
     fn on_limit_stop(&self) -> HashSet<String> {
         HashSet::new()
     }
-    /// Sessions closed on purpose since `since` (`session_watch::closed_on_purpose`, and the duty
-    /// officer's close begun and not finished yet): they were meant to end.
-    fn closed_on_purpose(&self, _since: i64) -> HashSet<String> {
-        HashSet::new()
+    /// Sessions closed on purpose since `since`, each with its latest close
+    /// (`session_watch::closed_on_purpose`, and the duty officer's close begun and not finished
+    /// yet): they were meant to end.
+    fn closed_on_purpose(&self, _since: i64) -> HashMap<String, i64> {
+        HashMap::new()
     }
     /// Whether the session's last words were the person's `/exit` (`session_watch::exited`).
     fn exited(&self, _folder: &str, _session: &str) -> bool {
@@ -402,7 +412,11 @@ pub fn candidates(
             .unwrap_or(boot);
         let cut = written > baseline + crate::session_watch::CUT_MARGIN_SECONDS
             && !machine.exited(folder, &seen.session);
-        if !cut || closed.contains(&seen.session) {
+        // A close counts only when it came in this launch: one before it was the session closed
+        // and then continued as this launch (review round 4 of #836).
+        if !cut
+            || crate::session_watch::closed_since(&closed, &seen.session, r["launched_at"].as_i64())
+        {
             continue;
         }
         if done.contains(&seen.session)
@@ -450,6 +464,15 @@ pub fn run(root: &Path, boot: i64, now: i64, machine: &dyn Machine) -> Value {
     let Some(ledger) = read_ledger(root).filter(|l| l.boot < boot) else {
         return json!({"continued": [], "reason": "no_earlier_boot"});
     };
+    if now - boot > MAX_AFTER_BOOT_SECONDS {
+        if !journal(root).iter().any(|l| l["boot"] == boot) {
+            append(
+                root,
+                json!({"at": now, "boot": boot, "phase": "outcome", "outcome": "too_late"}),
+            );
+        }
+        return json!({"continued": [], "reason": "too_late"});
+    }
     let (done, open) = this_boot(&journal(root), boot);
     let live = machine.live_sessions();
     for intent in open {
@@ -566,7 +589,7 @@ impl Machine for Real<'_> {
     fn on_limit_stop(&self) -> HashSet<String> {
         crate::recovery::live_stop_sessions(self.root, self.now)
     }
-    fn closed_on_purpose(&self, since: i64) -> HashSet<String> {
+    fn closed_on_purpose(&self, since: i64) -> HashMap<String, i64> {
         let duty = crate::duty::journal(self.root);
         let mut closed = crate::session_watch::closed_on_purpose(
             &crate::resumable::recent(self.root, since),
@@ -574,12 +597,17 @@ impl Machine for Real<'_> {
             since,
         );
         // A close the duty officer began and has not finished: its next check records it closed.
-        closed.extend(
-            duty.iter()
-                .filter(|l| l["phase"] == "intent" && l["action"] == "close")
-                .filter(|l| l["at"].as_i64().is_some_and(|at| at >= since))
-                .filter_map(|l| l["session"].as_str().map(str::to_owned)),
-        );
+        for l in duty
+            .iter()
+            .filter(|l| l["phase"] == "intent" && l["action"] == "close")
+        {
+            if let (Some(at), Some(session)) = (l["at"].as_i64(), l["session"].as_str()) {
+                if at >= since {
+                    let latest = closed.entry(session.to_owned()).or_insert(at);
+                    *latest = (*latest).max(at);
+                }
+            }
+        }
         closed
     }
     fn exited(&self, folder: &str, session: &str) -> bool {
@@ -714,7 +742,7 @@ mod tests {
         full: bool,
         fail: HashSet<String>,
         stopped: HashSet<String>,
-        closed: HashSet<String>,
+        closed: HashMap<String, i64>,
         exited: HashSet<String>,
         off: bool,
         started: RefCell<Vec<String>>,
@@ -739,7 +767,7 @@ mod tests {
         fn on_limit_stop(&self) -> HashSet<String> {
             self.stopped.clone()
         }
-        fn closed_on_purpose(&self, _: i64) -> HashSet<String> {
+        fn closed_on_purpose(&self, _: i64) -> HashMap<String, i64> {
             self.closed.clone()
         }
         fn exited(&self, _: &str, session: &str) -> bool {
@@ -1157,7 +1185,9 @@ mod tests {
             fake.written.insert(s.into(), BOOT - 300);
         }
         fake.written.insert("d".into(), BOOT - 1000 + 10);
-        fake.closed.insert("b".into());
+        fake.closed.insert("b".into(), BOOT - 400);
+        // i: closed (a host's idle close) before this launch began, then continued as it.
+        fake.closed.insert("a".into(), BOOT - 9500);
         fake.exited.insert("c".into());
         run(root, BOOT, BOOT + 60, &fake);
         assert_eq!(*fake.started.borrow(), ["a", "f"]);
@@ -1170,6 +1200,24 @@ mod tests {
         fake.written.insert("h".into(), BOOT - 300);
         run(root, BOOT, BOOT + 60, &fake);
         assert_eq!(*fake.started.borrow(), ["h"]);
+    }
+
+    #[test]
+    fn an_owner_that_first_runs_hours_after_the_boot_continues_nothing() {
+        // Review round 4 of #836.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        launch(root, &id(1), "a", BOOT - 9000, json!({}));
+        ledger(root, &[("a", &id(1))], BOOT - 600, Some(BOOT - 20));
+        let mut fake = Fake::default();
+        fake.written.insert("a".into(), BOOT - 300);
+        let late = BOOT + MAX_AFTER_BOOT_SECONDS + 1;
+        assert_eq!(run(root, BOOT, late, &fake)["reason"], "too_late");
+        run(root, BOOT, late + 60, &fake);
+        assert!(fake.started.borrow().is_empty());
+        let lines = journal(root);
+        assert_eq!(lines.len(), 1, "journalled once: {lines:?}");
+        assert_eq!(lines[0]["outcome"], "too_late");
     }
 
     #[test]

@@ -228,11 +228,67 @@ pub fn session_files(accounts: &dyn Accounts) -> Vec<(PathBuf, Value)> {
                 .ok()
                 .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             {
+                // SB-450 (review round 4 of fabric-switchboard #836): a file written before the
+                // process now holding its pid started (a leftover from before a restart) is not
+                // that process's session; the duty officer, the pool and the launch records
+                // would read an unrelated process as it.
+                let pid = v["pid"].as_u64().and_then(|p| u32::try_from(p).ok());
+                if pid
+                    .is_some_and(|pid| written_before_start(modified(&path), process_started(pid)))
+                {
+                    continue;
+                }
                 found.push((config.clone(), v));
             }
         }
     }
     found
+}
+
+/// A file's last write, Unix seconds.
+fn modified(path: &Path) -> Option<i64> {
+    std::fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64)
+}
+
+/// When `pid` started, Unix seconds, read for that one process (macOS `proc_pidinfo`, Linux
+/// `/proc/<pid>`'s time, as the process table's walk reads them); None when unknown.
+#[cfg(target_os = "macos")]
+fn process_started(pid: u32) -> Option<i64> {
+    let pid = i32::try_from(pid).ok()?;
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+    // SAFETY: one fixed-size read of this pid's BSD info into a zeroed buffer of its size.
+    let got = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    (got == size).then(|| {
+        // SAFETY: filled above, its size checked.
+        let info = unsafe { info.assume_init() };
+        info.pbi_start_tvsec as i64
+    })
+}
+#[cfg(target_os = "linux")]
+fn process_started(pid: u32) -> Option<i64> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(format!("/proc/{pid}"))
+        .ok()
+        .map(|m| m.mtime())
+}
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn process_started(_pid: u32) -> Option<i64> {
+    None
 }
 
 /// SB-384: the newest write (Unix seconds) of one Claude Code session's transcript and of the
@@ -666,6 +722,51 @@ mod tests {
         assert!(at > 1_700_000_000);
         // Another folder's transcript of the same id is not this session's.
         assert_eq!(transcript_at(&accounts, "/w/g", "S1"), None);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn a_session_file_from_before_its_process_started_is_not_listed() {
+        // SB-450 (review round 4 of fabric-switchboard #836): a leftover `sessions/<pid>.json`
+        // whose pid a newer process holds is not that process's session.
+        struct Home(PathBuf);
+        impl Accounts for Home {
+            fn launched_homes(&self) -> Vec<PathBuf> {
+                vec![self.0.clone()]
+            }
+        }
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join("sessions");
+        std::fs::create_dir_all(&dir).unwrap();
+        let pid = std::process::id();
+        let body = json!({"pid": pid, "sessionId": "S-fresh"}).to_string();
+        std::fs::write(dir.join("fresh.json"), &body).unwrap();
+        let stale = dir.join("stale.json");
+        std::fs::write(
+            &stale,
+            json!({"pid": pid, "sessionId": "S-stale"}).to_string(),
+        )
+        .unwrap();
+        let path = std::ffi::CString::new(stale.to_string_lossy().as_bytes()).unwrap();
+        let old = [
+            libc::timeval {
+                tv_sec: 1_000,
+                tv_usec: 0,
+            },
+            libc::timeval {
+                tv_sec: 1_000,
+                tv_usec: 0,
+            },
+        ];
+        // SAFETY: sets the times of a file this test wrote.
+        assert_eq!(unsafe { libc::utimes(path.as_ptr(), old.as_ptr()) }, 0);
+        let mut ours: Vec<String> = session_files(&Home(home.path().to_owned()))
+            .into_iter()
+            .filter(|(config, _)| config == home.path())
+            .filter_map(|(_, v)| v["sessionId"].as_str().map(str::to_owned))
+            .collect();
+        ours.sort();
+        assert_eq!(ours, ["S-fresh"]);
     }
 
     #[test]

@@ -631,16 +631,38 @@ pub fn cut_turn(written: Option<i64>, baseline: i64, tail: &str) -> bool {
     written.is_some_and(|w| w > baseline + CUT_MARGIN_SECONDS) && !exited(tail)
 }
 
-/// SB-509: the sessions closed on purpose since `since`: a `resumable.jsonl` line (the duty
-/// officer's or a session host's close, a restart wave's) or a duty officer's act in `duty.jsonl`.
-/// They are offered elsewhere (the Sessions page's *Continue*) or were meant to end. Pure.
-pub fn closed_on_purpose(resumable: &[Value], duty: &[Value], since: i64) -> HashSet<String> {
-    resumable
+/// SB-509: the sessions closed on purpose since `since`, each with its latest close: a
+/// `resumable.jsonl` line (the duty officer's or a session host's close, a restart wave's) or a
+/// duty officer's act in `duty.jsonl`. They are offered elsewhere (the Sessions page's
+/// *Continue*) or were meant to end. A close counts against a launch only when it came at or
+/// after that launch began ([`closed_since`]): a session closed and then continued as a new
+/// launch was not closed in that launch (review round 4 of #836). Pure.
+pub fn closed_on_purpose(resumable: &[Value], duty: &[Value], since: i64) -> HashMap<String, i64> {
+    let mut closed: HashMap<String, i64> = HashMap::new();
+    for l in resumable
         .iter()
         .chain(duty.iter().filter(|l| l.get("outcome").is_some()))
-        .filter(|l| l["at"].as_i64().is_some_and(|at| at >= since))
-        .filter_map(|l| l["session"].as_str().map(str::to_owned))
-        .collect()
+    {
+        let (Some(at), Some(session)) = (l["at"].as_i64(), l["session"].as_str()) else {
+            continue;
+        };
+        if at >= since {
+            let latest = closed.entry(session.to_owned()).or_insert(at);
+            *latest = (*latest).max(at);
+        }
+    }
+    closed
+}
+
+/// Whether `session` was closed on purpose at or after `launched_at` (unknown: any close counts).
+pub fn closed_since(
+    closed: &HashMap<String, i64>,
+    session: &str,
+    launched_at: Option<i64>,
+) -> bool {
+    closed
+        .get(session)
+        .is_some_and(|at| launched_at.is_none_or(|l| *at >= l))
 }
 
 /// SB-509: marks gone launches whose Claude Code session can be continued as itself
@@ -653,7 +675,7 @@ pub fn offer(
     found: &mut [Value],
     offers: &mut serde_json::Map<String, Value>,
     live: &HashSet<&str>,
-    closed: &HashSet<String>,
+    closed: &HashMap<String, i64>,
     can_continue: impl Fn(&str, i64) -> bool,
     now: i64,
 ) {
@@ -664,7 +686,9 @@ pub fn offer(
         let Some(session) = f["session_id"].as_str().map(str::to_owned) else {
             continue;
         };
-        if f["provider"].as_str().is_some_and(|p| p != "claude") || closed.contains(&session) {
+        if f["provider"].as_str().is_some_and(|p| p != "claude")
+            || closed_since(closed, &session, f["launched_at"].as_i64())
+        {
             continue;
         }
         let entry = offers.get(&session).cloned();
@@ -736,7 +760,7 @@ fn offer_continuations(root: &Path, found: &mut [Value], pairs: &[(String, u32)]
             since,
         )
     } else {
-        HashSet::new()
+        HashMap::new()
     };
     offer(
         found,
@@ -1059,7 +1083,7 @@ mod tests {
         ];
         let mut offers = serde_json::Map::new();
         let none = HashSet::new();
-        let closed = HashSet::new();
+        let closed = HashMap::new();
         let history = |s: &str, _: i64| s != "s-5";
         offer(&mut found, &mut offers, &none, &closed, history, 1000);
         let offered: Vec<&str> = found
@@ -1121,7 +1145,7 @@ mod tests {
             seen_baseline.set(b);
             false
         };
-        let (none, closed) = (HashSet::new(), HashSet::new());
+        let (none, closed) = (HashSet::new(), HashMap::new());
         offer(
             &mut [gone(Some(900))],
             &mut serde_json::Map::new(),
@@ -1155,9 +1179,27 @@ mod tests {
             json!({"at": 960, "phase": "intent", "action": "close", "session": "s-intent"}),
         ];
         let closed = closed_on_purpose(&resumable, &duty, 100);
-        let mut names: Vec<&str> = closed.iter().map(String::as_str).collect();
+        let mut names: Vec<&str> = closed.keys().map(String::as_str).collect();
         names.sort_unstable();
         assert_eq!(names, ["s-duty", "s-host"]);
+        // Review round 4 of #836: a close before the launch began (the session closed, then
+        // continued as this launch) is not a close of this launch.
+        assert!(!closed_since(&closed, "s-host", Some(901)));
+        assert!(closed_since(&closed, "s-host", Some(900)));
+        assert!(closed_since(&closed, "s-host", None));
+        let mut continued = vec![
+            json!({"kind": GONE, "launch_id": "L-2", "session_id": "s-host",
+            "provider": "claude", "dispatch": false, "launched_at": 920}),
+        ];
+        offer(
+            &mut continued,
+            &mut serde_json::Map::new(),
+            &HashSet::new(),
+            &closed,
+            |_, _| true,
+            1000,
+        );
+        assert_eq!(continued[0]["continuable"], true);
         let mut found = vec![
             json!({"kind": GONE, "launch_id": "L-1", "session_id": "s-duty",
             "provider": "claude", "dispatch": false, "last_turn_at": 100}),
