@@ -19,6 +19,13 @@ const NOT_READY: &str = "This stop is not ready on that account. Read recovery s
 /// SB-396 D7: a stop is never claimed while its session still runs in a process.
 pub const SESSION_LIVE: &str =
     "That session still runs in a process, so it is not started again. Close it there first.";
+/// SB-561 (M1-21): a stop whose session another path is continuing now (a person's Continue,
+/// the boot resume, the duty officer's restart, a restart wave) is not claimed beside it.
+pub const BEING_CONTINUED: &str =
+    "That session is being continued already, so it is not started again.";
+/// SB-561 (M1-21): a stop whose session a later launch continued is not claimed again.
+pub const CONTINUED: &str =
+    "That session was continued after it stopped, so it is not started again.";
 /// SB-396 LC-9: a reading of an account's usage younger than this decides a probe.
 const READING_FRESH: i64 = 600;
 /// Seconds after a stop before a probe without fresh capacity, by attempt (SB-115).
@@ -456,6 +463,10 @@ pub(crate) fn claim(
         .ok_or(NOT_READY)?;
     if live(&row.session) {
         return Err(SESSION_LIVE.into());
+    }
+    // SB-561 (M1-21): never beside a continuation in progress, nor after one.
+    if let Some(why) = crate::resume::claim_refusal(root, &row.session, row.stopped_at, now) {
+        return Err(why.into());
     }
     let ready = readiness(row, snapshot, limited, capped, sign_in, now);
     if !ready.accounts.iter().any(|id| id == account) {
@@ -1103,6 +1114,53 @@ mod tests {
             .unwrap_err(),
             SESSION_LIVE
         );
+        assert_eq!(read(root.path()).unwrap()[0].state, State::Waiting);
+    }
+
+    #[test]
+    fn a_stop_whose_session_is_being_continued_or_was_continued_is_never_claimed() {
+        // SB-561 (M1-21): a host's claim never starts a second copy beside a Continue, a boot
+        // resume or a restart, nor after a launch continued the session.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        let none = HashSet::new();
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        let live = |_: &str| false;
+        let claim_now = |at: i64| {
+            claim(
+                root.path(),
+                "limit:1",
+                "new",
+                &s,
+                &none,
+                &none,
+                &none,
+                &live,
+                at,
+            )
+        };
+        crate::resumable::mark_resuming(root.path(), "session-1", 101);
+        assert_eq!(claim_now(102).unwrap_err(), BEING_CONTINUED);
+        crate::resumable::unmark_resuming(root.path(), "session-1");
+        let id = crate::launches::new_id();
+        crate::launches::record_resume(
+            root.path(),
+            &id,
+            serde_json::json!({"provider": "claude", "provider_session_id": "session-1",
+                "launched_at": 250}),
+            &crate::launches::LaunchedBy::default(),
+        )
+        .unwrap();
+        assert_eq!(claim_now(300).unwrap_err(), CONTINUED);
         assert_eq!(read(root.path()).unwrap()[0].state, State::Waiting);
     }
 

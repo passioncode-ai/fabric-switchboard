@@ -379,6 +379,17 @@ impl Pass {
         // Each file goes only once the owner answered, registered or refused for good.
         for (file, stop) in crate::blocking::run(|| crate::stop_spool::waiting(&runtime.root, time))
         {
+            // SB-561 (M1-23): a session that went on since (a turn, a continuation) has no stop.
+            if crate::blocking::run(|| {
+                crate::resume::spool_stale(&runtime.root, &stop.session, stop.at, time)
+            }) {
+                crate::stop_spool::done(&file);
+                crate::oplog::event(
+                    "recovery_hook",
+                    &[("result", crate::oplog::Field::Code("spool_stale"))],
+                );
+                continue;
+            }
             let answer = runtime
                 .execute(crate::Operation::RecoveryHook {
                     session: stop.session,

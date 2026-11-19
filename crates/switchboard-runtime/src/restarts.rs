@@ -81,6 +81,9 @@ pub struct Entry {
     pub reason: Option<String>,
     pub ended_at: Option<i64>,
     pub back_at: Option<i64>,
+    /// SB-561 (S1.3): the permission mode its process ran with when the plan read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,6 +180,7 @@ pub fn plan_of(seen: &[crate::duty::Seen], facts: &Facts) -> (Vec<Entry>, Vec<Sk
                 reason: None,
                 ended_at: None,
                 back_at: None,
+                permissions: s.permissions.clone(),
             }),
         }
     }
@@ -864,7 +868,9 @@ pub fn tick(_: &Path, _: i64) {}
 
 /// The resume script with the launch it continues exported after its `unset` line: that line
 /// clears every variable the launch must not inherit, `SWITCHBOARD_LAUNCH_ID` among them, so an
-/// export before it would be cleared at once (review of 2026-11-16, blocker 1).
+/// export before it would be cleared at once (review of 2026-11-16, blocker 1). SB-561: the one
+/// builder (`resume::script`) writes the export there itself; this stays for its test.
+#[cfg(test)]
 pub(crate) fn with_launch_id(script: &str, launch: &str) -> String {
     let export = format!(
         "export SWITCHBOARD_LAUNCH_ID={}\n",
@@ -909,33 +915,43 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
     let Some(program) = crate::launch::find_program("claude") else {
         return ("failed", Some("cannot_resume"));
     };
-    // SB-515: the permission choice as Fabric Sessions asks it (D-7), the one answer it reads.
-    let bypass = crate::session_accounts::resume_flags(root);
     let prompt = e.caller.then(|| caller_prompt(wave));
-    let mut script = crate::duty::resume_script_for(
-        &e.config,
-        &e.cwd,
-        &e.session,
+    // SB-561 (S1.1, S1.2): the one builder, before anything is ended: the account checked (a
+    // resume it refuses leaves the session running, skipped), the launch's own permissions and
+    // environment. The host's own launch continues: its record and its viewers stay the session's.
+    let resume = match crate::resume::build(
+        root,
+        &crate::resume::Target {
+            session: &e.session,
+            config: &e.config,
+            cwd: &e.cwd,
+            live: e.permissions.as_deref(),
+            restarting: true,
+        },
         &program,
-        &bypass,
         prompt.as_deref(),
-    );
-    if let Some(launch) = &e.launch_id {
-        // The host's own launch continues: its record and its viewers stay the session's.
-        script = with_launch_id(&script, launch);
-    }
+        e.launch_id.as_deref(),
+        crate::monitor::now(),
+    ) {
+        Ok(resume) => resume,
+        Err(_) => return ("skipped", Some("account_refused")),
+    };
     if let (true, Some(launch)) = (e.in_place, &e.launch_id) {
         let path = script_path(root, &wave.id, &e.session);
-        if crate::launch::write_script_at(&path, &script).is_err() {
+        if crate::launch::write_script_at(&path, &resume.script).is_err() {
             return ("failed", Some("not_written"));
         }
-        return in_place_outcome(crate::session_host::restart(root, launch, &path));
+        let outcome = in_place_outcome(crate::session_host::restart(root, launch, &path));
+        if outcome.0 == "resuming" {
+            crate::resume::started(root, &resume, &e.session, crate::monitor::now());
+        }
+        return outcome;
     }
     let path = terminal_script_path(root, &wave.id, &e.session);
     let written = path
         .parent()
         .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
-        && crate::launch::write_script_at(&path, &script).is_ok();
+        && crate::launch::write_script_at(&path, &resume.script).is_ok();
     if !written {
         return ("failed", Some("not_written"));
     }
@@ -952,7 +968,10 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
     // SB-450: marked before the window opens (no launch record names a Terminal resume).
     crate::resumable::mark_resuming(root, &e.session, crate::monitor::now());
     match crate::launch::start_terminal(&path) {
-        Ok(()) => ("resuming", None),
+        Ok(()) => {
+            crate::resume::started(root, &resume, &e.session, crate::monitor::now());
+            ("resuming", None)
+        }
         Err(_) => {
             crate::resumable::unmark_resuming(root, &e.session);
             ("failed", Some("not_started"))
@@ -1013,6 +1032,8 @@ mod tests {
             cpu: None,
             cpu_quiet: None,
             own_launches: None,
+            permissions: None,
+            hosted: None,
         }
     }
 
@@ -1124,6 +1145,7 @@ mod tests {
             reason: None,
             ended_at: None,
             back_at: None,
+            permissions: None,
         }
     }
 

@@ -85,6 +85,10 @@ pub(crate) const CONFLICTS: &[&str] = &[
     "FABRIC_DISPATCH_HANDOFF",
     "FABRIC_DISPATCH_REQUEST",
     "FABRIC_DISPATCH_ID",
+    // SB-561 (M1-07): a workflow and its hand-over belong to the launch that continues them; a
+    // session started from inside one, or a resume, never inherits another launch's.
+    "OBSERVATORY_WORKFLOW_ID",
+    "OBSERVATORY_HANDOFF_ID",
 ];
 pub use fabric_sessions_core::terminal::LINUX_TERMINAL_MISSING;
 /// SB-397 D-2: the Terminal and script helpers live in fabric-sessions-core.
@@ -1499,7 +1503,46 @@ pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
     if session_running(home)? {
         return Err("Close the existing session before changing its home.".into());
     }
+    // SB-561 (S1.5): a session resumed in this home by a launch of its own writes no marker; its
+    // own session file (`sessions/<pid>.json`, which Claude Code keeps while it runs) says so.
+    #[cfg(unix)]
+    if live_session_file(home) {
+        return Err("Close the existing session before changing its home.".into());
+    }
     Ok(())
+}
+/// SB-561 (S1.5): whether a live process holds a Claude Code session file in `home`: its pid
+/// alive and the file written no earlier than the process started (a file left from before a pid
+/// was reused is not its own).
+#[cfg(unix)]
+fn live_session_file(home: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(home.join("sessions")) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        if path.extension().and_then(|x| x.to_str()) != Some("json") {
+            return false;
+        }
+        let Some(pid) = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.parse::<u32>().ok())
+            .filter(|p| *p > 0)
+        else {
+            return false;
+        };
+        if !pid_alive(pid) {
+            return false;
+        }
+        let reused = fs::symlink_metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| SystemTime::now().duration_since(t).ok())
+            .zip(process_age(pid))
+            .is_some_and(|(file_age, age)| pid_reused(file_age, age));
+        !reused
+    })
 }
 /// SB-450 (review round 3 of #836): whether a home's `.session-pid` marker cannot name the
 /// process that holds `pid` now: it was written before this boot, or (Unix) the process is younger
@@ -3549,6 +3592,8 @@ fn launch_core(
         &script(&home, &program, &args, &env, false, &working_directory),
     )?;
     // SB-95: what this home's session is, for the session list — ids, folder and times only.
+    // SB-561 (S1.3, S1.4): the permission mode it runs with and its own values (a workflow, a
+    // hand-over, its context; never a token), which a resume of it carries again.
     let record = json!({
         "account_id": account.id,
         "provider": account.provider.as_str(),
@@ -3559,6 +3604,14 @@ fn launch_core(
         "in_place": in_place,
         "launched_at": switchboard_proxy::now(),
         "continues": continuation.map(|c| c.workflow_id.clone()),
+        "permissions": crate::resume::mode_of_args(
+            match account.provider {
+                Provider::Claude => "claude-code",
+                Provider::Codex => "codex",
+            },
+            args.iter().copied(),
+        ),
+        "env": crate::resume::launch_env(&env),
     });
     crate::launches::record(root, &home, record, &launch_id)?;
     // In place the caller runs the script now; the reservation lapses if it never does.

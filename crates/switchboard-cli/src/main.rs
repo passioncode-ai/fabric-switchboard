@@ -5256,6 +5256,10 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs() as i64);
+            // SB-561 (M1-23): a stop kept while no owner ran is over once the session finished a
+            // turn after it; the owner never registers it after the session went on. A stop of
+            // this same turn (a second or two earlier) stays.
+            switchboard_runtime::stop_spool::forget_before(root, session, now - 2);
             // A busy or absent owner never holds a turn.
             if switchboard_runtime::recovery::session_has_live_stop(root, session, now) {
                 let _ = tokio::time::timeout(

@@ -7,7 +7,8 @@
 //! session's own file `sessions/<pid>.json`, in which Claude Code writes its status (`busy`,
 //! `shell`, `waiting`, `idle`) and since when, and the modification time of that session's
 //! transcript. Never a transcript's content. A session's own commands are the shells its Bash tool
-//! starts (their command line names `.claude/shell-snapshots/`), foreground or background; its MCP
+//! starts (their command line names `<config>/shell-snapshots/` of the session's own config
+//! folder, SB-561), foreground or background; its MCP
 //! servers and helpers (`caffeinate`) are not work.
 //!
 //! What it does, at most once every five minutes and at most three times a check (DEC-0021):
@@ -149,6 +150,11 @@ pub struct Seen {
     /// that run now, each in a session host of its own and so outside its process tree; `None`
     /// when the launch records could not be read with the process table.
     pub own_launches: Option<usize>,
+    /// SB-561 (S1.3): the permission mode its process runs with, from its command line; `None`
+    /// when the process table was not read.
+    pub permissions: Option<String>,
+    /// SB-561 (S1.6): the launch whose live session host runs it: restarted in place through it.
+    pub hosted: Option<String>,
 }
 
 /// The terminal host of a session from its ancestors' executable paths (DEC-0021: an Orca or
@@ -276,7 +282,7 @@ pub fn session_works(root: &Path, session: &str, now: i64, floor: i64) -> bool {
     busy.iter().any(|s| {
         let moved = s
             .cpu
-            .map(|before| tree_of(&again, s.pid).cpu - before >= HOST_CPU_MOVED);
+            .map(|before| tree_of(&again, s.pid, &s.config).cpu - before >= HOST_CPU_MOVED);
         host_keeps(s, now, floor, moved)
     })
 }
@@ -319,9 +325,13 @@ pub fn decide(s: &Seen, set: &Settings, now: i64, newer_copy: bool) -> Option<(A
 pub fn observe(root: &Path) -> Vec<Seen> {
     let mut seen = live(root, |_| true);
     let table = process_table();
+    let (hosted, consoles) = hosts_of(root, &seen);
     for s in &mut seen {
         s.host = host_of(&crate::machine_sessions::ancestor_paths(s.pid));
-        s.dashboards = s.host == "dashboards";
+        // SB-561 (S1.6): a Dashboards console is known by the launch its host or record names,
+        // not only by its ancestors (lost once the CLI that spawned its host exits).
+        s.dashboards = s.host == "dashboards" || consoles.contains(&s.session);
+        s.hosted = hosted.get(&s.session).cloned();
         if let Some(table) = &table {
             fill_tree(s, table);
         }
@@ -329,9 +339,47 @@ pub fn observe(root: &Path) -> Vec<Seen> {
     seen
 }
 
+/// SB-561 (S1.6): of the sessions `seen`, the launch whose live session host runs each, and the
+/// ones a Fabric Dashboards console launched (its record's `launched_by.surface`) that have not
+/// ended.
+fn hosts_of(
+    root: &Path,
+    seen: &[Seen],
+) -> (HashMap<String, String>, std::collections::HashSet<String>) {
+    let mut hosted = HashMap::new();
+    let mut consoles = std::collections::HashSet::new();
+    if seen.is_empty() {
+        return (hosted, consoles);
+    }
+    #[cfg(unix)]
+    for (launch, _) in crate::session_host::live_hosts(root) {
+        if let Some(session) = crate::launches::session_of(root, &launch) {
+            if seen.iter().any(|s| s.session == session) {
+                hosted.insert(session, launch);
+            }
+        }
+    }
+    let now = crate::monitor::now();
+    for r in crate::launches::recent_records(root, now - 2 * 86_400) {
+        let Some(session) = r["provider_session_id"].as_str() else {
+            continue;
+        };
+        if r["ended"].is_null()
+            && r["launched_by"]["surface"] == "dashboards"
+            && seen.iter().any(|s| s.session == session)
+        {
+            consoles.insert(session.to_owned());
+        }
+    }
+    (hosted, consoles)
+}
+
 /// A session's process tree: its CPU and its own commands, read.
 fn fill_tree(s: &mut Seen, table: &HashMap<u32, Row>) {
-    let tree = tree_of(table, s.pid);
+    let tree = tree_of(table, s.pid, &s.config);
+    s.permissions = table
+        .get(&s.pid)
+        .map(|row| crate::resume::mode_of_command(&row.command));
     s.cpu = Some(tree.cpu);
     s.commands = tree.commands.len();
     s.commands_known = true;
@@ -381,6 +429,8 @@ fn live(root: &Path, keep: impl Fn(&str) -> bool) -> Vec<Seen> {
             cpu: None,
             cpu_quiet: None,
             own_launches: None,
+            permissions: None,
+            hosted: None,
             config,
         });
     }
@@ -476,7 +526,21 @@ pub struct Tree {
     pub cpu: f64,
     pub commands: Vec<i64>,
 }
-pub fn tree_of(table: &HashMap<u32, Row>, root: u32) -> Tree {
+/// SB-561 (M1-01): a command is the session's own when it is a direct child sourcing a shell
+/// snapshot from the session's own config folder (`<config>/shell-snapshots/`): the person's
+/// `~/.claude`, or a Switchboard home (`homes/<account>`, `runtimes/claude-<pool>`), whose
+/// snapshots Claude Code writes there too. Before, only `/.claude/shell-snapshots/` counted, so
+/// every session in a Switchboard home read as running no command.
+pub fn tree_of(table: &HashMap<u32, Row>, root: u32, config: &Path) -> Tree {
+    let snapshots: Vec<String> = std::iter::once(config.to_path_buf())
+        .chain(config.canonicalize().ok())
+        .map(|c| {
+            format!(
+                "{}/shell-snapshots/",
+                c.to_string_lossy().trim_end_matches('/')
+            )
+        })
+        .collect();
     let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
     for (pid, row) in table {
         children.entry(row.ppid).or_default().push(*pid);
@@ -495,7 +559,7 @@ pub fn tree_of(table: &HashMap<u32, Row>, root: u32) -> Tree {
             continue;
         };
         tree.cpu += row.cpu;
-        if row.ppid == root && row.command.contains("/.claude/shell-snapshots/") {
+        if row.ppid == root && snapshots.iter().any(|n| row.command.contains(n.as_str())) {
             tree.commands.push(row.age);
         }
         stack.extend(children.get(&pid).cloned().unwrap_or_default());
@@ -582,8 +646,10 @@ pub fn resume_script(
 }
 
 /// SB-396 wave B: the resume script of session `session` begun in `cwd` under the Claude Code
-/// config folder `config`, with `prompt` to go on with when given; the duty officer's restart and
-/// a person's Continue share it.
+/// config folder `config`, with `prompt` to go on with when given, as `resume::script` writes
+/// every resume (SB-561): the home's exports as they are, these arguments. The paths that
+/// continue a session build theirs with `resume::build`, which also checks the account and
+/// takes the launch's own permissions and environment.
 pub fn resume_script_for(
     config: &Path,
     cwd: &str,
@@ -592,56 +658,30 @@ pub fn resume_script_for(
     bypass: &[&str],
     prompt: Option<&str>,
 ) -> String {
-    let quote = fabric_sessions_core::cli::quoted;
-    let mut out = format!(
-        "#!{}\nset +x\nunset {}\n",
-        crate::launch::SCRIPT_SHELL,
-        crate::launch::CONFLICTS.join(" ")
-    );
-    let person = crate::person::claude_dir();
-    // SB-452: a managed home's own route, which outranks the folder's local settings.
-    let route = (person.as_deref() != Some(config)
-        && config.join(crate::launch::ROUTE_FILE).is_file())
-    .then(|| crate::launch::route_arg(config));
-    if person.as_deref() != Some(config) {
-        if let Ok(text) = std::fs::read_to_string(config.join("launch.command")) {
-            for line in text.lines().filter(|l| l.starts_with("export ")) {
-                if !line.starts_with("export SWITCHBOARD_LAUNCH_ID=")
-                    && !line.starts_with("export CLAUDE_CONFIG_DIR=")
-                    && !line.starts_with("export PATH=")
-                {
-                    out.push_str(line);
-                    out.push('\n');
-                }
-            }
-        }
-        out.push_str(&format!(
-            "export CLAUDE_CONFIG_DIR={}\n",
-            quote(&config.to_string_lossy())
-        ));
-    }
-    // A Terminal window runs the script with the PATH it was started with; the program's folder
-    // goes first and the person's login PATH fills what that PATH lacks (SB-455), so the session's
-    // hooks find `node` (operator 2026-11-15: every hook failed with "node: command not found").
-    out.push_str(&crate::launch::path_export(program));
-    out.push_str(&format!(
-        "cd {} || exit 1\n{}",
-        quote(cwd),
-        quote(&program.to_string_lossy())
-    ));
-    for arg in bypass.iter().copied().chain(route.as_deref()) {
-        out.push(' ');
-        out.push_str(&quote(arg));
-    }
-    out.push_str(&format!(" --resume {}", quote(session)));
-    if let Some(prompt) = prompt {
-        out.push(' ');
-        out.push_str(&quote(prompt));
-    }
-    // Ended by a signal (the duty officer closing it, the person's Ctrl-C) is a clean end: the
-    // window settings close the window on status 0, so it does not stay behind.
-    out.push_str("\nstatus=$?\n[ \"$status\" -ge 128 ] && exit 0\nexit \"$status\"\n");
-    out
+    let exports: Vec<String> = std::fs::read_to_string(config.join("launch.command"))
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| {
+            l.starts_with("export ")
+                && !l.starts_with("export SWITCHBOARD_LAUNCH_ID=")
+                && !l.starts_with("export CLAUDE_CONFIG_DIR=")
+                && !l.starts_with("export PATH=")
+        })
+        .map(str::to_owned)
+        .collect();
+    let permissions: Vec<String> = bypass.iter().map(|a| (*a).to_owned()).collect();
+    crate::resume::script(&crate::resume::Script {
+        config,
+        cwd,
+        session,
+        program,
+        permissions: &permissions,
+        exports: &exports,
+        route: None,
+        prompt,
+        launch_id: None,
+        marker: false,
+    })
 }
 
 pub(crate) fn journal(root: &Path) -> Vec<Value> {
@@ -703,7 +743,7 @@ fn restarts(lines: &[Value], session: &str, now: i64) -> usize {
                 && l["action"] == "restart"
                 && l["outcome"]
                     .as_str()
-                    .is_some_and(|o| o == "restarted" || o.starts_with("closed"))
+                    .is_some_and(|o| o.starts_with("restarted") || o.starts_with("closed"))
                 && l["at"].as_i64().is_some_and(|t| now - t < RESTART_WINDOW)
         })
         .count()
@@ -882,7 +922,8 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
                 root,
                 json!({"at": at, "phase": "intent", "action": action, "reason": reason,
                     "session": s.session, "folder": s.cwd, "pid": s.pid, "host": s.host,
-                    "config": s.config, "prompt": prompt}),
+                    "config": s.config, "prompt": prompt, "permissions": s.permissions,
+                    "hosted": s.hosted}),
             );
             act_on(root, s, act)
         };
@@ -914,60 +955,197 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
 
 #[cfg(unix)]
 fn act_on(root: &Path, s: &Seen, act: Act) -> &'static str {
-    if !stop(s.pid) {
-        return "still_running";
-    }
     let Act::Restart { prompt } = act else {
-        return "closed";
+        return if stop(s.pid) {
+            "closed"
+        } else {
+            "still_running"
+        };
     };
-    resume(root, &s.session, &s.config, &s.cwd, prompt)
+    // SB-561 (S1.6): a session in a live session host is restarted there, in place, its viewers
+    // kept; never stopped and reopened in a Terminal window without its host.
+    if let Some(launch) = &s.hosted {
+        return restart_in_host(root, s, launch, prompt);
+    }
+    // SB-561 (S1.2): the account is checked before the session is stopped: a resume it would
+    // refuse leaves the session as it is.
+    match prepare(root, s, prompt, None) {
+        Prepared::Refused => return "left_account",
+        Prepared::Ready(path, resume) => {
+            if !stop(s.pid) {
+                return "still_running";
+            }
+            start(root, &s.session, &path, &resume)
+        }
+        Prepared::Cannot(outcome) => {
+            if !stop(s.pid) {
+                return "still_running";
+            }
+            outcome
+        }
+    }
 }
 
-/// The second half of a restart: the stopped session resumed as itself in a Terminal window.
+/// What a restart can start.
 #[cfg(unix)]
-fn resume(root: &Path, session: &str, config: &Path, cwd: &str, prompt: bool) -> &'static str {
-    // Another process may hold the session by now (a host continued it): never a second copy.
-    if crate::machine_sessions::live_sessions(root).contains_key(session) {
-        return "closed_held_elsewhere";
-    }
-    if !Path::new(cwd).is_dir() {
-        return "closed_no_folder";
+enum Prepared {
+    /// The script, written, and the resume it holds.
+    Ready(PathBuf, crate::resume::Resume),
+    /// The account may not serve the resume: the session is left running.
+    Refused,
+    /// Nothing can resume it (no folder, no `claude`, no script): stopped as a close, as before.
+    Cannot(&'static str),
+}
+
+/// SB-561 (S1.1): a restart's resume, from the one builder, written to `duty/<session>.command`.
+#[cfg(unix)]
+fn prepare(root: &Path, s: &Seen, prompt: bool, launch: Option<&str>) -> Prepared {
+    prepare_for(
+        root,
+        &crate::resume::Target {
+            session: &s.session,
+            config: &s.config,
+            cwd: &s.cwd,
+            live: s.permissions.as_deref(),
+            restarting: true,
+        },
+        prompt,
+        launch,
+        duty_script(root, &s.session),
+    )
+}
+
+#[cfg(unix)]
+fn prepare_for(
+    root: &Path,
+    target: &crate::resume::Target,
+    prompt: bool,
+    launch: Option<&str>,
+    path: PathBuf,
+) -> Prepared {
+    if !Path::new(target.cwd).is_dir() {
+        return Prepared::Cannot("closed_no_folder");
     }
     let Some(program) = crate::launch::find_program("claude") else {
-        return "closed_no_claude";
+        return Prepared::Cannot("closed_no_claude");
     };
-    // SB-515: the permission choice as Fabric Sessions asks it (D-7), the one answer it reads.
-    let bypass = crate::session_accounts::resume_flags(root);
-    let script = resume_script_for(
-        config,
-        cwd,
-        session,
+    let resume = match crate::resume::build(
+        root,
+        target,
         &program,
-        &bypass,
         prompt.then_some(CONTINUE_PROMPT),
-    );
-    let dir = root.join("duty");
-    let path = dir.join(format!(
+        launch,
+        crate::monitor::now(),
+    ) {
+        Ok(resume) => resume,
+        Err(_) => return Prepared::Refused,
+    };
+    let written = path
+        .parent()
+        .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+        && crate::launch::write_script_at(&path, &resume.script).is_ok();
+    if !written {
+        return Prepared::Cannot("closed_not_restarted");
+    }
+    Prepared::Ready(path, resume)
+}
+
+#[cfg(unix)]
+fn duty_script(root: &Path, session: &str) -> PathBuf {
+    root.join("duty").join(format!(
         "{}.command",
         session
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect::<String>()
+    ))
+}
+
+/// SB-561 (S1.6): restarts a hosted session in its host: the script goes where a host starts a
+/// restart from (`restarts/`), the host ends the session and runs it in the same terminal. A host
+/// that will not, or does not answer, leaves the session as it is.
+#[cfg(unix)]
+fn restart_in_host(root: &Path, s: &Seen, launch: &str, prompt: bool) -> &'static str {
+    let path = root.join(crate::restarts::DIR).join(format!(
+        "duty-{}.command",
+        s.session
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect::<String>()
     ));
-    if std::fs::create_dir_all(&dir).is_err()
-        || crate::launch::write_script_at(&path, &script).is_err()
-    {
-        return "closed_not_restarted";
+    let resume = match prepare(root, s, prompt, Some(launch)) {
+        Prepared::Refused => return "left_account",
+        Prepared::Cannot(_) => return "left_not_prepared",
+        Prepared::Ready(script, resume) => {
+            let moved = std::fs::rename(&script, &path).is_ok();
+            if !moved {
+                return "left_not_prepared";
+            }
+            resume
+        }
+    };
+    let outcome = match crate::session_host::restart(root, launch, &path) {
+        Ok(crate::session_host::Restart::Accepted) | Ok(crate::session_host::Restart::Unknown) => {
+            crate::resume::started(root, &resume, &s.session, crate::monitor::now());
+            "restarted_in_host"
+        }
+        Ok(crate::session_host::Restart::Refused) => "left_host_refused",
+        Err(e) if e == crate::session_host::HOST_BUSY => "left_host_busy",
+        Err(_) => "left_host_gone",
+    };
+    if !outcome.starts_with("restarted") {
+        let _ = std::fs::remove_file(&path);
+    }
+    outcome
+}
+
+/// The second half of a restart: the stopped session resumed as itself in a Terminal window.
+#[cfg(unix)]
+fn start(root: &Path, session: &str, path: &Path, resume: &crate::resume::Resume) -> &'static str {
+    // Another process may hold the session by now (a host continued it): never a second copy.
+    if crate::machine_sessions::live_sessions(root).contains_key(session) {
+        return "closed_held_elsewhere";
     }
     // SB-450: a Terminal resume writes no launch record; the mark keeps a continuation after a
     // restart from starting a second copy while this window starts the session.
     crate::resumable::mark_resuming(root, session, crate::monitor::now());
-    match crate::launch::start_terminal(&path) {
-        Ok(()) => "restarted",
+    match crate::launch::start_terminal(path) {
+        Ok(()) => {
+            crate::resume::started(root, resume, session, crate::monitor::now());
+            "restarted"
+        }
         Err(_) => {
             crate::resumable::unmark_resuming(root, session);
             "closed_not_restarted"
         }
+    }
+}
+
+/// A restart a quit cut after its stop: resumed from what its intent recorded.
+#[cfg(unix)]
+fn resume(
+    root: &Path,
+    session: &str,
+    config: &Path,
+    cwd: &str,
+    prompt: bool,
+    permissions: Option<&str>,
+) -> &'static str {
+    if crate::machine_sessions::live_sessions(root).contains_key(session) {
+        return "closed_held_elsewhere";
+    }
+    let target = crate::resume::Target {
+        session,
+        config,
+        cwd,
+        live: permissions,
+        restarting: false,
+    };
+    match prepare_for(root, &target, prompt, None, duty_script(root, session)) {
+        Prepared::Ready(path, resume) => start(root, session, &path, &resume),
+        // The session was stopped already: a resume its account refuses is a close.
+        Prepared::Refused => "closed_account",
+        Prepared::Cannot(outcome) => outcome,
     }
 }
 #[cfg(not(unix))]
@@ -1050,7 +1228,14 @@ fn finish_interrupted(root: &Path, now: i64) -> Vec<Value> {
         let outcome = if !gone {
             "interrupted"
         } else if intent["action"] == "restart" {
-            finish_restart(root, session, &config, cwd, intent["prompt"] == true)
+            finish_restart(
+                root,
+                session,
+                &config,
+                cwd,
+                intent["prompt"] == true,
+                intent["permissions"].as_str(),
+            )
         } else {
             "closed"
         };
@@ -1084,11 +1269,12 @@ fn finish_restart(
     config: &Path,
     cwd: &str,
     prompt: bool,
+    permissions: Option<&str>,
 ) -> &'static str {
-    resume(root, session, config, cwd, prompt)
+    resume(root, session, config, cwd, prompt, permissions)
 }
 #[cfg(not(unix))]
-fn finish_restart(_: &Path, _: &str, _: &Path, _: &str, _: bool) -> &'static str {
+fn finish_restart(_: &Path, _: &str, _: &Path, _: &str, _: bool, _: Option<&str>) -> &'static str {
     "closed_not_restarted"
 }
 
@@ -1364,6 +1550,8 @@ mod tests {
             cpu: Some(10.0),
             cpu_quiet: Some(true),
             own_launches: Some(0),
+            permissions: None,
+            hosted: None,
         }
     }
 
@@ -1608,14 +1796,62 @@ mod tests {
         assert_eq!(table.len(), 6);
         assert_eq!(table[&103].cpu, 60.5);
         assert_eq!(table[&200].age, 2 * 86_400 + 3 * 3600);
-        let tree = tree_of(&table, 100);
+        let tree = tree_of(&table, 100, Path::new("/Users/u/.claude"));
         assert_eq!(
             tree.commands,
             vec![33 * 60 + 13],
             "only the Bash tool's shell is a command"
         );
         assert!((tree.cpu - (2447.26 + 1.33 + 0.03 + 60.5)).abs() < 0.01);
-        assert!(tree_of(&table, 999).commands.is_empty());
+        assert!(tree_of(&table, 999, Path::new("/Users/u/.claude"))
+            .commands
+            .is_empty());
+    }
+
+    #[test]
+    fn a_command_of_a_session_in_a_switchboard_home_is_its_own() {
+        // SB-561 (M1-01): Claude Code writes a home's shell snapshots in that home, so before
+        // every isolated, managed and hosted session read as running no command.
+        let table = parse_table(
+            "  100     1    10:00   0:10.00 /opt/claude\n\
+               102   100     5:00   0:00.03 /bin/zsh -c source /d/homes/a1/shell-snapshots/snapshot-zsh-1.sh && eval 'sleep 600'\n\
+               103   100     4:00   0:00.03 /bin/zsh -c source /d/homes/b2/shell-snapshots/snapshot-zsh-1.sh && eval 'x'\n",
+        );
+        assert_eq!(
+            tree_of(&table, 100, Path::new("/d/homes/a1")).commands,
+            vec![300],
+            "its own home's snapshot counts; another home's does not"
+        );
+        assert!(tree_of(&table, 100, Path::new("/Users/u/.claude"))
+            .commands
+            .is_empty());
+        // A Seen filled from the table carries the process's own permission mode.
+        let table =
+            parse_table("  100     1    10:00   0:10.00 /opt/claude --permission-mode plan\n");
+        let mut s = Seen {
+            config: PathBuf::from("/d/homes/a1"),
+            pid: 100,
+            ..seen("busy", 1, 1, None)
+        };
+        fill_tree(&mut s, &table);
+        assert_eq!(s.permissions.as_deref(), Some("plan"));
+    }
+
+    #[test]
+    fn a_restart_that_left_the_session_running_is_not_counted() {
+        // SB-561: a restart its account refused, or its host would not take, stopped nothing.
+        let now = 100_000;
+        let line = |outcome: &str| {
+            json!({"at": now - 60, "action": "restart", "reason": "stuck", "outcome": outcome,
+                "session": "s-1", "pid": 7})
+        };
+        let lines = vec![
+            line("left_account"),
+            line("left_host_refused"),
+            line("restarted_in_host"),
+            line("restarted"),
+        ];
+        assert_eq!(restarts(&lines, "s-1", now), 2);
     }
 
     #[test]
