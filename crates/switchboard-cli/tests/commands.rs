@@ -2026,36 +2026,49 @@ fn a_key_observatory_holds_is_added_by_name_through_a_pipe() {
     assert_eq!(added["saved"][0]["answer"]["pool"], "tokens");
     assert_eq!(added["saved"][1]["target"], "anthropic");
     assert_eq!(added["saved"][1]["answer"]["name"], "alpha-web");
-    // The value reached the vault: the named key reads back (as a session script reads it).
-    let key = run(&["agents", "anthropic", "key", "alpha-web", "--to-pipe"]);
-    assert_eq!(json(&key)["key"], "sk-ant-api03-synthetic-fixture");
-    // SB-420: without --to-pipe, or into a file, the key is refused and never printed.
-    let refused = run(&["agents", "anthropic", "key", "alpha-web"]);
-    assert!(!refused.status.success());
-    let everything = format!(
-        "{}{}",
-        String::from_utf8_lossy(&refused.stdout),
-        String::from_utf8_lossy(&refused.stderr)
-    );
-    assert!(!everything.contains("synthetic-fixture"), "{everything}");
-    assert!(
-        everything.contains("only for a session script"),
-        "{everything}"
-    );
-    let file = tmp.path().join("printed");
-    let status = binary()
-        .arg("--data-dir")
-        .arg(&data)
-        .args(["agents", "anthropic", "key", "alpha-web", "--to-pipe"])
-        .stdin(Stdio::null())
-        .stdout(std::fs::File::create(&file).unwrap())
-        .stderr(Stdio::null())
-        .status()
-        .unwrap();
-    assert!(!status.success());
-    assert!(!std::fs::read_to_string(&file)
+    // The value reached the vault: the named key reads back for a launch's one-time ticket, as a
+    // session script reads it (SB-560, M3-01), and for nothing else.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .contains("synthetic-fixture"));
+        .as_secs() as i64;
+    let ticket = switchboard_runtime::value_doors::issue(
+        &data,
+        &switchboard_runtime::value_doors::anthropic_slot("alpha-web"),
+        now,
+    )
+    .unwrap();
+    let with_ticket = |ticket: Option<&str>| {
+        let mut command = binary();
+        command
+            .arg("--data-dir")
+            .arg(&data)
+            .args(["agents", "anthropic", "key", "alpha-web", "--to-pipe"])
+            .env_remove(switchboard_runtime::value_doors::TICKET_ENV)
+            .stdin(Stdio::null());
+        if let Some(ticket) = ticket {
+            command.env(switchboard_runtime::value_doors::TICKET_ENV, ticket);
+        }
+        command.output().unwrap()
+    };
+    let key = with_ticket(Some(&ticket));
+    assert_eq!(json(&key)["key"], "sk-ant-api03-synthetic-fixture");
+    for refused in [with_ticket(Some(&ticket)), with_ticket(None)] {
+        assert!(!refused.status.success(), "once, and never without one");
+        let everything = format!(
+            "{}{}",
+            String::from_utf8_lossy(&refused.stdout),
+            String::from_utf8_lossy(&refused.stderr)
+        );
+        assert!(!everything.contains("synthetic-fixture"), "{everything}");
+        assert!(
+            everything.contains("only to a session Switchboard launched"),
+            "{everything}"
+        );
+    }
+    let journal = std::fs::read_to_string(data.join("value-doors.jsonl")).unwrap();
+    assert_eq!(journal.lines().count(), 3);
+    assert!(!journal.contains(&ticket) && !journal.contains("alpha-web"));
     // The record names the slot, never the value; the list shows where it went.
     let record = std::fs::read_to_string(data.join("observatory-keys.json")).unwrap();
     assert!(record.contains("alpha-web/prod/ANTHROPIC_API_KEY"));
@@ -2133,11 +2146,14 @@ fn value_printing_commands_need_the_hand_over_named() {
         assert!(!output.status.success(), "{args:?}");
         String::from_utf8_lossy(&output.stderr).into_owned()
     };
+    // SB-560 (M3-01): a key is answered only for a launch's one-time ticket, named or not.
     let key = ["agents", "key", "--service", "openrouter", "--machine"];
-    assert!(run(&key, false).contains("only for a session script"));
-    // Named: the guard passes and the command answers as before (no key is saved here).
+    assert!(run(&key, false).contains("only to a session Switchboard launched"));
     let named = run(&[&key[..], &["--to-pipe"]].concat(), false);
-    assert!(named.contains("No OpenRouter key is saved"), "{named}");
+    assert!(
+        named.contains("only to a session Switchboard launched"),
+        "{named}"
+    );
     let surrender = ["accounts", "surrender", "synthetic-id"];
     assert!(run(&surrender, false).contains("Only the machine that calls the account back"));
     let named = run(&surrender, true);

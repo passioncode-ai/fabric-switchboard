@@ -189,9 +189,32 @@ pub struct Decision {
     pub source: String,
 }
 pub const DECISION_INVALID: &str = "Carry the operator's own words: by operator, the instruction as said (at most 500 characters), when it was said (RFC 3339) and where.";
+/// SB-560 (M3-06): words relayed are fresh: said in the last day, not later than now.
+pub const DECISION_STALE: &str = "The operator's words open an act only within a day of when they were said. Ask the operator again and carry the new words with when they were said.";
+/// How long the operator's words open an act after they were said.
+pub const DECISION_FRESH_SECONDS: i64 = 86_400;
+/// SB-560 (M3-06): a first ceiling above this, in cents, is a loosening too.
+pub const FIRST_CEILING_FREE_CENTS: u32 = 10_000;
+pub const FIRST_CEILING_IN_WINDOW: &str = "A first ceiling above $100 a day is set in the Switchboard window or on the operator's words. From here, set one of $100 or less.";
 pub const NOT_A_LOOSENING: &str = "The operator's words open only raising, clearing or doubling a ceiling, deleting a group, replacing or removing a key, and moving or handing over an account.";
 impl Decision {
+    /// The words' shape, and (SB-560, M3-06) that they were said in the last day and not later
+    /// than five minutes from now, so words relayed once do not open acts long after.
     pub fn check(&self) -> Result<(), String> {
+        self.check_at(crate::monitor::now())
+    }
+    pub fn check_at(&self, now: i64) -> Result<(), String> {
+        self.check_shape()?;
+        let said =
+            time::OffsetDateTime::parse(&self.at, &time::format_description::well_known::Rfc3339)
+                .map_err(|_| DECISION_INVALID.to_string())?
+                .unix_timestamp();
+        if said > now + 300 || said < now - DECISION_FRESH_SECONDS {
+            return Err(DECISION_STALE.into());
+        }
+        Ok(())
+    }
+    fn check_shape(&self) -> Result<(), String> {
         let text = |s: &str, max: usize| {
             !s.trim().is_empty() && s.chars().count() <= max && !s.chars().any(|c| c == '\0')
         };
@@ -773,6 +796,10 @@ pub fn set_ceiling(
         if !by.loosens() {
             let current = file.ceilings.iter().find(|c| c.scope == scope);
             let loosens = match (current, value) {
+                // SB-560 (M3-06): a high first ceiling is a loosening too.
+                (None, Some(cents)) if cents > FIRST_CEILING_FREE_CENTS => {
+                    return Err(FIRST_CEILING_IN_WINDOW.into());
+                }
                 (None, _) => false,
                 (Some(_), None) => true,
                 (Some(c), Some(cents)) => cents > c.cents,
@@ -1251,6 +1278,65 @@ mod tests {
     use std::sync::Mutex;
     use switchboard_core::agent_keys::AgentKey;
     use switchboard_core::Project;
+
+    /// SB-560 (M3-06): the operator's words open an act within a day of when they were said, and
+    /// never words dated later than five minutes from now; a first ceiling above $100 a day is a
+    /// loosening the CLI and MCP cannot make alone.
+    #[test]
+    fn words_go_stale_after_a_day_and_a_high_first_ceiling_is_a_loosening() {
+        let words = |at: i64| Decision {
+            by: "operator".into(),
+            instruction: "do it".into(),
+            at: crate::rfc3339(at).unwrap(),
+            source: "session s".into(),
+        };
+        assert_eq!(words(T - 60).check_at(T), Ok(()));
+        assert_eq!(words(T - DECISION_FRESH_SECONDS + 1).check_at(T), Ok(()));
+        assert_eq!(
+            words(T - DECISION_FRESH_SECONDS - 1).check_at(T),
+            Err(DECISION_STALE.into())
+        );
+        assert_eq!(words(T + 600).check_at(T), Err(DECISION_STALE.into()));
+        let bad = Decision {
+            at: "yesterday".into(),
+            ..words(T)
+        };
+        assert_eq!(bad.check_at(T), Err(DECISION_INVALID.into()));
+
+        let root = tempfile::tempdir().unwrap();
+        let s = Snapshot::default();
+        assert_eq!(
+            set_ceiling(
+                root.path(),
+                &s,
+                ChainScope::Machine,
+                Some(100.01),
+                Surface::Cli,
+                T
+            )
+            .unwrap_err(),
+            FIRST_CEILING_IN_WINDOW
+        );
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(100.0),
+            Surface::Mcp,
+            T,
+        )
+        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(500.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
+    }
 
     const T: i64 = 1_800_000_000;
     const WF: &str = "wf_0123456789abcdef";

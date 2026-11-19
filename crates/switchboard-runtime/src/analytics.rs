@@ -35,6 +35,9 @@ pub const SHARED_FOLDER: &str = "PassionCode";
 pub const SHARED_FILE: &str = "installation.json";
 /// This app's own bookkeeping in its data folder.
 pub const STATE_FILE: &str = "analytics-state.json";
+/// SB-560 (M3-07): turning usage counts on or off is the operator's choice; from the CLI and MCP it
+/// runs on the operator's words, checked and recorded where it runs.
+pub const NEEDS_WORD: &str = "Turning usage counts on or off is the operator's choice. Pass the operator's own words (--operator-said with --said-at and --said-in, or decision in MCP), or use Settings in the window.";
 const SDK: &str = concat!("switchboard-analytics@", env!("CARGO_PKG_VERSION"));
 /// `production` for a release (a version without a pre-release part, built in release mode);
 /// `sandbox` for a debug build or a pre-release (`-rc.N` rehearsals, betas).

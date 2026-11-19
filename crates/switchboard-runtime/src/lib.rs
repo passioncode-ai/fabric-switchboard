@@ -92,6 +92,7 @@ pub mod uninstall;
 mod usage_budget;
 mod usage_gate;
 pub mod usage_mode;
+pub mod value_doors;
 pub mod vault_choice;
 pub mod vesta;
 pub mod walks;
@@ -1020,6 +1021,10 @@ pub enum Operation {
         /// gone answers that no key is saved, never another key.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         slot: Option<spend::KeySlot>,
+        /// SB-560 (M3-01): the one-time ticket the launch wrote for this key
+        /// (`SWITCHBOARD_KEY_TICKET`); without a live one nothing is answered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ticket: Option<String>,
     },
     /// Durable stopped-session registrations and capacity notices (SB-114), CLI/host only.
     Recovery,
@@ -1228,6 +1233,9 @@ pub enum Operation {
     /// SB-390: the key's value, for a session script's `export`; only the CLI asks for it.
     AnthropicKeyValue {
         name: String,
+        /// SB-560 (M3-01): as `AgentKeyValue`'s.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ticket: Option<String>,
     },
     /// SB-404 K1: the provider keys Project Observatory holds, by name, each with where it was
     /// saved here; never a value. Observatory missing is an answer (`state: absent`).
@@ -4790,7 +4798,11 @@ pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str>
     // SB-560 (M3-04): using here an account another machine holds, past the moved-away guard, is
     // the window's or the operator's word, never a bare flag.
     if forced(operation) {
-        return Some(account_send::FORCE_NEEDS_WORD);
+        return Some(match operation {
+            Operation::MachineTrust { .. } => machine_proof::TRUST_NEEDS_WORD,
+            Operation::Analytics { .. } => analytics::NEEDS_WORD,
+            _ => account_send::FORCE_NEEDS_WORD,
+        });
     }
     matches!(
         operation,
@@ -4813,11 +4825,16 @@ pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str>
     )
     .then_some(spend::WINDOW_ONLY)
 }
-/// SB-560 (M3-04): an update or a gift that passes the moved-away guard with `force`.
+/// SB-560 (M3-04, M3-07): what passes only on the window's own button or the operator's words,
+/// checked and recorded on the operation, whatever surface sent it: an update or a gift past the
+/// moved-away guard (`force`), trusting another machine's key, and turning usage counts on or off.
 fn forced(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::Update { force: true, .. } | Operation::Assign { force: true, .. }
+        Operation::Update { force: true, .. }
+            | Operation::Assign { force: true, .. }
+            | Operation::MachineTrust { .. }
+            | Operation::Analytics { enabled: Some(_) }
     )
 }
 /// SB-299: what `spend.json` calls a loosening `OnOperatorsWord` may wrap; none for anything else.
@@ -4825,6 +4842,8 @@ fn operator_action(operation: &Operation) -> Option<&'static str> {
     Some(match operation {
         Operation::Update { force: true, .. } => "account_forced",
         Operation::Assign { force: true, .. } => "account_given_forced",
+        Operation::MachineTrust { .. } => "machine_trusted",
+        Operation::Analytics { enabled: Some(_) } => "analytics_set",
         Operation::SetCeiling { .. } => "ceiling_set",
         Operation::AnswerCeiling { .. } => "ceiling_answered",
         Operation::RemoveProject { .. } => "group_removed",
@@ -6452,7 +6471,25 @@ async fn execute(
             service,
             folder,
             slot,
+            ticket,
         } => {
+            // SB-560 (M3-01): the slot the ticket must name: the one asked, else the folder's.
+            let asked = match &slot {
+                Some(slot) => slot.clone(),
+                None => match store.agent_key_in(&service, folder.as_deref())? {
+                    Some(entry) => entry
+                        .pool
+                        .map_or(spend::KeySlot::Machine, spend::KeySlot::Group),
+                    None => return Err(switchboard_core::agent_keys::NO_AGENT_KEY.into()),
+                },
+            };
+            value_doors::redeem(
+                root,
+                ticket.as_deref(),
+                &value_doors::key_slot(&service, &asked),
+                "agent_key",
+                monitor::now(),
+            )?;
             let key = match slot {
                 Some(slot) => {
                     let pool = match &slot {
@@ -6548,7 +6585,15 @@ async fn execute(
             anthropic_keys::set_model(root, &name, &model)
         }
         Operation::AnthropicKeyRemove { name } => anthropic_keys::remove(root, &store, &name),
-        Operation::AnthropicKeyValue { name } => {
+        Operation::AnthropicKeyValue { name, ticket } => {
+            // SB-560 (M3-01): only for the launch's own one-time ticket.
+            value_doors::redeem(
+                root,
+                ticket.as_deref(),
+                &value_doors::anthropic_slot(&name),
+                "anthropic_key",
+                monitor::now(),
+            )?;
             Ok(json!({"key": anthropic_keys::value(root, &store, &name)?}))
         }
         Operation::ObservatoryKeys => {
@@ -7696,9 +7741,19 @@ async fn execute(
             })
         }
         Operation::SurrenderAccount { id, undo } => {
-            account_send::surrender(&store, &id, undo, monitor::now(), &|token| {
+            let answer = account_send::surrender(&store, &id, undo, monitor::now(), &|token| {
                 refresh_state.wait_settled(token)
-            })
+            });
+            // SB-560 (spec S3.1): every sign-in handed back is journalled.
+            if !undo {
+                value_doors::journal(
+                    root,
+                    "surrender",
+                    if answer.is_ok() { "given" } else { "refused" },
+                    monitor::now(),
+                );
+            }
+            answer
         }
         Operation::SurrenderDelegated { served: false, .. }
         | Operation::AddDelegated { served: false, .. }
@@ -7709,9 +7764,21 @@ async fn execute(
             sender_key,
             undo,
             ..
-        } => account_send::surrender_delegated(&store, &id, &sender_key, undo, &|token| {
-            refresh_state.wait_settled(token)
-        }),
+        } => {
+            let answer =
+                account_send::surrender_delegated(&store, &id, &sender_key, undo, &|token| {
+                    refresh_state.wait_settled(token)
+                });
+            if !undo {
+                value_doors::journal(
+                    root,
+                    "surrender_delegated",
+                    if answer.is_ok() { "given" } else { "refused" },
+                    monitor::now(),
+                );
+            }
+            answer
+        }
         Operation::AddDelegated {
             label,
             provider,
@@ -15349,7 +15416,7 @@ mod usage_gate_tests {
         let words = spend::Decision {
             by: "operator".into(),
             instruction: "передай аккаунт на студию".into(),
-            at: "2026-11-08T01:00:00Z".into(),
+            at: rfc3339(monitor::now()).unwrap(),
             source: "session 0000".into(),
         };
         runtime
@@ -15700,7 +15767,7 @@ mod operators_word_tests {
         spend::Decision {
             by: "operator".into(),
             instruction: "подними потолок до 10".into(),
-            at: "2026-11-07T22:00:00Z".into(),
+            at: rfc3339(monitor::now()).unwrap(),
             source: "session 38adf103".into(),
         }
     }

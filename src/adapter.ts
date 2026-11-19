@@ -219,6 +219,12 @@ const safeErrors = new Set([
   'That machine answered the challenge with a signature that does not hold, so nothing was sent. Check what that ssh name reaches.',
   // SB-560: one machine's key holds at most 16 seats here (answered to that machine by ssh-serve).
   'The calling machine already delegated 16 seats to this computer. Ask it to call one back before delegating another.',
+  // SB-560 part 3: key doors, trust and usage counts on the operator's words, fresh words, a high first ceiling.
+  "A saved key is handed only to a session Switchboard launched, once, from its own script. Launch the agent with Switchboard, or see what is saved with switchboard agents openrouter status or switchboard agents anthropic list.",
+  "Trusting another key for a machine decides which computer receives sign-ins. Pass the operator's own words (--operator-said with --said-at and --said-in, or decision in MCP).",
+  "Turning usage counts on or off is the operator's choice. Pass the operator's own words (--operator-said with --said-at and --said-in, or decision in MCP), or use Settings in the window.",
+  "The operator's words open an act only within a day of when they were said. Ask the operator again and carry the new words with when they were said.",
+  "A first ceiling above $100 a day is set in the Switchboard window or on the operator's words. From here, set one of $100 or less.",
   // SB-560 part 2: a called-back seat, a recall that brought another account, force on the operator's words.
   "This seat was called back by the machine that delegated it, so it stays off here until that machine removes it or gives it back.",
   "The other machine gave back a sign-in of another account, so it was not kept. The account stays on that machine; sign in to it again here if that machine cannot be trusted.",

@@ -319,6 +319,17 @@ fn binary(provider: Provider) -> Result<PathBuf, String> {
 /// A variable the session script fills from a command's output when it starts — a secret the
 /// script must not hold (SB-79, XA-02 A-2): `(name, program, arguments)`.
 type FromCommand<'a> = Option<(&'a str, &'a Path, &'a [String])>;
+/// SB-560 (M3-01): the first argument of a key command that carries its one-time ticket
+/// (`value_doors`): the script sets it as `SWITCHBOARD_KEY_TICKET` for that command alone, never
+/// as an argument. A control character, so no argument a person or a path gives can look like it.
+pub(crate) const TICKET_MARK: &str = "\u{1}ticket:";
+/// The ticket a key command carries, and its real arguments.
+fn ticket_of(arguments: &[String]) -> (Option<&str>, &[String]) {
+    match arguments.first().and_then(|a| a.strip_prefix(TICKET_MARK)) {
+        Some(ticket) => (Some(ticket), &arguments[1..]),
+        None => (None, arguments),
+    }
+}
 /// Printed by a session script that could not read its key; names the fix, never the key.
 const KEY_UNREADABLE: &str =
     "Switchboard could not read the OpenRouter key. Check it on the API keys page, then launch again.";
@@ -353,10 +364,18 @@ fn script_with(
         result.push_str(&format!("export {key}={}\n", quote(value)));
     }
     if let Some((name, command, arguments)) = from_command {
+        let (ticket, arguments) = ticket_of(arguments);
         let mut call = quote(command.to_string_lossy().as_ref());
         for argument in arguments {
             call.push(' ');
             call.push_str(&quote(argument));
+        }
+        if let Some(ticket) = ticket {
+            call = format!(
+                "{}={} {call}",
+                crate::value_doors::TICKET_ENV,
+                quote(ticket)
+            );
         }
         result.push_str(&format!(
             "{name}=\"$({call})\" && [ -n \"${name}\" ] || {{ printf '%s\\n' {} >&2; exit 1; }}\nexport {name}\n",
@@ -461,17 +480,30 @@ fn windows_script_with(
         ));
     }
     if let Some((name, command, arguments)) = from_command {
+        let (ticket, arguments) = ticket_of(arguments);
         let arguments = arguments
             .iter()
             .map(|a| powershell_quote(a))
             .collect::<Vec<_>>()
             .join(", ");
+        let ticket_env = powershell_quote(crate::value_doors::TICKET_ENV);
+        if let Some(ticket) = ticket {
+            result.push_str(&format!(
+                "[Environment]::SetEnvironmentVariable({ticket_env}, {}, 'Process')\n",
+                powershell_quote(ticket)
+            ));
+        }
         result.push_str(&format!(
             "$global:LASTEXITCODE = 0\n$switchboardSecret = & {} @({arguments})\nif ($LASTEXITCODE -ne 0 -or -not $switchboardSecret) {{ [Console]::Error.WriteLine({}); exit 1 }}\n[Environment]::SetEnvironmentVariable({}, [string]$switchboardSecret, 'Process')\nRemove-Variable switchboardSecret\n",
             q(command),
             powershell_quote(KEY_UNREADABLE),
             powershell_quote(name)
         ));
+        if ticket.is_some() {
+            result.push_str(&format!(
+                "[Environment]::SetEnvironmentVariable({ticket_env}, $null, 'Process')\n"
+            ));
+        }
     }
     result.push_str(&format!("$homePath = {}\n$marker = Join-Path $homePath '.session-process'\n$process = Get-Process -Id $PID\n@{{ pid = $PID; created = $process.StartTime.ToUniversalTime().ToFileTimeUtc() }} | ConvertTo-Json -Compress | Set-Content -LiteralPath $marker -Encoding ASCII\nRemove-Item -LiteralPath (Join-Path $homePath '.launch-pending') -Force\nSet-Location -LiteralPath {}\n",q(home),q(working_directory)));
     let arguments = args
@@ -2364,7 +2396,14 @@ fn launch_agent_anthropic_with(
     // SB-515: Hermes runs with its own full access unless the person chose `ask`.
     with_full_access(root, id, &mut args, &mut env);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    // SB-560 (M3-01): the key is handed once, to this script, for a ticket made now.
+    let ticket = crate::value_doors::issue(
+        root,
+        &crate::value_doors::anthropic_slot(key),
+        crate::monitor::now(),
+    )?;
     let key_command = vec![
+        format!("{TICKET_MARK}{ticket}"),
         "--data-dir".to_string(),
         root.to_string_lossy().into_owned(),
         "agents".into(),
@@ -2861,7 +2900,14 @@ fn key_command(
             return Err(crate::spend::STOP_FOLDER_MOVED.into());
         }
     }
+    // SB-560 (M3-01): the key is handed once, to this script, for a ticket made now.
+    let ticket = crate::value_doors::issue(
+        root,
+        &crate::value_doors::key_slot("openrouter", &slot),
+        crate::monitor::now(),
+    )?;
     let mut command = vec![
+        format!("{TICKET_MARK}{ticket}"),
         "--data-dir".to_string(),
         root.to_string_lossy().into_owned(),
         "agents".into(),
@@ -6134,9 +6180,14 @@ mod tests {
                 "export HERMES_HOME={}",
                 quote(home.join("agent-home").to_string_lossy().as_ref())
             )));
-            assert!(text.contains(
-                "OPENROUTER_API_KEY=\"$('/opt/Switchboard Tools/switch'\\''board' '--data-dir' "
-            ));
+            // SB-560 (M3-01): the key command carries its one-time ticket in its environment,
+            // never as an argument.
+            assert!(text.contains("OPENROUTER_API_KEY=\"$(SWITCHBOARD_KEY_TICKET='"));
+            assert!(text.contains("' '/opt/Switchboard Tools/switch'\\''board' '--data-dir' "));
+            assert!(
+                !text.contains('\u{1}'),
+                "the ticket's mark never reaches the script"
+            );
             assert!(
                 text.contains("'agents' 'key' '--service' 'openrouter' '--machine'"),
                 "the key slot the gate read, the machine's here (SB-144, SB-213)"

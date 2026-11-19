@@ -45,6 +45,9 @@ pub const PROOF_REQUIRED: &str = "That machine has not proved it is the one Swit
 /// SB-560 (M2-10): an answer to the challenge whose signature does not hold, pinned or not.
 pub const PROOF_INVALID: &str = "That machine answered the challenge with a signature that does not hold, so nothing was sent. Check what that ssh name reaches.";
 pub const CHANGES_FILE: &str = "machine-key-changes.json";
+/// SB-560 (M3-07): trusting a key decides which computer receives sign-ins; from the CLI and MCP
+/// it runs on the operator's words, checked and recorded where it runs.
+pub const TRUST_NEEDS_WORD: &str = "Trusting another key for a machine decides which computer receives sign-ins. Pass the operator's own words (--operator-said with --said-at and --said-in, or decision in MCP).";
 
 /// SB-560 (spec S2.2): what one proof of another machine found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
