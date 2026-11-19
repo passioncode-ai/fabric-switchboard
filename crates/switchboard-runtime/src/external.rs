@@ -1988,7 +1988,7 @@ pub(crate) const RENEWAL_HEADROOM: usize = 512;
 /// SB-542: whether a renewal's write of `auth` would fit one `security -i` line, as written or
 /// without its token-less MCP entries (`external_keychain::add_compacting` writes it so), asked
 /// before the grant spends the refresh token. Runs nothing.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 pub(crate) fn fits_or_compacted(service: &str, user: &str, auth: &[u8]) -> bool {
     use switchboard_core::security_cli::fits;
     fits(service, user, auth, RENEWAL_HEADROOM)
@@ -2688,6 +2688,7 @@ mod tests {
         );
         assert_eq!(*f.keys.borrow(), before);
     }
+    #[cfg(unix)]
     #[test]
     fn a_renewal_fits_when_the_item_fits_without_its_token_less_mcp_entries() {
         let stubs: serde_json::Map<String, serde_json::Value> = (0..60)
