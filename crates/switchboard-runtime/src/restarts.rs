@@ -910,16 +910,18 @@ fn in_place_outcome(
 /// `host_refused` (the host would not), `host_gone` (no host answered), `host_busy` (a host took
 /// the connection and did not answer in time, SB-413), `still_running` (the
 /// process did not end) or `not_started` (no Terminal window opened).
+/// SB-561 (S1.1, S1.2): a wave's resume of `e`, from the one builder, before anything is ended:
+/// the account checked, the launch's own permissions and environment. The host's own launch
+/// continues: its record and its viewers stay the session's.
 #[cfg(unix)]
-fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'static str>) {
-    let Some(program) = crate::launch::find_program("claude") else {
-        return ("failed", Some("cannot_resume"));
-    };
+fn wave_resume(
+    root: &Path,
+    wave: &Wave,
+    e: &Entry,
+    program: &Path,
+) -> Result<crate::resume::Resume, String> {
     let prompt = e.caller.then(|| caller_prompt(wave));
-    // SB-561 (S1.1, S1.2): the one builder, before anything is ended: the account checked (a
-    // resume it refuses leaves the session running, skipped), the launch's own permissions and
-    // environment. The host's own launch continues: its record and its viewers stay the session's.
-    let resume = match crate::resume::build(
+    crate::resume::build(
         root,
         &crate::resume::Target {
             session: &e.session,
@@ -928,11 +930,20 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
             live: e.permissions.as_deref(),
             restarting: true,
         },
-        &program,
+        program,
         prompt.as_deref(),
         e.launch_id.as_deref(),
         crate::monitor::now(),
-    ) {
+    )
+}
+
+#[cfg(unix)]
+fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'static str>) {
+    let Some(program) = crate::launch::find_program("claude") else {
+        return ("failed", Some("cannot_resume"));
+    };
+    // A resume its account refuses leaves the session running, skipped.
+    let resume = match wave_resume(root, wave, e, &program) {
         Ok(resume) => resume,
         Err(_) => return ("skipped", Some("account_refused")),
     };
@@ -1058,6 +1069,31 @@ mod tests {
         assert!(
             out.find("export SWITCHBOARD_LAUNCH_ID='L-2'").unwrap() > out.find("\nunset ").unwrap()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_waves_resume_is_built_by_the_one_builder_with_its_launch_and_mode() {
+        // SB-561 (S1.1, S1.3): a hosted session's resume reports to its host's launch, with the
+        // permission mode its process ran with when the plan read it.
+        let root = tempfile::tempdir().unwrap();
+        let e = Entry {
+            launch_id: Some("L-7".into()),
+            in_place: true,
+            permissions: Some("acceptEdits".into()),
+            ..entry("S1", 7, false)
+        };
+        let w = wave(vec![e.clone()]);
+        let r = wave_resume(root.path(), &w, &e, Path::new("/usr/bin/claude")).unwrap();
+        assert!(r.script.contains("export SWITCHBOARD_LAUNCH_ID='L-7'"));
+        assert!(r
+            .script
+            .contains("'--permission-mode' 'acceptEdits' --resume 'S1'"));
+        assert!(
+            !r.script.contains(".session-pid"),
+            "a launch of its own: its host holds it"
+        );
+        assert_eq!(r.permissions, "acceptEdits");
     }
 
     #[test]

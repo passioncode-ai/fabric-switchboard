@@ -346,6 +346,7 @@ fn hosts_of(
     root: &Path,
     seen: &[Seen],
 ) -> (HashMap<String, String>, std::collections::HashSet<String>) {
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut hosted = HashMap::new();
     let mut consoles = std::collections::HashSet::new();
     if seen.is_empty() {
@@ -969,8 +970,8 @@ fn act_on(root: &Path, s: &Seen, act: Act) -> &'static str {
     }
     // SB-561 (S1.2): the account is checked before the session is stopped: a resume it would
     // refuse leaves the session as it is.
-    match prepare(root, s, prompt, None) {
-        Prepared::Refused => return "left_account",
+    match prepare(root, s, prompt, None, duty_script(root, &s.session)) {
+        Prepared::Refused(why) => return why,
         Prepared::Ready(path, resume) => {
             if !stop(s.pid) {
                 return "still_running";
@@ -991,15 +992,16 @@ fn act_on(root: &Path, s: &Seen, act: Act) -> &'static str {
 enum Prepared {
     /// The script, written, and the resume it holds.
     Ready(PathBuf, crate::resume::Resume),
-    /// The account may not serve the resume: the session is left running.
-    Refused,
+    /// The resume was refused (`left_account`: its account may not serve it;
+    /// `left_not_prepared`: its home could not be prepared): the session is left running.
+    Refused(&'static str),
     /// Nothing can resume it (no folder, no `claude`, no script): stopped as a close, as before.
     Cannot(&'static str),
 }
 
-/// SB-561 (S1.1): a restart's resume, from the one builder, written to `duty/<session>.command`.
+/// SB-561 (S1.1): a restart's resume, from the one builder, written to `path`.
 #[cfg(unix)]
-fn prepare(root: &Path, s: &Seen, prompt: bool, launch: Option<&str>) -> Prepared {
+fn prepare(root: &Path, s: &Seen, prompt: bool, launch: Option<&str>, path: PathBuf) -> Prepared {
     prepare_for(
         root,
         &crate::resume::Target {
@@ -1011,7 +1013,8 @@ fn prepare(root: &Path, s: &Seen, prompt: bool, launch: Option<&str>) -> Prepare
         },
         prompt,
         launch,
-        duty_script(root, &s.session),
+        path,
+        crate::launch::find_program("claude").as_deref(),
     )
 }
 
@@ -1022,23 +1025,27 @@ fn prepare_for(
     prompt: bool,
     launch: Option<&str>,
     path: PathBuf,
+    program: Option<&Path>,
 ) -> Prepared {
     if !Path::new(target.cwd).is_dir() {
         return Prepared::Cannot("closed_no_folder");
     }
-    let Some(program) = crate::launch::find_program("claude") else {
+    let Some(program) = program else {
         return Prepared::Cannot("closed_no_claude");
     };
     let resume = match crate::resume::build(
         root,
         target,
-        &program,
+        program,
         prompt.then_some(CONTINUE_PROMPT),
         launch,
         crate::monitor::now(),
     ) {
         Ok(resume) => resume,
-        Err(_) => return Prepared::Refused,
+        Err(e) if e == crate::resume::NOT_PREPARED => {
+            return Prepared::Refused("left_not_prepared")
+        }
+        Err(_) => return Prepared::Refused("left_account"),
     };
     let written = path
         .parent()
@@ -1073,16 +1080,12 @@ fn restart_in_host(root: &Path, s: &Seen, launch: &str, prompt: bool) -> &'stati
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect::<String>()
     ));
-    let resume = match prepare(root, s, prompt, Some(launch)) {
-        Prepared::Refused => return "left_account",
+    // Written straight where a host starts a restart from: the host refuses a program anywhere
+    // else (`session_host::restart_program_allowed`).
+    let resume = match prepare(root, s, prompt, Some(launch), path.clone()) {
+        Prepared::Refused(why) => return why,
         Prepared::Cannot(_) => return "left_not_prepared",
-        Prepared::Ready(script, resume) => {
-            let moved = std::fs::rename(&script, &path).is_ok();
-            if !moved {
-                return "left_not_prepared";
-            }
-            resume
-        }
+        Prepared::Ready(_, resume) => resume,
     };
     let outcome = match crate::session_host::restart(root, launch, &path) {
         Ok(crate::session_host::Restart::Accepted) | Ok(crate::session_host::Restart::Unknown) => {
@@ -1141,10 +1144,18 @@ fn resume(
         live: permissions,
         restarting: false,
     };
-    match prepare_for(root, &target, prompt, None, duty_script(root, session)) {
+    match prepare_for(
+        root,
+        &target,
+        prompt,
+        None,
+        duty_script(root, session),
+        crate::launch::find_program("claude").as_deref(),
+    ) {
         Prepared::Ready(path, resume) => start(root, session, &path, &resume),
         // The session was stopped already: a resume its account refuses is a close.
-        Prepared::Refused => "closed_account",
+        Prepared::Refused("left_not_prepared") => "closed_not_restarted",
+        Prepared::Refused(_) => "closed_account",
         Prepared::Cannot(outcome) => outcome,
     }
 }
@@ -1835,6 +1846,79 @@ mod tests {
         };
         fill_tree(&mut s, &table);
         assert_eq!(s.permissions.as_deref(), Some("plan"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_restart_is_built_by_the_one_builder_and_never_against_its_account() {
+        // SB-561 (S1.1, S1.2, S1.3): the duty officer's restart writes the script `resume::build`
+        // answers, with the live process's own permission mode; a resume the account refuses
+        // writes nothing and leaves the session running.
+        use std::sync::Arc;
+        use switchboard_core::{AuthKind, Credential, MemoryVault, Provider, Store};
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("data");
+        crate::launch::private_dir(&root).unwrap();
+        let store = Arc::new(Store::open(root.clone(), Arc::new(MemoryVault::default())).unwrap());
+        crate::resume::attach(&root, &store);
+        let credential = Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            r#"{"claudeAiOauth":{"accessToken":"tok-now","refreshToken":"r"}}"#,
+        )
+        .unwrap();
+        let id = store
+            .add(
+                "Synthetic".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                credential,
+            )
+            .unwrap()
+            .id;
+        crate::launch::private_dir(&root.join("homes")).unwrap();
+        let home = root.join("homes").join(&id);
+        crate::launch::private_dir(&home).unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let cwd = work.path().to_string_lossy().into_owned();
+        let s = Seen {
+            config: home.clone(),
+            cwd: cwd.clone(),
+            permissions: Some("plan".into()),
+            ..seen("busy", 60, 1, Some(60))
+        };
+        let path = duty_script(&root, &s.session);
+        let target = crate::resume::Target {
+            session: &s.session,
+            config: &s.config,
+            cwd: &s.cwd,
+            live: s.permissions.as_deref(),
+            restarting: true,
+        };
+        let program = Path::new("/bin/claude");
+        let Prepared::Ready(written, resume) =
+            prepare_for(&root, &target, true, None, path.clone(), Some(program))
+        else {
+            panic!("a restart on a usable account is prepared");
+        };
+        assert_eq!(written, path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), resume.script);
+        assert!(resume
+            .script
+            .contains("'--permission-mode' 'plan' --resume 's-1'"));
+        assert!(!resume.script.contains("tok-now"));
+        std::fs::remove_file(&path).unwrap();
+        store.update(&id, "Synthetic".into(), false).unwrap();
+        assert!(matches!(
+            prepare_for(&root, &target, true, None, path.clone(), Some(program)),
+            Prepared::Refused("left_account")
+        ));
+        assert!(!path.exists(), "nothing written for a refused restart");
+        assert!(matches!(
+            prepare_for(&root, &target, true, None, path, None),
+            Prepared::Cannot("closed_no_claude")
+        ));
     }
 
     #[test]

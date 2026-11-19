@@ -536,6 +536,12 @@ pub fn check(
     let store = store_for(root).ok_or(ACCOUNTS_UNREAD)?;
     let snapshot = store.snapshot().map_err(|_| ACCOUNTS_UNREAD)?;
     let stop = crate::recovery::live_stop_sessions(root, now).contains(session);
+    // One session per Switchboard home, as at a launch (`launch::Reservation`): a resume never
+    // starts beside another session there. The duty officer's and a wave's restart stop the
+    // session's own process first.
+    if !restarting && crate::launch::ensure_idle(config).is_err() {
+        return Err(HOME_BUSY.into());
+    }
     match home {
         Home::Managed(pool) => {
             if let Some(why) = group_refusal(&snapshot, &pool) {
@@ -554,9 +560,6 @@ pub fn check(
         Home::Isolated(id) => {
             if let Some(why) = account_refusal(&snapshot, &id) {
                 return Err(why.into());
-            }
-            if !restarting && crate::launch::ensure_idle(config).is_err() {
-                return Err(HOME_BUSY.into());
             }
             let account = snapshot
                 .accounts
@@ -1069,6 +1072,38 @@ mod tests {
         };
         started(&f.root, &r, session, 1001);
         assert!(!crate::recovery::live_stop_sessions(&f.root, 1001).contains(session));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_resume_never_starts_beside_another_session_in_its_home() {
+        // SB-561 (S1.5): one session per Switchboard home, as at a launch.
+        let f = fixture();
+        let id = f.add("default", "tok-a");
+        let home = f.home(&id);
+        // This test process stands for a session running there (its marker names it).
+        std::fs::write(home.join(".session-pid"), std::process::id().to_string()).unwrap();
+        assert_eq!(
+            check(&f.root, &home, "S1", false, 1).unwrap_err(),
+            HOME_BUSY
+        );
+        assert!(
+            check(&f.root, &home, "S1", true, 1).is_ok(),
+            "a restart stops the home's own session first"
+        );
+        std::fs::remove_file(home.join(".session-pid")).unwrap();
+        // A live Claude Code session file in the home holds it too (a hosted resume's).
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        std::fs::write(
+            home.join("sessions")
+                .join(format!("{}.json", std::process::id())),
+            "{}",
+        )
+        .unwrap();
+        assert_eq!(
+            check(&f.root, &home, "S1", false, 1).unwrap_err(),
+            HOME_BUSY
+        );
     }
 
     #[test]
