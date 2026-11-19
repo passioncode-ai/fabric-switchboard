@@ -22,6 +22,9 @@ const ERRORS_WARN: u64 = 50;
 pub struct Inputs<'a> {
     pub attention: &'a Value,
     pub bugs: &'a Value,
+    /// SB-510: the watchdog's current findings (`watchdog::current`); `None` when it is off,
+    /// never ran or its report is stale, which reads as unknown, never as ok.
+    pub watchdog: Option<&'a [Value]>,
     pub owner_running: bool,
     pub version: &'a str,
     pub now: i64,
@@ -164,6 +167,28 @@ pub fn report(inputs: &Inputs) -> Value {
         check("errors_today", "errors", "unknown", 0, None)
     };
     checks.push(errors);
+    // SB-510: what the watchdog, outside the owner, found: the owner stopped or silent, an act
+    // left half done, a board run gone or a session in two processes for too long.
+    checks.push(match inputs.watchdog {
+        None => check("watchdog", "lifecycle", "unknown", 0, None),
+        Some(findings) => {
+            let state = if findings.is_empty() {
+                "ok"
+            } else if findings.iter().any(|f| f["severity"] == "fail") {
+                "fail"
+            } else {
+                "warn"
+            };
+            let n = findings.len() as u64;
+            check(
+                "watchdog",
+                "lifecycle",
+                state,
+                n,
+                (n > 0).then_some("switchboard_watchdog"),
+            )
+        }
+    });
     let state = worst(checks.iter().map(|c| c["state"].as_str().unwrap_or("")));
     json!({
         "schema": SCHEMA,
@@ -183,6 +208,7 @@ mod tests {
         report(&Inputs {
             attention: &attention,
             bugs: &bugs,
+            watchdog: Some(&[]),
             owner_running: owner,
             version: "0.7.102",
             now: 10 * 86_400 + 100,
@@ -311,5 +337,33 @@ mod tests {
             true,
         );
         assert_eq!(state_of(&old, "crashes"), "warn");
+    }
+
+    #[test]
+    fn the_watchdogs_findings_set_its_check_and_no_report_is_unknown() {
+        let now = 10 * 86_400 + 100;
+        let with = |watchdog: Option<&[Value]>| {
+            report(&Inputs {
+                attention: &json!({"items": []}),
+                bugs: &json!({"crashes": [], "counting": true, "errors": []}),
+                watchdog,
+                owner_running: false,
+                version: "0.7.121",
+                now,
+            })
+        };
+        assert_eq!(state_of(&with(Some(&[])), "watchdog"), "ok");
+        assert_eq!(state_of(&with(None), "watchdog"), "unknown");
+        let acts = [json!({"code": "act_unfinished", "severity": "warn", "ids": ["S1"]})];
+        assert_eq!(state_of(&with(Some(&acts)), "watchdog"), "warn");
+        let down = [
+            json!({"code": "owner_down", "severity": "fail", "ids": []}),
+            json!({"code": "act_unfinished", "severity": "warn", "ids": ["S1"]}),
+        ];
+        let r = with(Some(&down));
+        assert_eq!(state_of(&r, "watchdog"), "fail");
+        assert_eq!(r["state"], "fail");
+        // Counts and codes only: a session id the report holds never leaves.
+        assert!(!r.to_string().contains("S1"));
     }
 }

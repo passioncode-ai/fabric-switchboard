@@ -100,8 +100,9 @@ pub fn transcript(config: &Path, cwd: &str, session: &str) -> PathBuf {
 }
 
 /// Where a session can be resumed from: its config folder and working folder, from the newest
-/// end recorded here, else a launch record naming it (its home), else a limit stop (the person's
-/// own Claude folder).
+/// end recorded here, else a launch record naming it (its home), else the ledger of live sessions
+/// (SB-508: a session the person started in a terminal or an editor, seen live in the last week),
+/// else a limit stop (the person's own Claude folder).
 pub fn locate(root: &Path, session: &str, now: i64) -> Option<(PathBuf, String)> {
     if let Some(v) = recent(root, now - WINDOW_SECONDS)
         .into_iter()
@@ -120,6 +121,9 @@ pub fn locate(root: &Path, session: &str, now: i64) -> Option<(PathBuf, String)>
             };
             return Some((config, r["working_directory"].as_str()?.to_owned()));
         }
+    }
+    if let Some(found) = crate::live_ledger::locate(root, session, now) {
+        return Some(found);
     }
     let stops = crate::recovery::read(root).ok()?;
     let stop = stops.iter().find(|s| s.session == session)?;
@@ -254,6 +258,45 @@ mod tests {
                     .permissions()
             ) & 0o777,
             0o600
+        );
+    }
+
+    #[test]
+    fn a_session_nobody_closed_or_launched_is_found_in_the_live_ledger() {
+        // SB-508: started by the person in a terminal, seen live by the watch, never closed by
+        // Switchboard: after a reboot `locate` still knows its config and working folders.
+        let root = tempfile::tempdir().unwrap();
+        let session = "33333333-3333-4333-8333-333333333333";
+        assert!(locate(root.path(), session, 5000).is_none());
+        let ledger = crate::live_ledger::merge(
+            &crate::live_ledger::Ledger::default(),
+            &[crate::live_ledger::Observed {
+                session: session.into(),
+                config: PathBuf::from("/h/.claude-work"),
+                cwd: "/w/mine".into(),
+                pid: 42,
+            }],
+            |_| "terminal".to_owned(),
+            4000,
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join(crate::live_ledger::FILE),
+            serde_json::to_vec(&ledger).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            locate(root.path(), session, 5000),
+            Some((PathBuf::from("/h/.claude-work"), "/w/mine".to_owned()))
+        );
+        // An end Switchboard recorded still wins over the ledger.
+        record(
+            root.path(),
+            json!({"session": session, "config": "/h/.claude", "cwd": "/w/other", "reason": "idle", "at": 4500}),
+        );
+        assert_eq!(
+            locate(root.path(), session, 5000),
+            Some((PathBuf::from("/h/.claude"), "/w/other".to_owned()))
         );
     }
 

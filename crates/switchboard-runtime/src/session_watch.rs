@@ -492,10 +492,17 @@ fn watch(root: &Path, now: i64) {
     let (scan, records, pairs) = read_fresh(root, now);
     // SB-412: room in the pool after a refused dispatch is noted once.
     crate::dispatch_refusals::observe(root, &scan, now);
+    // SB-508: every live Claude Code session is kept for a continuation after a reboot or a
+    // crash; a scan that did not read the process table changes nothing.
+    if table_read(&scan) {
+        crate::live_ledger::observe(root, &claude_pids(&scan), now);
+    }
     let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
     let mut found = findings(&rows, &records, &pairs, now, table_read(&scan));
     describe_duplicates(root, &mut found);
-    let before = last_keys(root);
+    let kept = last(root);
+    stamp_first_seen(&mut found, &kept, now);
+    let before: HashSet<String> = kept.iter().map(key).collect();
     for f in &found {
         if !before.contains(&key(f)) {
             let kind = match f["kind"].as_str() {
@@ -511,10 +518,38 @@ fn watch(root: &Path, now: i64) {
     }
     // SB-389: a duplicate's copies and the offer change while its keys stay, so the whole
     // findings are compared, not their keys.
-    if found != last(root) {
+    if found != kept {
         let bytes = serde_json::to_vec(&json!({"at": now, "findings": found})).unwrap_or_default();
         let _ = switchboard_core::private_fs::private_write(&root.join(FILE), &bytes);
     }
+}
+
+/// SB-510: the field each kept finding carries: when the watch first found it (Unix seconds).
+pub const FIRST_SEEN: &str = "first_seen";
+
+/// SB-510: each finding's first sighting, carried from the kept watch (`kept`), else now, so the
+/// watchdog can tell a finding that has stood for a while from a new one.
+pub fn stamp_first_seen(found: &mut [Value], kept: &[Value], now: i64) {
+    for f in found.iter_mut() {
+        let k = key(f);
+        let first = kept
+            .iter()
+            .find(|old| key(old) == k)
+            .and_then(|old| old[FIRST_SEEN].as_i64())
+            .unwrap_or(now);
+        f[FIRST_SEEN] = first.into();
+    }
+}
+
+/// SB-508: the live Claude Code processes a scan read.
+fn claude_pids(scan: &Value) -> HashSet<u32> {
+    scan["sessions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|r| r["agent"] == "claude-code")
+        .filter_map(|r| r["pid"].as_u64().and_then(|p| u32::try_from(p).ok()))
+        .collect()
 }
 
 /// SB-389: each duplicate's copies (status, commands, where they run) and the copy Needs
@@ -544,10 +579,6 @@ fn key(f: &Value) -> String {
     )
 }
 
-fn last_keys(root: &Path) -> HashSet<String> {
-    last(root).iter().map(key).collect()
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -570,6 +601,33 @@ mod tests {
         assert_eq!(children.get(&300), None, "E does not run");
         assert_eq!(children.get(&400), None);
         assert_eq!(children.len(), 1);
+    }
+
+    #[test]
+    fn a_finding_keeps_its_first_sighting_and_only_claude_code_pids_are_live_sessions() {
+        // SB-510: the watchdog reads how long a finding has stood.
+        let kept = vec![
+            json!({"kind": DUPLICATE, "session_id": "s-1", FIRST_SEEN: 100}),
+            json!({"kind": GONE, "launch_id": "L-old"}),
+        ];
+        let mut found = vec![
+            json!({"kind": DUPLICATE, "session_id": "s-1"}),
+            json!({"kind": GONE, "launch_id": "L-old"}),
+            json!({"kind": GONE, "launch_id": "L-new"}),
+        ];
+        stamp_first_seen(&mut found, &kept, 500);
+        let firsts: Vec<i64> = found
+            .iter()
+            .map(|f| f[FIRST_SEEN].as_i64().unwrap())
+            .collect();
+        assert_eq!(firsts, [100, 500, 500]);
+        let scan = json!({"sessions": [
+            {"pid": 10, "agent": "claude-code"}, {"pid": 11, "agent": "codex"},
+            {"pid": 12, "agent": "claude-code"}
+        ]});
+        let mut pids: Vec<u32> = claude_pids(&scan).into_iter().collect();
+        pids.sort_unstable();
+        assert_eq!(pids, [10, 12]);
     }
 
     #[test]

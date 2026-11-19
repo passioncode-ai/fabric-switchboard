@@ -171,6 +171,18 @@ enum Command {
         #[command(subcommand)]
         command: Option<DutyCmd>,
     },
+    /// The watchdog, a system job apart from Switchboard (SB-510): every five minutes it checks
+    /// that Switchboard answers, that no act of the duty officer was left half done for 10
+    /// minutes, that no board run has been gone for 30 and no session has run in two processes
+    /// for 15. It only reports, in Needs attention and the health report; it never acts. Without
+    /// a subcommand: the switch, its job and the last report.
+    Watchdog {
+        /// Check once now, as the job does: needs no running Switchboard and writes the report.
+        #[arg(long)]
+        once: bool,
+        #[command(subcommand)]
+        command: Option<WatchdogCmd>,
+    },
     /// Whether Switchboard reads or changes your own Claude Code and Codex sign-in on this
     /// computer. Off on a teammate's computer that only serves seats an organization
     /// delegated: nothing captures, activates, renews or copies from your own sign-in, and the
@@ -1116,6 +1128,13 @@ enum OwnSignInCmd {
     /// Switchboard may read and change your own sign-in (the default).
     On,
     /// Switchboard never reads or changes your own sign-in on this computer.
+    Off,
+}
+#[derive(Subcommand)]
+enum WatchdogCmd {
+    /// Turn the watchdog on (the default); the app puts its job in place.
+    On,
+    /// Turn the watchdog off and take its job out.
     Off,
 }
 #[derive(Subcommand)]
@@ -2564,6 +2583,15 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         mcp::Server::new(root, read_only).serve().await?;
         return Ok(Value::Null);
     }
+    // SB-510: the watchdog's own run needs no owner and no store; it only reads, probes and
+    // writes its report, so it works while the owner is down.
+    if let Command::Watchdog { once: true, .. } = cli.command {
+        return Ok(switchboard_runtime::watchdog::once(
+            &root,
+            switchboard_runtime::session_watch::now(),
+        )
+        .await);
+    }
     // SB-299: needs no owner and no store.
     if let Command::Link = cli.command {
         return switchboard_runtime::agents::link_this_cli();
@@ -2977,6 +3005,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         },
         Command::OwnSignIn { command } => Operation::OwnSignIn {
             on: command.as_ref().map(|c| matches!(c, OwnSignInCmd::On)),
+        },
+        Command::Watchdog { command, .. } => Operation::Watchdog {
+            on: command.as_ref().map(|c| matches!(c, WatchdogCmd::On)),
+            run: false,
         },
         // Answered before the owner is asked (`ssh_serve`); here only to keep this match whole.
         Command::SshServe { .. } => return Err(ssh_serve::NOT_THROUGH_SSH.into()),
@@ -6611,6 +6643,8 @@ mod mcp_parity {
         ),
         ("own-sign-in on", Tool("switchboard_own_sign_in")),
         ("own-sign-in off", Tool("switchboard_own_sign_in")),
+        ("watchdog on", Tool("switchboard_watchdog")),
+        ("watchdog off", Tool("switchboard_watchdog")),
         (
             "accounts surrender",
             Not("SB-292: run only by the calling machine's accounts recall over ssh; it prints a sign-in"),
