@@ -863,7 +863,7 @@ when the operator asks. Kept in `<data>/own-sign-in`.
 
 ### `switchboard_usage_mode`: `mode?`
 
-How quota figures are kept current on this computer (SB-518, DEC-0029). `smart` (the default): a
+How quota figures are kept current on this computer (SB-518, DEC-0032). `smart` (the default): a
 response's rate-limit headers with both the five-hour and the seven-day window count as a check, so
 while requests flow the usage endpoint is asked at most every 30 minutes per account; an account
 that carries no traffic is checked every 10 minutes; a switch checks its candidate fresh first;

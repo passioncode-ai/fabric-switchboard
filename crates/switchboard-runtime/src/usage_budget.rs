@@ -1,4 +1,4 @@
-//! SB-518 (DEC-0029): one budget of usage checks per provider. Every quota check reaches the
+//! SB-518 (DEC-0032): one budget of usage checks per provider. Every quota check reaches the
 //! provider's usage endpoint from one address; before this, the background alone sent about
 //! eight a minute with 32 accounts and a 429 held only the one account it answered.
 //!

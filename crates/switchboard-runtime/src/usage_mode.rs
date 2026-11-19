@@ -1,4 +1,4 @@
-//! SB-518 (DEC-0029): the person's choice of how quota figures are kept current, kept in
+//! SB-518 (DEC-0032): the person's choice of how quota figures are kept current, kept in
 //! `<data>/usage-mode` (0600, one word): `smart` (absent, the default), `timer` (the fixed
 //! cadence of 0.7.120) or `on_demand` (no background check). Read at the owner's start and by each
 //! offline command; set with `switchboard usage-mode` or MCP `switchboard_usage_mode`.

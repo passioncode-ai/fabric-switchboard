@@ -194,7 +194,7 @@ impl Store {
     ) -> Result<RotationDecision, String> {
         self.decide(policy, current_id, now, limited, policy.max_age_seconds)
     }
-    /// SB-518 (DEC-0029): the candidate a switch would take if its figures, up to
+    /// SB-518 (DEC-0032): the candidate a switch would take if its figures, up to
     /// `CANDIDATE_RANK_MAX_AGE_SECONDS` old, were current, when they are older than the policy
     /// allows: the caller checks it fresh before the pass decides, and `rotation_decision_with`
     /// then switches to it only on that fresh figure. None when the decision already has a
@@ -219,11 +219,8 @@ impl Store {
                 .iter()
                 .find(|a| Some(a.id.as_str()) == current_id)
                 .and_then(|a| {
-                    fresh_usage(
-                        a,
-                        policy.max_age_seconds.max(CURRENT_MAX_AGE_FLOOR_SECONDS),
-                        now,
-                    )
+                    let age = policy.max_age_seconds.max(CURRENT_MAX_AGE_FLOOR_SECONDS);
+                    fresh_usage(a, age, now).or_else(|| self.header_figure(a, age, now))
                 })
                 .is_some_and(|used| used >= policy.threshold_percent)
         };
@@ -288,7 +285,10 @@ impl Store {
             // SB-518: the account in use is held to the policy's age, but never to less than
             // the real interval between its checks (`CURRENT_MAX_AGE_FLOOR_SECONDS`).
             let current_age = policy.max_age_seconds.max(CURRENT_MAX_AGE_FLOOR_SECONDS);
-            let Some(usage) = fresh_usage(current, current_age, now) else {
+            let Some(usage) = fresh_usage(current, current_age, now).or_else(|| {
+                self.header_figure(current, current_age, now)
+                    .filter(|used| *used >= policy.threshold_percent)
+            }) else {
                 return Ok(hold("usage_unavailable"));
             };
             if usage < policy.threshold_percent {
@@ -409,6 +409,31 @@ impl Store {
                 "no_eligible_account"
             }),
         })
+    }
+    /// SB-518 (DEC-0032): the five-hour and seven-day figures of the account in use as its
+    /// last complete response headers gave them, when those came within `max_age` and nothing
+    /// since says otherwise: the higher of the two. Used only to learn that the account in use
+    /// reached its threshold while the endpoint's per-model windows are older (a header never
+    /// freshens those); below the threshold such a figure decides nothing, and without one the
+    /// usage is unknown, never zero.
+    fn header_figure(&self, account: &Account, max_age: i64, now: i64) -> Option<f64> {
+        let seen = self.header_seen_at(&account.id)?;
+        let usage = account.usage.as_ref()?;
+        let health = account.usage_health.as_ref()?;
+        if health.status != "ok" || seen > now || now - seen > max_age || health.checked_at < seen {
+            return None;
+        }
+        let windows: Vec<&crate::UsageWindow> = crate::HEADER_WINDOWS
+            .iter()
+            .map(|name| usage.windows.iter().find(|w| w.name == *name))
+            .collect::<Option<_>>()?;
+        if windows
+            .iter()
+            .any(|w| w.resets_at.is_some_and(|t| t <= now))
+        {
+            return None;
+        }
+        windows.iter().map(|w| w.used_percent).reduce(f64::max)
     }
     fn rotation_credential_eligible(
         &self,

@@ -1089,7 +1089,7 @@ fn routed_and_in_use_accounts_keep_the_three_minute_cadence_and_spares_of_a_rota
     for id in [&rotating, &idle, &routed, &other, &idle_free] {
         observe(&store, id, 40., now);
     }
-    // SB-518 (DEC-0029): an account that only could be switched to carries no traffic; it is
+    // SB-518 (DEC-0032): an account that only could be switched to carries no traffic; it is
     // read on the idle cadence, and a switch to it checks it fresh first.
     assert_eq!(next_check(&store, &rotating), now + CHECK_IDLE_SECONDS);
     assert_eq!(next_check(&store, &routed), now + CHECK_ACTIVE_SECONDS);
@@ -2372,7 +2372,7 @@ fn with_no_room_anywhere_a_limited_group_waits_on_the_account_free_first() {
     assert_eq!(decision.candidate_id.as_deref(), Some(c.as_str()));
 }
 
-// SB-518 (DEC-0029): the smart usage mode, the store's half.
+// SB-518 (DEC-0032): the smart usage mode, the store's half.
 fn header_usage(percent: f64, at: i64, windows: &[&str]) -> Usage {
     Usage {
         used_percent: percent,
@@ -2458,38 +2458,71 @@ fn a_complete_header_observation_postpones_the_next_check_up_to_the_ceiling() {
 }
 
 #[test]
-fn a_header_keeps_the_endpoints_other_windows_current_only_inside_the_ceiling() {
-    use switchboard_core::PASSIVE_CEILING_SECONDS;
+fn the_account_in_use_switches_on_its_header_figures_while_its_other_windows_age() {
     let (_root, _vault, store) = setup();
     let now = clock() - 3000;
-    let id = routed_account(&store, now);
+    let current = account(&store, "org-current", now);
+    let spare = account(&store, "org-spare", now);
+    store.select(Provider::Claude, "default", &current).unwrap();
     let both = ["five_hour", "seven_day"];
-    let observed = |store: &Store| {
-        store
-            .snapshot()
-            .unwrap()
-            .accounts
-            .into_iter()
-            .find(|a| a.id == id)
-            .unwrap()
-            .usage
-            .unwrap()
-    };
-    store.observe(&id, endpoint_usage(10., now)).unwrap();
+    let p = policy();
+    let none = Default::default();
+    store.observe(&current, endpoint_usage(50., now)).unwrap();
+    // Ten minutes of headers: the per-model window keeps the endpoint's age.
     store
-        .observe(&id, header_usage(20., now + 120, &both))
+        .observe(&current, header_usage(60., now + 590, &both))
         .unwrap();
-    let usage = observed(&store);
+    let usage = store
+        .snapshot()
+        .unwrap()
+        .accounts
+        .into_iter()
+        .find(|a| a.id == current)
+        .unwrap()
+        .usage
+        .unwrap();
     assert_eq!(
-        usage.observed_at,
-        now + 120,
-        "the per-model window is current"
+        usage.observed_at, now,
+        "a header never freshens a per-model window"
     );
-    assert!(usage.windows.iter().any(|w| w.name == "seven_day_opus"));
-    // Past the ceiling the per-model window keeps the age of the endpoint's last answer.
-    let late = now + PASSIVE_CEILING_SECONDS + 10;
-    store.observe(&id, header_usage(21., late, &both)).unwrap();
-    assert_eq!(observed(&store).observed_at, now + 120);
+    store
+        .observe(&spare, endpoint_usage(10., now + 595))
+        .unwrap();
+    // Below the threshold the header figure decides nothing: the usage stays unknown.
+    assert_eq!(
+        store
+            .rotation_decision_with(&p, Some(&current), now + 600, &none)
+            .unwrap()
+            .reason,
+        "usage_unavailable"
+    );
+    // At it, the fresh header figure is enough to move.
+    store
+        .observe(&current, header_usage(95., now + 598, &both))
+        .unwrap();
+    let decision = store
+        .rotation_decision_with(&p, Some(&current), now + 600, &none)
+        .unwrap();
+    assert_eq!(decision.candidate_id, Some(spare.clone()));
+    // A partial header is not such a figure.
+    let (_root2, _vault2, other) = setup();
+    let current = account(&other, "org-current", now);
+    let spare = account(&other, "org-spare", now);
+    other.select(Provider::Claude, "default", &current).unwrap();
+    other.observe(&current, endpoint_usage(50., now)).unwrap();
+    other
+        .observe(&current, header_usage(95., now + 598, &["five_hour"]))
+        .unwrap();
+    other
+        .observe(&spare, endpoint_usage(10., now + 595))
+        .unwrap();
+    assert_eq!(
+        other
+            .rotation_decision_with(&p, Some(&current), now + 600, &none)
+            .unwrap()
+            .reason,
+        "usage_unavailable"
+    );
 }
 
 #[test]

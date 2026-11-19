@@ -206,7 +206,7 @@ pub enum Operation {
         #[serde(default)]
         on: Option<bool>,
     },
-    /// SB-518 (DEC-0029): how quota figures are kept current (`smart`, `timer`, `on_demand`);
+    /// SB-518 (DEC-0032): how quota figures are kept current (`smart`, `timer`, `on_demand`);
     /// `mode` absent reads the setting.
     UsageMode {
         #[serde(default)]
@@ -1585,7 +1585,7 @@ impl Runtime {
         let limits = limits::LimitState::kept_in(root.join(limits::EVIDENCE_FILE), monitor::now());
         let statistics = statistics::Statistics::load(&root);
         let own_sign_in_off = own_sign_in::is_off(&root);
-        // SB-518 (DEC-0029): the person's usage mode, read once here and again when changed.
+        // SB-518 (DEC-0032): the person's usage mode, read once here and again when changed.
         store.set_usage_mode(usage_mode::read(&root));
         Ok(Arc::new(Self {
             store,

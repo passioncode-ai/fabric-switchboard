@@ -130,7 +130,7 @@ pub(crate) struct UsageGate {
     /// not checked faster near its limit for a while. Memory only, seeded from the holds read
     /// at start.
     refused_at: Mutex<HashMap<String, i64>>,
-    /// SB-518 (DEC-0029): the per-provider budget every check passes through. Unbudgeted in a
+    /// SB-518 (DEC-0032): the per-provider budget every check passes through. Unbudgeted in a
     /// test's `UsageGate::default()`; an owner's and the offline CLI's come from `kept_in`.
     pub(crate) budget: crate::usage_budget::UsageBudget,
     /// Synthetic usage endpoints for tests; production always uses the fixed provider origins.

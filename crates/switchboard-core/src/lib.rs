@@ -156,7 +156,7 @@ pub const PROJECT_NOT_NATIVE: &str = "This account belongs to a project. The ord
 /// one of its windows resets.
 pub const CHECK_ACTIVE_SECONDS: i64 = 180;
 pub const CHECK_IDLE_SECONDS: i64 = 600;
-/// SB-518 (DEC-0029): a response's rate-limit headers that carry both the five-hour and the
+/// SB-518 (DEC-0032): a response's rate-limit headers that carry both the five-hour and the
 /// seven-day window count as a quota check, so while requests flow the next check from the
 /// usage endpoint waits; but never longer than this after the last check from the endpoint
 /// itself, because headers can lag the real figure and do not carry the per-model windows.
@@ -168,7 +168,7 @@ pub const HEADER_WINDOWS: [&str; 2] = ["five_hour", "seven_day"];
 pub const HEADER_FRESH_SECONDS: i64 = 60;
 /// SB-518: header observations kept in memory reach `accounts.json` at most this often.
 pub const HEADER_FLUSH_SECONDS: i64 = 60;
-/// SB-518 (DEC-0029): how this computer keeps quota figures current, the person's choice.
+/// SB-518 (DEC-0032): how this computer keeps quota figures current, the person's choice.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UsageMode {
     /// Response headers first, the usage endpoint when a figure decides something, under a
@@ -497,9 +497,7 @@ fn usage_valid(u: &Usage) -> bool {
         )
 }
 
-/// `passive` (SB-518): a complete header set within `PASSIVE_CEILING_SECONDS` of the endpoint's
-/// last answer, whose other windows then count as observed with it.
-fn merge_windows(old: &Usage, new: &Usage, passive: bool) -> Option<Usage> {
+fn merge_windows(old: &Usage, new: &Usage) -> Option<Usage> {
     let mut windows = new.windows.clone();
     let mut observed_at = new.observed_at;
     for w in &old.windows {
@@ -510,9 +508,7 @@ fn merge_windows(old: &Usage, new: &Usage, passive: bool) -> Option<Usage> {
             // The aggregate can establish capacity only as recently as every
             // window it contains. A partial header response does not observe
             // the missing weekly/model quota, even when its reset is ahead.
-            if !passive {
-                observed_at = observed_at.min(old.observed_at);
-            }
+            observed_at = observed_at.min(old.observed_at);
         }
     }
     let worst = windows
@@ -2810,7 +2806,7 @@ impl Store {
             self.same_generation(id, expected, read)?;
         }
         let headers = usage.source == "response_headers";
-        // SB-518 (DEC-0029): headers with both windows count as a check; a partial set never
+        // SB-518 (DEC-0032): headers with both windows count as a check; a partial set never
         // does, and never postpones the usage endpoint.
         let complete = headers
             && HEADER_WINDOWS
@@ -2874,7 +2870,7 @@ impl Store {
         } else {
             // SB-518: only an account that carries traffic (the ordinary CLI's, a group's routed
             // one) keeps the active cadence; one that only could be switched to is read on the
-            // idle cadence, and a switch to it checks it fresh first (DEC-0029).
+            // idle cadence, and a switch to it checks it fresh first (DEC-0032).
             let next = next_quota_check(in_use || routed || (!smart && rotates), &usage, observed);
             match near_limit_check(&usage, observed) {
                 Some(sooner) if near_applies => {
@@ -2899,13 +2895,9 @@ impl Store {
         if headers {
             // Stored quota is cleared whenever the credential generation changes, so any
             // stored windows belong to this generation. Headers carry only 5h/7d; the windows
-            // they lack keep the age of the endpoint's last answer, except within the ceiling
-            // (SB-518), where that answer is as current as the cadence promises.
-            if let Some(merged) = a
-                .usage
-                .as_ref()
-                .and_then(|old| merge_windows(old, &usage, passive))
-            {
+            // they lack keep the age of the endpoint's last answer (SB-518 keeps this: a header
+            // never freshens a per-model window; `Store::header_figure` reads its own two).
+            if let Some(merged) = a.usage.as_ref().and_then(|old| merge_windows(old, &usage)) {
                 usage = merged;
             }
         }

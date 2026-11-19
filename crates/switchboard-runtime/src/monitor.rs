@@ -260,7 +260,7 @@ impl Pass {
         runtime
             .usage_gate
             .forget_missing(snapshot.accounts.iter().map(|a| a.id.as_str()));
-        // SB-518 (DEC-0029): the person's mode. `on_demand` checks nothing on a schedule (a
+        // SB-518 (DEC-0032): the person's mode. `on_demand` checks nothing on a schedule (a
         // switch's candidate and a person's check still ask); `timer` keeps 0.7.120's cadence.
         let mode = runtime.store.usage_mode();
         let mut due: Vec<_> = snapshot
@@ -306,7 +306,7 @@ impl Pass {
         // W4 items 2 and 14: Claude Code's sign-in and the accounts that need a new sign-in are
         // read once per pass, before the transaction (Keychain reads held it up to 48 s).
         let inputs = crate::blocking::run(|| rotate_inputs(runtime, native_sources));
-        // SB-518 (DEC-0029): a switch ranks candidates on figures up to fifteen minutes old and
+        // SB-518 (DEC-0032): a switch ranks candidates on figures up to fifteen minutes old and
         // takes one only on a fresh figure: the one it would take is checked now, outside the
         // transaction, counted in its provider's budget. Never a request of a session: the proxy's
         // one move of a refused request (DEC-0002) is untouched.
@@ -601,7 +601,7 @@ fn primed_or_read(
 }
 
 /// The due accounts (oldest first) this pass checks: at most four, and in the `smart` and
-/// `on_demand` modes each only with a token of its provider's budget (SB-518, DEC-0029: two a
+/// `on_demand` modes each only with a token of its provider's budget (SB-518, DEC-0032: two a
 /// minute, a burst of four), so a provider without one waits for a later pass. The `timer` mode
 /// keeps 0.7.120's four a pass with no budget.
 fn choose_checks(
@@ -631,6 +631,7 @@ fn choose_checks(
 /// A schedule stamped ahead of a clock that was set back would otherwise stall probes. SB-518:
 /// every schedule of two minutes or more falls due spread by ± 15 % (`usage_budget::jittered`),
 /// so accounts checked together drift apart instead of falling due in step.
+#[cfg(test)]
 fn due(a: &Account, time: i64) -> bool {
     due_at(a, time, true)
 }
@@ -651,6 +652,7 @@ fn due_at(a: &Account, time: i64, spread: bool) -> bool {
 /// Due for this pass. A row the provider asked to wait for keeps no slot, even when its
 /// schedule says due (a clock set back); a new credential generation — its usage health
 /// cleared — is checked at once. No credential is read here (LC-04).
+#[cfg(test)]
 fn due_now(a: &Account, time: i64, gate: &UsageGate) -> bool {
     due_now_at(a, time, gate, true)
 }
@@ -898,7 +900,7 @@ async fn check_as(
         return Err(switchboard_proxy::USAGE_DISABLED.into());
     }
     let provider = account.map(|a| a.provider);
-    // SB-518 (DEC-0029): while a 429 holds its provider, nobody asks: a person's check is
+    // SB-518 (DEC-0032): while a 429 holds its provider, nobody asks: a person's check is
     // answered as the provider's wait, before any renewal or credential read.
     if let Some(provider) = provider {
         if gate.budget.held_until(provider, now()).is_some() {
@@ -1384,7 +1386,7 @@ fn rotation_excluded(
 }
 /// SB-518: fresh checks of switch candidates a pass makes at most.
 const CONFIRMS_PER_PASS: usize = 2;
-/// SB-518 (DEC-0029): the candidate each enabled policy would switch to on a figure older than it
+/// SB-518 (DEC-0032): the candidate each enabled policy would switch to on a figure older than it
 /// allows is checked now, at most two a pass, each with a token of its provider's budget (it may
 /// run ahead of the bucket like a person's check). The switch itself is decided after, in the
 /// transaction, on the fresh figure only. A native policy uses the sign-in read for the pass.
@@ -2884,7 +2886,7 @@ mod tests {
         account.usage_health = None;
         assert!(due_now(&account, 10_000, &gate));
     }
-    /// SB-518 (DEC-0029): 32 accounts of one provider, all due every three minutes (the
+    /// SB-518 (DEC-0032): 32 accounts of one provider, all due every three minutes (the
     /// demand that made about 640 checks an hour), on a fake clock: the smart mode's budget
     /// lets about 120 through in an hour; the timer mode keeps 0.7.120's four a pass.
     #[test]
@@ -3482,7 +3484,7 @@ mod tests {
             check(store, NATIVE, state, id, Some(&lock), gate).await
         }
 
-        /// SB-518 (DEC-0029): a 429 on one account's usage check holds every account of the
+        /// SB-518 (DEC-0032): a 429 on one account's usage check holds every account of the
         /// provider: no other account's check, a person's included, reaches the endpoint, and the
         /// background leaves them all out of its pass.
         #[tokio::test]
@@ -3522,7 +3524,7 @@ mod tests {
                 .is_some_and(|until| until >= now() + 900 - 5));
         }
 
-        /// SB-518 (DEC-0029): a switch ranks a candidate on a ten-minute-old figure but takes it
+        /// SB-518 (DEC-0032): a switch ranks a candidate on a ten-minute-old figure but takes it
         /// only after one fresh check of it, made before the pass decides.
         #[tokio::test]
         async fn a_switch_checks_its_candidate_fresh_before_it_moves() {
