@@ -3,6 +3,16 @@
 > [board](evidence/backlog.md).
 
 
+## 2026-11-19: SB-550, other machines read every minute through their own Switchboard, with sessions and health (DEC-0033), on branch `sb-550-remote-minute`
+
+- **Asked.** Operator, 2026-11-19, a screenshot of Accounts with a remote machine group: the bar and figure differ from the line under them, the line was drawn over the bar, tell when something does not work, and ping the remote sessions every minute through Switchboard (never the sessions themselves), on a teammate's Switchboard inside the organization too.
+- **Found.** The bar and share were this computer's own old check (`account.usage`), the line the background read of the copy there (`remote-usage.json`, every 15 minutes); the window read that file once; `.usage-sub`'s `-webkit-box` clamp inside the `button.row-usage` (which centres its content) put the line over the bar.
+- **Built.** `remote_usage.rs`: every 60 s (5 min after three failures), one call `remote-status` (accounts, sessions cut to ids and codes by `sessions_digest`, health), fallback to `accounts list` and `sessions --rows` for an older Switchboard (asked again after an hour), leases every 15 minutes (`leases_at`), `machine_view`, `troubled_sessions`, `failing_checks`; CLI `remote-status` and `ssh-serve`'s `RemoteStatus` (seats and the group's sessions, no health); attention `machine_unreachable`, `machine_health`, `machine_sessions`; health check `machines`; window: `remoteUsageCell` (bar, share and age from the copy there; this computer's check only before the first read), `machineReadLine` on each machine's card, `machines-changed` (app stat of the file every 15 s) and the minute's re-read on Accounts and Groups; CSS: the cell starts at its top and the line wraps below the bar.
+- **Decisions.** DEC-0033 (amends DEC-0017's cadence). Health of a remote machine counts only failing checks and its owner not running (a warning there is its own Needs attention). The fallback skips `sessions --rows` behind an older restricted entry (it refuses it).
+- **Checks.** Studio: see the PR (gate EXIT line). Copylot en-US f4524725…79b729de and the changelog 8ed9eeb8; ru-RU e1b07239…4486543b.
+
+**Exact next task.** Review the `sb-550-remote-minute` pull request and merge once its gate reads EXIT 0 on the merged head (renumber DEC-0033 if an open pull request took it); after the release, read `switchboard machines list` on the operator's Mac and check each machine's `read.call` is `status` and the Accounts rows of the machine groups show one number.
+
 ## 2026-11-19: release 0.7.121 and plan section 10 (launch, fleet and lifecycle), waves W10.0 to W10.2 landed
 
 - **Objective.** The operator's order of 2026-11-19: audit attribution, lifecycle and watchers, full access by default, MCP, automatic switching against the provider's load; design the Launch flow (folder, agent, model, billing, key reuse or minting, harness), remote session management and the organization's subscriptions board; build it in waves and release.

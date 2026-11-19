@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0029` (`DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0034` (`DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -313,7 +313,8 @@ research notes); the ones still in force that the board cites are seeded below w
 ### DEC-0017: The accounts on other machines are read in the background, and still never routed here
 
 - **Date:** 2026-11-14
-- **Status:** Accepted (built on branch `wf4`: SB-366, WF-4); amends DEC-0013's "on request"
+- **Status:** Accepted (built on branch `wf4`: SB-366, WF-4); amends DEC-0013's "on request";
+  its cadence and what is read amended by DEC-0033 (every minute, with sessions and health)
 - **Context:** an account moved to another machine is turned off here (DEC-0013), so its row read
   "Not checked while disabled", and its copy there was read only when a person asked
   (`machines --live`). The operator asked that the usage of accounts on another device come here
@@ -903,3 +904,59 @@ research notes); the ones still in force that the board cites are seeded below w
   of SB-452/SB-453: "the proxy should handle an upstream 429 with retry-after: a bounded wait and
   retry inside the proxy before any byte reached the client (a request that did no work, like
   DEC-0002's rule; never retry after bytes were sent)".
+
+### DEC-0033: Each machine is read every minute through its own Switchboard, its sessions and health with its accounts
+
+- **Date:** 2026-11-19
+- **Status:** Accepted (built on branch `sb-550-remote-minute`: SB-550). Amends DEC-0017's cadence
+  (15 minutes, then hourly after three failures) and what is read; DEC-0013's routing rule and
+  DEC-0025's lease cadence stand. The number is the next one free after the decisions on open pull
+  requests (DEC-0027 #821, DEC-0029 #832, DEC-0030 #836, DEC-0032 #856); a pull request that lands
+  first with the same number moves this one to the next free.
+- **Context:** the Accounts row of an account on another machine showed this computer's own old
+  check as its bar and share ("17%, 8d ago") while the line under it gave the background read of
+  its copy there ("Used 0% on the machine, 14 min ago"): two numbers for one account. The window
+  read that file once and did not read it again, so a fresh read could still say "Not read yet",
+  and the line under the bar was drawn over it. The operator asked to tell when something does
+  not work, and to ping the sessions on other machines every minute through Switchboard, never by
+  asking the sessions themselves, on a teammate's Switchboard inside the organization too.
+- **Decision:**
+  - The owner reads each machine group's Switchboard over ssh every minute while it runs, one
+    machine after another on a thread of its own, each call given up at 20 seconds, never two
+    passes at once. Three failures in a row read that machine every five minutes.
+  - One call, `switchboard --json remote-status`, answers that machine's accounts (label,
+    provider, on or off, used share with when its own check observed it, its check's status), its
+    sessions (the Sessions page's rows cut to ids and codes: id, group, why, agent, launch and
+    session ids, since when; never a folder, a label or text a session wrote; the ended rows only
+    counted) and its own `agent-health/1` report. A Switchboard there that does not know the call
+    is read with the older calls in the same read (`accounts list`, then `sessions --rows`) and
+    asked the one call again an hour later.
+  - A teammate's restricted entry (`ssh-serve`, DEC-0025) answers the same call cut to the seats
+    the calling key delegated and the sessions of the group its key line names, with no health:
+    that computer's other data stays its own.
+  - `remote-usage.json` keeps per machine the accounts' shares, the session rows and counts, the
+    health checks' states and which call answered: ids, codes, counts and times only (0600).
+  - The row of an account on another machine shows its copy there: bar, share and age from the
+    last read; this computer's own older check is shown only while there is no read there, and
+    says so. The window reads the file again each minute while Accounts or Groups is on screen,
+    and when the owner writes it (event `machines-changed`, one `stat` per 15-second look).
+  - Needs attention names a machine that did not answer three reads in a row
+    (`machine_unreachable`), and from a read that worked its failing health checks or its owner
+    not running (`machine_health`) and its sessions that need a person: a second copy, a quiet or
+    gone board run (`machine_sessions`). `agent-health/1` counts them in the check `machines`.
+    Switchboard itself sends no message about them.
+  - The leases of seats delegated to a machine are extended at most every 15 minutes, as before;
+    a failed extension is tried at the next read.
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#background-reads-of-other-machines-sb-366-dec-0017),
+  `AGENTS.md` Lifecycle (the child `ssh` and `remote-usage.json` every minute, the window's
+  `machines-changed`, the idle budget), [CLI.md](CLI.md) (`remote-status`, `ssh-serve`,
+  `attention`, `health`), the MCP descriptions of `switchboard_attention`, `switchboard_health` and
+  `switchboard_machines`, the skill's [tools reference](../plugins/switchboard/skills/switching-accounts/references/tools.md),
+  [ux/scenarios.md](ux/scenarios.md) (SCN-092 step 8), [CHANGELOG](../CHANGELOG.md),
+  [evidence/backlog.md](evidence/backlog.md) (SB-550).
+- **Source:** operator 2026-11-19, a screenshot of Accounts with the machine group of a remote
+  machine and two accounts: «вот такие как мне отслеживать и числа с полоской отличаются и в
+  целом надо понимать если что-то не работает и вести пинг по сессиям которые удаленны раз в
+  минуту через свитчборд а не через запросы напрямую к сессиям и на удаленный свитчборд в рамках
+  организации то же самое».
+
