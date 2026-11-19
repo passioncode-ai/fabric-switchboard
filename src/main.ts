@@ -4007,11 +4007,9 @@ function newSessionDialog() {
   const context = openDialog(t('New session'), folders.length ? t('Fabric opens its launch in the project of this folder, and starts the session when you press Start there.') : t('No group has a folder yet. Add a repository to a group first.'), 'sessions-new');
   const cancel = context.actions.querySelector('button');
   if (!folders.length) { if (cancel) cancel.textContent = t('Close'); cancel?.focus(); return; }
-  const field = el('label', 'field'); field.append(el('span', '', t('Folder')));
-  const choice = select(folders.map((f) => [f, folderName(f)])); choice.id = 'new-session-folder'; field.append(choice);
-  const runner = el('label', 'field'); runner.append(el('span', '', t('Agent')));
-  const agent = select([['', t('Fabric chooses')], ['claude-code', 'Claude Code']]); runner.append(agent);
-  context.body.append(field, runner);
+  const choice = select(folders.map((f) => [f, folderName(f)])); choice.id = 'new-session-folder';
+  const agent = select([['', t('Fabric chooses')], ['claude-code', 'Claude Code']]);
+  const grid = el('div', 'form-grid'); grid.append(field(t('Folder'), choice), field(t('Agent'), agent)); context.body.append(grid);
   const go = submit(t('Open in Fabric')); go.className = 'button primary'; context.actions.append(go);
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
