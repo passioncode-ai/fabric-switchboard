@@ -1098,7 +1098,7 @@ mod tests {
             root.path(),
             session,
             "homes/a",
-            json!({"continues": "wf_a", "launched_at": 900}),
+            json!({"continues": "wf_a", "launched_at": 800}),
         );
         assert_eq!(workflow_held(root.path(), "wf_a", 1000), None);
         crate::resumable::mark_resuming(root.path(), session, 990);

@@ -607,6 +607,15 @@ export function dutyOutcomeText(outcome: string | undefined): string | null {
     case 'closed_no_folder': return t('closed, not reopened: its folder is gone');
     case 'closed_no_claude': return t('closed, not reopened: Claude Code was not found');
     case 'closed_not_restarted': return t('closed, not reopened: the Terminal window did not open');
+    // SB-561: a hosted session restarted in its host is a restart as planned; a restart whose
+    // account would not continue it, or whose host would not take it, left the session running.
+    case 'restarted_in_host': return null;
+    case 'left_account': return t('left running: its account would not continue it');
+    case 'left_host_refused': return t('left running: its session host did not restart it');
+    case 'left_host_busy': return t('left running: its session host did not answer in time');
+    case 'left_host_gone': return t('left running: its session host was gone');
+    case 'left_not_prepared': return t('left running: the restart could not be prepared');
+    case 'closed_account': return t('closed, not reopened: its account would not continue it');
     default: return outcome;
   }
 }

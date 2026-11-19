@@ -1156,7 +1156,7 @@ mod tests {
             root.path(),
             &id,
             serde_json::json!({"provider": "claude", "provider_session_id": "session-1",
-                "launched_at": 250}),
+                "launched_at": 250, "ended": {"kind": "exited", "at": 260}}),
             &crate::launches::LaunchedBy::default(),
         )
         .unwrap();

@@ -2092,16 +2092,16 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. “At the next check” lists what the next check would do; “Recent actions” the last five with their time, each “Restarted in {folder}: it {reason}.” or “Closed in {folder}: it {reason}.” and, when it did not go to plan, “Result: {outcome}.”
 3. *Check now* acts at once; *Turn off* / *Turn on* switches it (“The duty officer is off.”, “The duty officer is on.”). The limits change with `switchboard duty set` or MCP `switchboard_duty`.
 **Alt paths:** on Windows “On this system the duty officer only reports; it restarts nothing.” and no *Check now*; the read fails → the read error and the rest of Settings stays.
-**Expected result:** no interactive Claude Code session stays stalled past its limit (busy, writing nothing, using no CPU) or finished past `idle_minutes` (and never before 65 minutes, the longest wake-up a session can set itself; SB-392); a session with a command of its own running, or waiting for the person's answer, is never ended; a restarted one continues in Terminal with its history and its hooks; a Fabric Dashboards console is never touched.
+**Expected result:** no interactive Claude Code session stays stalled past its limit (busy, writing nothing, using no CPU) or finished past `idle_minutes` (and never before 65 minutes, the longest wake-up a session can set itself; SB-392); a session with a command of its own running, or waiting for the person's answer, is never ended; a restarted one continues with its history and its hooks, in its own session host when it runs in one (viewers kept), else in Terminal, with the permission mode its launch ran with and its account checked first: an account that may not serve it leaves the session running and says so (SB-561); a Fabric Dashboards console, known by its ancestors or its launch record, is never touched.
 **UI elements:** the fold and its state, the two lists, *Check now*, *Turn off* / *Turn on*.
 **States covered:** reading, read failed, on, off, nothing due, actions due, unsupported.
 **Errors & recovery:** a restart that could not open Terminal leaves the session closed and says so; its transcript keeps the work, and `claude --resume` from its folder continues it.
 **Status:** draft
 **Meaning:** SB-384, DEC-0021 (operator 2026-11-15: «дежурный по сессиям … не накапливаем эти висящие сессии»).
 **Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md).
-**Coverage:** `duty::tests::*`, ui-logic `dutyReasonText`, `dutyOutcomeText` (`scripts/test-ui-logic.mjs`); WebKit demo (`?demo=1`).
+**Coverage:** `duty::tests::*`, `resume::tests::*`, ui-logic `dutyReasonText`, `dutyOutcomeText` (`scripts/test-ui-logic.mjs`); WebKit demo (`?demo=1`).
 **Product:** unobserved
-**Traces:** SB-384, DEC-0021, SCN-095
+**Traces:** SB-384, DEC-0021, SCN-095, SB-561, DEC-0034
 
 ### SCN-097: See which keys an agent can start on before launching it
 **Persona:** P-01
@@ -2142,13 +2142,13 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Expected result:** one place answers what needs the person, what runs, what waits (for quota or its own wake-up) and what ended, on every machine, and the acts Switchboard already has are one press away.
 **UI elements:** the sidebar entry, the machine sections, the group folds, the rows, *Close this copy*, *Open here*, *Continue*, *End…* and its dialog.
 **States covered:** reading, read failed, stale, part not read, empty, needs attention, running, waiting, ended, can continue, a machine not answering, no Switchboard there, an older one there.
-**Errors & recovery:** an act refused shows its sentence; ending on another machine first has that machine prove its key (SB-357).
+**Errors & recovery:** an act refused shows its sentence; *Continue* on a session whose account is disabled, used on another machine, given to an agent, a delegated seat whose lease ran out, or in a group switched off is refused with that reason, and one stopped on its limit continues through its group's managed route or waits for room (SB-561); ending on another machine first has that machine prove its key (SB-357).
 **Status:** draft
 **Meaning:** SB-395 (operator 2026-11-16 via fabric-dashboards: «сессиям, короче, на каждом уровне нужно видеть сессии»; in this session: «экран сессиями, чтобы виден был, можно было их менеджить»).
 **Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md).
 **Coverage:** `session_rows::tests::*`; WebKit demo (`?demo=1`, sidebar → Sessions).
 **Product:** unobserved
-**Traces:** SB-395, SCN-095, SB-388, SB-342, SB-357
+**Traces:** SB-395, SCN-095, SB-388, SB-342, SB-357, SB-561, DEC-0034
 ### SCN-099: Restart every running session so it loads new skills, and watch each come back
 **Persona:** P-01
 **Goal:** After a new skill, plugin, hook or Claude Code, every running session picks it up without losing its work or history, and the person (or an agent) sees each one come back.
@@ -2301,10 +2301,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Expected result:** no session the restart cut in a turn is lost or started twice, and none that waited for the person, was closed on purpose or is a board run is started; each continuation is a launch of its own, attachable by its launch id, whose record names the launch it continues.
 **UI elements:** the fold and its state, the checkbox, the list of outcomes.
 **States covered:** reading, read failed, on, off, nothing continued, continued, refused by the pool, over the limit, interrupted, failed, unsupported.
-**Errors & recovery:** a continuation that could not start ends its new launch as `not_started` and leaves the old session's history; `sessions continue <id>` continues it by hand.
+**Errors & recovery:** a continuation that could not start ends its new launch as `not_started` and leaves the old session's history; one whose account may not serve it (SB-561: disabled, used elsewhere, given to an agent, a lease ended, a group off) is journalled `failed` and not started; `sessions continue <id>` continues it by hand.
 **Status:** draft
 **Meaning:** SB-450 (Fabric Dashboards, board request 737b04e6: after the Mac rebooted nothing continued the sessions).
 **Copy:** checked with Copylot, register ui, en-US and ru-RU; report ids in [strings](../brand/strings.md#sessions-after-a-restart-scn-105-sb-450-dec-0030).
 **Coverage:** runtime `boot_resume::tests::*`, `resumable::tests::a_session_a_launch_began_to_continue_a_moment_ago_is_not_continued_again`; `tests/mcp.rs` (tool list). No walk in the installed app yet; design pass B NOT_RUN.
 **Product:** unobserved
-**Traces:** SB-450, DEC-0030, SCN-096
+**Traces:** SB-450, DEC-0030, SCN-096, SB-561, DEC-0034
