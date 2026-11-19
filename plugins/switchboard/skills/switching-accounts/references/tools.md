@@ -899,7 +899,8 @@ when the operator asks. Kept in `<data>/own-sign-in`.
 
 How quota figures are kept current on this computer (SB-518, DEC-0032). `smart` (the default): a
 response's rate-limit headers with both the five-hour and the seven-day window count as a check, so
-while requests flow the usage endpoint is asked at most every 30 minutes per account; an account
+while requests flow the usage endpoint is asked about once every 30 minutes per account
+(sooner near the limit or after a pause); an account
 that carries no traffic is checked every 10 minutes; a switch checks its candidate fresh first;
 each provider has a budget of 2 checks a minute (a burst of 4, at most 2 at once), and a 429 on any
 usage check holds the whole provider for at least 15 minutes, doubling on repeats up to an hour.

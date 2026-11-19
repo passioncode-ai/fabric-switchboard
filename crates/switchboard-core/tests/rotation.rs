@@ -2521,13 +2521,14 @@ fn the_account_in_use_switches_on_its_header_figures_while_its_other_windows_age
     store
         .observe(&spare, endpoint_usage(10., now + 595))
         .unwrap();
-    // Below the threshold the header figure decides nothing: the usage stays unknown.
+    // Below the threshold the header figure decides nothing: the account waits for the
+    // endpoint's next answer, which is not "unavailable".
     assert_eq!(
         store
             .rotation_decision_with(&p, Some(&current), now + 600, &none)
             .unwrap()
             .reason,
-        "usage_unavailable"
+        "stale_usage"
     );
     // At it, the fresh header figure is enough to move.
     store

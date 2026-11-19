@@ -278,6 +278,8 @@ impl UsageBudget {
                     strikes,
                 },
             );
+            // Saved under the lock, so two refusals at once never write the older copy last.
+            self.save(&holds);
             holds.clone()
         };
         crate::oplog::event(
@@ -296,7 +298,6 @@ impl UsageBudget {
                 ),
             ],
         );
-        self.save(&snapshot);
         snapshot[provider.as_str()].until
     }
 
@@ -313,16 +314,15 @@ impl UsageBudget {
         if !self.limited {
             return;
         }
-        let snapshot = {
+        {
             let mut holds = lock(&self.holds);
             match holds.get(provider.as_str()) {
                 Some(hold) if hold.recorded_at < started => {}
                 _ => return,
             }
             holds.remove(provider.as_str());
-            holds.clone()
-        };
-        self.save(&snapshot);
+            self.save(&holds);
+        }
     }
 
     /// Takes one token for `caller` at `now`. The background needs a whole token and a free

@@ -330,11 +330,18 @@ impl Store {
             // SB-518: the account in use is held to the policy's age, but never to less than
             // the real interval between its checks (`CURRENT_MAX_AGE_FLOOR_SECONDS`).
             let current_age = policy.max_age_seconds.max(CURRENT_MAX_AGE_FLOOR_SECONDS);
-            let Some(usage) = fresh_usage(current, current_age, now).or_else(|| {
-                self.header_figure(current, current_age, now)
-                    .filter(|used| *used >= policy.threshold_percent)
-            }) else {
-                return Ok(hold("usage_unavailable"));
+            let header = self.header_figure(current, current_age, now);
+            let Some(usage) = fresh_usage(current, current_age, now)
+                .or_else(|| header.filter(|used| *used >= policy.threshold_percent))
+            else {
+                // Headers show the five-hour and seven-day figures below the threshold while
+                // the endpoint's per-model windows age: nothing is unavailable, the endpoint's
+                // next answer is awaited (at most `PASSIVE_CEILING_SECONDS` after its last).
+                return Ok(hold(if header.is_some() {
+                    "stale_usage"
+                } else {
+                    "usage_unavailable"
+                }));
             };
             if usage < policy.threshold_percent {
                 return Ok(hold("below_threshold"));

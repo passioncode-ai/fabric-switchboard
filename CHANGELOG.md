@@ -8,7 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-- Usage checks are smarter and gentler (SB-518): a response's rate-limit headers count as a check, so an account with traffic is asked at most every 30 minutes; each provider gets 2 checks a minute; a refused check pauses the whole provider for at least 15 minutes; a switch checks its candidate first. Choose `switchboard usage-mode smart`, `timer` or `on-demand`.
+- Usage checks are smarter and gentler (SB-518): a response's rate-limit headers count as a check, so Switchboard asks the usage endpoint about an account with traffic only about once every 30 minutes; each provider gets 2 checks a minute; a refused check pauses the whole provider for at least 15 minutes; a switch checks its candidate first. Choose `switchboard usage-mode smart`, `timer` or `on-demand`.
 - The MCP server checks every call against its tool's schema and refuses a wrong argument by name; a read-only server now answers the read form of 12 tools such as the session limit and the duty officer, and refuses a change as read-only instead of answering "Unknown tool."; and an agent can remove a Kimi Code account or the OpenRouter key as the window does (SB-517).
 - Hermes on a named Anthropic key now takes a reasoning level (SB-535): `switchboard agents launch hermes --anthropic <name> --effort xhigh` (also `--reasoning`) starts `hermes --provider anthropic -m <model> --reasoning xhigh`. Such a launch no longer lets Hermes adopt Claude Code's sign-in, has no fallback provider, runs its side tasks (titles, compression and the rest) on the same key and model, and clears every other provider key from its environment, so nothing it does is billed to another account.
 
