@@ -331,6 +331,7 @@ fn read_only_refusal(name: &str) -> String {
 
 /// SB-517: the schema keywords [`validate`] checks. Every other keyword a tool's schema carries
 /// (`description`, `title`, `default`) only documents; a test keeps the schemas inside this set.
+#[cfg(test)]
 const CHECKED_KEYWORDS: [&str; 12] = [
     "type",
     "properties",
