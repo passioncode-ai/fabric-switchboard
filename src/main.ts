@@ -10,9 +10,9 @@ if (native) watchProblems(reportProblem);
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, reportProblem, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dispatchRefusedLine, dispatchStopLineText, dispatchStopNotice, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
+import { feedView, feedBadge, feedMoveLine, feedNotice, feedPriority, feedArrows, statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, machineChoices, remoteGroupChoices, movableAccounts, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dispatchRefusedLine, defaultBoardShare, dispatchStopLineText, dispatchStopNotice, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey, OwnSignIn } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, FeedStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey, OwnSignIn } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -271,7 +271,7 @@ function loadOnboarding() {
 function backgroundRender() {
   if (busy || loading || openMenu || document.querySelector('dialog')) return;
   const key = (document.activeElement as HTMLElement | null)?.dataset.focus;
-  if (render({ background: true })) restoreFocus(key);
+  if (render({ background: true })) restoreFocus(key, true);
 }
 const selected = (account: Account) => snapshot?.routes[`${account.provider}:${account.pool}`] === account.id;
 
@@ -322,7 +322,29 @@ function foldSection(options: { key: string; title: string | Node; state?: strin
 }
 /** WF-1.1 (1.1.3): every link into standing configuration opens its Settings section, then focuses `focusKey` (or the section's header). */
 function goToSettings(section: string, focusKey?: string) { foldChoices.set(section, true); goTo('settings', focusKey ?? `fold-${section}`); }
-function restoreFocus(key?: string) { if (key) document.querySelectorAll<HTMLElement>('[data-focus]').forEach((node) => { if (node.dataset.focus === key) node.focus(); }); }
+// SB-471: after an action, a background read or a closed dialog, focus comes back without scrolling (`keepPlace`): the
+// action's button may now stand elsewhere (an account moved to another group), and the page stays where the person
+// left it. Moving on purpose (a page, a tour step, a fold) still scrolls to what it focuses.
+function restoreFocus(key?: string, keepPlace = false) { if (key) document.querySelectorAll<HTMLElement>('[data-focus]').forEach((node) => { if (node.dataset.focus === key) node.focus({ preventScroll: keepPlace }); }); }
+/** SB-471: the page the last render drew: a render of the same page keeps its scroll, a new page starts as the browser leaves it. */
+let renderedPage: Page | null = null;
+/** SB-471: the scrolled lists inside the page, kept by position across a render (the page itself is the window's). */
+const INNER_SCROLLERS = '.move-options, .project-accounts, .folder-list, .stat-scroll';
+/** Each inner list by its class, the nearest element with an id around it and its place among the same, so a list that appears or goes elsewhere never takes another's position. */
+function scrollerKeys(): [string, HTMLElement][] {
+  const seen = new Map<string, number>();
+  return [...root.querySelectorAll<HTMLElement>(INNER_SCROLLERS)].map((node) => {
+    const base = `${node.className}|${node.parentElement?.closest<HTMLElement>('[id]')?.id ?? ''}`;
+    const n = seen.get(base) ?? 0; seen.set(base, n + 1); return [`${base}|${n}`, node];
+  });
+}
+function scrollState(): { x: number; y: number; inner: Map<string, number> } {
+  return { x: window.scrollX, y: window.scrollY, inner: new Map(scrollerKeys().filter(([, node]) => node.scrollTop > 0).map(([key, node]) => [key, node.scrollTop])) };
+}
+function keepScroll(state: { x: number; y: number; inner: Map<string, number> }) {
+  for (const [key, node] of scrollerKeys()) { const top = state.inner.get(key); if (top) node.scrollTop = top; }
+  if (window.scrollX !== state.x || window.scrollY !== state.y) window.scrollTo(state.x, state.y);
+}
 
 async function reload() {
   if (!native && !demo) { loading = false; render(); return; }
@@ -382,7 +404,7 @@ async function mutate(action: () => Promise<unknown>, success: string | (() => s
     try { snapshot = await adapter.snapshot(); loadError = ''; }
     catch { loadError = t('The action completed, but accounts could not be refreshed. Retry loading the account list.'); }
   } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error, operation); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
-  finally { clock.end(); busy = false; render(); restoreFocus(focusKey); loadOnboarding(); }
+  finally { clock.end(); busy = false; render(); restoreFocus(focusKey, true); loadOnboarding(); }
 }
 
 /** Returns false when a background render found nothing to change and left the DOM alone. */
@@ -398,7 +420,7 @@ function render(options: { background?: boolean } = {}): boolean {
     shell.querySelectorAll<HTMLDetailsElement>('details').forEach((details) => { details.open = openDetails.has(details.querySelector<HTMLElement>('summary')?.dataset.focus); });
     const markup = shell.outerHTML;
     if (options.background && markup === lastRendered) return false;
-    lastRendered = markup; root.replaceChildren(shell); syncCountdown(); if (tourStep !== null) placeTour(); return true;
+    lastRendered = markup; const scroll = scrollState(); const samePage = renderedPage === page; renderedPage = page; root.replaceChildren(shell); if (samePage) keepScroll(scroll); syncCountdown(); if (tourStep !== null) placeTour(); return true;
   };
   const withTour = () => {
     if (tourStep !== null && tourShown()) {
@@ -614,25 +636,8 @@ function delegateFields(context: ReturnType<typeof openDialog>) {
   context.body.append(option, note, lease);
   return () => box.checked ? { leaseHours: Math.round(Number(hours.value)) || 48 } : null;
 }
-/** SB-355 (SCN-092): a sign-in of this computer moves to a machine group's machine over ssh. */
-function moveHereDialog(machine: Machine) {
-  const context = openDialog(t('Move an account to {machine}', { machine: machine.name }), t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
-  // SB-377: a selected account moves too; its group switches to its next account here first.
-  const movable = snapshot!.accounts.filter((a) => a.kind === 'oauth' && a.enabled && snapshot?.elsewhere?.[a.id] === undefined);
-  if (!movable.length) { context.body.append(el('p', 'form-note', t('No account here can move now: only a subscription sign-in that is on and used on this computer moves.'))); context.actions.append(button(t('Done'), () => context.close(), 'button primary')); return; }
-  const which = select(movable.map((a): [string, string] => [a.id, `${a.label} · ${providerName(a.provider)}`]));
-  const pool = input('default'); pool.maxLength = 32;
-  context.body.append(field(t('Account'), which), field(t('Group there'), pool, t('Its group on the other machine.')));
-  const delegated = delegateFields(context);
-  context.actions.append(submit(t('Move')));
-  context.form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const account = movable.find((a) => a.id === which.value); if (!account) return;
-    const delegate = delegated();
-    void dialogSave(context, () => adapter.sendAccount(account.id, machine.name, pool.value.trim() || 'default', delegate), delegate ? t('{label} is delegated to {machine}. This computer calls it back when you ask.', { label: account.label, machine: machine.name }) : t('{label} moved to {machine}. This computer no longer uses it.', { label: account.label, machine: machine.name }));
-  });
-  which.focus();
-}
+/** SB-355 (SCN-092): accounts of this computer move to a machine group's machine over ssh. */
+function moveHereDialog(machine: Machine) { machineMoveDialog([], machine); }
 /** SB-378 (SCN-093 step 7): this computer's cap on working coding sessions. */
 let capacityState: CapacityStatus | null = null; let capacityLoading = false; let capacityError = '';
 function loadCapacity() {
@@ -659,21 +664,35 @@ function capacitySection() {
   return section;
 }
 function capacityDialog() {
-  const context = openDialog(t('Limit of working coding sessions'), t('Fabric board runs and hosted consoles wait while this many sessions work on this computer.'), 'capacity-set');
+  const context = openDialog(t('Limit of working coding sessions'), t("Hosted consoles wait while this many sessions work on this computer. Fabric board runs still start within the board's share."), 'capacity-set');
   const limit = input(capacityState?.cap ? String(capacityState.cap) : '20', 'number'); limit.min = '1'; limit.max = '500'; limit.step = '1'; limit.inputMode = 'numeric';
-  // SB-417: the board's share, left empty for the default (a quarter of the limit, at least 2).
-  const share = input(capacityState?.board_share_set && typeof capacityState.board_share === 'number' ? String(capacityState.board_share) : '', 'number'); share.min = '0'; share.max = '500'; share.step = '1'; share.inputMode = 'numeric';
+  // SB-417: the board's share, left empty for the default (a quarter of the limit, rounded up), which
+  // the empty field shows for the limit typed; the field's top follows the limit.
+  const share = input(capacityState?.board_share_set && typeof capacityState.board_share === 'number' ? String(capacityState.board_share) : '', 'number'); share.min = '0'; share.step = '1'; share.inputMode = 'numeric';
+  const followLimit = () => { const typed = Number(limit.value); const valid = Number.isInteger(typed) && typed >= 1 && typed <= 500; share.max = valid ? String(typed) : '500'; share.placeholder = valid ? String(defaultBoardShare(typed)) : ''; };
+  followLimit(); limit.addEventListener('input', followLimit);
+  // PR #825 review: the field as it opened; unchanged, the save leaves the share to the owner, which
+  // keeps it and clamps it to a lower limit (and says so).
+  const opened = share.value;
   const grid = el('div', 'form-grid');
   grid.append(field(t('Sessions'), limit, t('From 1 to 500.')));
-  grid.append(field(t('Board runs'), share, t('Board runs that start whatever the limit holds, from 0 to the limit. Leave it empty for a quarter of the limit, at least 2.')));
+  grid.append(field(t('Board runs'), share, t('Board runs that start whatever the limit holds, from 0 to the limit. Leave it empty for a quarter of the limit, rounded up.')));
   context.body.append(grid); context.actions.append(submit(t('Save limit')));
+  // The window's own checks below say what is wrong in the window's language; the engine's
+  // validation (in the system's language) would block the submit first.
+  context.form.noValidate = true;
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const value = Number(limit.value);
     if (!Number.isInteger(value) || value < 1 || value > 500) { context.error.textContent = t('Give the session limit as a whole number from 1 to 500.'); limit.focus(); return; }
+    const unchanged = share.value.trim() === opened.trim();
     const board = share.value.trim() === '' ? undefined : Number(share.value);
-    if (board !== undefined && (!Number.isInteger(board) || board < 0 || board > value)) { context.error.textContent = t("Give the board's share as a whole number from 0 to the session limit, with a limit set."); share.focus(); return; }
-    void dialogSave(context, async () => { capacityState = await adapter.capacity(board === undefined ? { cap: value, boardDefault: true } : { cap: value, board }); }, t('Limit saved: {cap} working sessions.', { cap: value }));
+    if (!unchanged && board !== undefined && (!Number.isInteger(board) || board < 0 || board > value)) { context.error.textContent = t("Give the board's share as a whole number from 0 to the session limit."); share.focus(); return; }
+    // Design review 2026-11-17: a share the save clamped to a lower limit is said, as the CLI says it.
+    void dialogSave(context, async () => { capacityState = await adapter.capacity(unchanged ? { cap: value } : board === undefined ? { cap: value, boardDefault: true } : { cap: value, board }); }, () => {
+      const saved = t('Limit saved: {cap} working sessions.', { cap: value });
+      return capacityState?.board_share_clamped && typeof capacityState.board_share === 'number' ? `${saved} ${t("The board's share was larger than the new limit, so it is now {n}.", { n: capacityState.board_share })}` : saved;
+    });
   });
   limit.focus();
 }
@@ -769,6 +788,111 @@ function balancingSection() {
   section.append(list, later);
   for (const line of [...view.backups, ...view.loans, ...view.returns]) section.append(el('p', 'form-note', line));
   return section;
+}
+/** SB-419 (DEC-0028, SCN-104): groups fed from the default group: a switch and a priority on each
+ * group's card, and on the Groups page arrows from the default group to each fed group. */
+let feedState: FeedStatus | null = null; let feedLoading = false; let feedError = ''; let feedKey = '';
+/** What the feed's answer depends on: the groups and the accounts they share. */
+const feedInputs = () => JSON.stringify([(snapshot?.projects ?? []).map((p) => [p.pool, p.shared_accounts ?? []]), snapshot?.default_shared ?? []]);
+function loadFeed() {
+  if (feedLoading) return;
+  feedLoading = true; const key = feedInputs(); const stamp = clock.stamp();
+  void adapter.feed(null).then((s) => { if (clock.accepts(stamp) || !feedState) { feedState = s; feedError = ''; } feedKey = key; }, (e) => { if (clock.accepts(stamp) || !feedState) feedError = t(safeError(e, 'read')); feedKey = key; }).finally(() => { feedLoading = false; render(); });
+}
+function wantFeed() {
+  if (!snapshot) return;
+  if (feedState ? feedKey !== feedInputs() : !feedError) loadFeed();
+}
+/** The map at the top of Groups: the default group, an arrow to each fed group, highest priority first. */
+const FEED_ROW = 32; const FEED_WIDTH = 56;
+function feedMapSection(): HTMLElement | null {
+  const view = feedView(feedState, feedError || null);
+  // Review round 1: a failed read is said once here, with Retry, never only inside folded cards.
+  if (view.state === 'failed') {
+    const box = el('div', 'feed-map-wrap'); const line = el('p', 'account-meta usage-error');
+    line.append(`${view.line} `, button(t('Retry'), () => { feedError = ''; loadFeed(); render(); }, 'text-button', 'feed-retry'));
+    box.append(line); if (view.error) box.append(el('p', 'form-error', view.error));
+    return box;
+  }
+  if (view.state === 'reading') return null;
+  if (!view.arrows.length) { const box = el('div', 'feed-map-wrap'); box.append(el('p', 'account-meta section-state', view.line)); return box; }
+  const wrap = el('div', 'feed-map-wrap');
+  const box = el('div', 'feed-map'); box.setAttribute('role', 'group'); box.setAttribute('aria-label', t('Fed from Default'));
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const height = view.arrows.length * FEED_ROW;
+  const svg = document.createElementNS(svgNs, 'svg');
+  for (const [k, v] of [['class', 'feed-arrows'], ['width', String(FEED_WIDTH)], ['height', String(height)], ['viewBox', `0 0 ${FEED_WIDTH} ${height}`], ['aria-hidden', 'true'], ['focusable', 'false']]) svg.setAttribute(k, v);
+  const defs = document.createElementNS(svgNs, 'defs'); const marker = document.createElementNS(svgNs, 'marker');
+  for (const [k, v] of [['id', 'feed-arrow-head'], ['viewBox', '0 0 6 6'], ['refX', '0'], ['refY', '3'], ['markerWidth', '6'], ['markerHeight', '6'], ['markerUnits', 'userSpaceOnUse'], ['orient', 'auto']]) marker.setAttribute(k, v);
+  const head = document.createElementNS(svgNs, 'path'); head.setAttribute('d', 'M0 0 L6 3 L0 6 z'); head.setAttribute('class', 'feed-arrow-head');
+  marker.append(head); defs.append(marker); svg.append(defs);
+  for (const d of feedArrows(view.arrows.length, FEED_ROW, FEED_WIDTH)) { const path = document.createElementNS(svgNs, 'path'); path.setAttribute('d', d); path.setAttribute('class', 'feed-arrow'); path.setAttribute('marker-end', 'url(#feed-arrow-head)'); svg.append(path); }
+  const targets = el('ol', 'feed-targets');
+  for (const a of view.arrows) {
+    const project = projectOf(a.pool);
+    const item = el('li', 'feed-target');
+    item.append(el('span', 'feed-node', project ? groupDisplayName(project) : a.label), el('span', 'feed-priority', t('Priority {n}', { n: a.priority })));
+    targets.append(item);
+  }
+  box.append(el('span', 'feed-node feed-source', t('Default group')), svg, targets);
+  const setNote = el('p', 'form-note'); setNote.append(`${t('Groups with the same priority are served in the order of their ids. The number of ready accounts is set from the command line:')} `, el('code', 'address', 'switchboard feed set --ready <n>'));
+  wrap.append(el('p', 'account-meta section-state', view.line), box, el('p', 'form-note feed-rule', view.rule), setNote);
+  return wrap;
+}
+/** Review round 1: a priority that did not parse stays in its field, marked, until it is fixed. */
+const feedPriorityTyped = new Map<string, string>();
+/** On a group's card: whether it is fed from the default group, and its priority. */
+function groupFeedRow(project: Project): HTMLElement | null {
+  if (project.tokens) return null;
+  wantFeed();
+  const view = feedView(feedState, feedError || null);
+  // The state of the read is said once, at the top of the page (feedMapSection).
+  if (view.state === 'reading' || view.state === 'failed') return null;
+  const row = el('div', 'group-feed');
+  const entry = view.groups.get(project.pool) ?? { fed: false, priority: null };
+  const shown = groupDisplayName(project);
+  const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = entry.fed; box.dataset.focus = `feed-${project.pool}`;
+  box.setAttribute('aria-label', t('Fed from Default: {group}', { group: shown }));
+  box.addEventListener('change', () => { const on = box.checked; feedPriorityTyped.delete(project.pool); void mutate(async () => { feedState = await adapter.feed({ pool: project.pool, on }); }, () => feedNotice({ group: shown, on, priority: feedState?.available.find((g) => g.pool === project.pool)?.priority ?? undefined }), `feed-${project.pool}`); });
+  option.append(box, el('span', '', t('Fed from Default')));
+  const field = el('label', 'feed-priority-field'); const input = el('input'); input.type = 'number'; input.min = '1'; input.max = '99'; input.step = '1'; input.inputMode = 'numeric';
+  const typed = feedPriorityTyped.get(project.pool);
+  input.value = typed ?? (entry.priority ? String(entry.priority) : ''); input.disabled = !entry.fed; input.dataset.focus = `feed-priority-${project.pool}`;
+  input.setAttribute('aria-label', t('Priority of {group}', { group: shown }));
+  const errorId = `feed-priority-error-${project.pool}`;
+  if (typed !== undefined) { input.setAttribute('aria-invalid', 'true'); input.setAttribute('aria-describedby', errorId); }
+  input.addEventListener('change', () => {
+    const n = feedPriority(input.value);
+    if (n === null) { feedPriorityTyped.set(project.pool, input.value); render(); restoreFocus(`feed-priority-${project.pool}`); return; }
+    feedPriorityTyped.delete(project.pool);
+    void mutate(async () => { feedState = await adapter.feed({ pool: project.pool, priority: n }); }, feedNotice({ group: shown, priority: n }), `feed-priority-${project.pool}`);
+  });
+  field.append(el('span', '', t('Priority')), input);
+  row.append(option, field);
+  if (typed !== undefined) { const error = el('p', 'form-error feed-rule', t('Give the priority as a whole number from 1 (highest) to 99.')); error.id = errorId; row.append(error); }
+  if (!entry.fed) row.append(el('p', 'form-note feed-rule', t('Turn the feed on to set a priority.')));
+  return row;
+}
+/** On Activity: the feed's newest moves, each with its reason. */
+function feedActivityPanel(): HTMLElement | null {
+  wantFeed();
+  const recent = feedState?.recent ?? [];
+  if (!recent.length && !feedState?.on) return null;
+  const panel = el('section', 'about-panel feed-activity'); panel.setAttribute('aria-labelledby', 'feed-activity-heading');
+  const heading = el('h2', '', t('Fed from Default')); heading.id = 'feed-activity-heading';
+  const name = (pool: string) => pool === 'default' ? t('Default group') : (projectOf(pool) ? groupDisplayName(projectOf(pool)!) : poolName(pool, snapshot!.projects));
+  // Review round 1: the feed is on and has moved nothing yet: say so, so it reads as running.
+  if (!recent.length) { panel.append(heading, el('p', 'surface-note', t('The feed is on and has moved no account yet. A pass every 15 minutes keeps the fed groups ready.'))); return panel; }
+  const list = el('ol', 'event-list');
+  for (const e of recent.slice(0, 10)) {
+    const row = el('li', 'event-row'); const line = el('div', 'event-title');
+    const label = snapshot!.accounts.find((a) => a.id === e.account)?.label ?? t('An account no longer saved');
+    line.append(el('strong', '', t('Feed')), el('time', '', new Date(e.at * 1000).toLocaleString(dateLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })));
+    row.append(line, el('p', 'event-detail', feedMoveLine(e, label, name)));
+    list.append(row);
+  }
+  panel.append(heading, list, el('p', 'surface-note', t('A pass every 15 minutes keeps the fed groups ready. Only the newest moves are shown.')));
+  return panel;
 }
 /** SB-143: Codex sessions in a project's folders use its Codex accounts, by one switch. */
 let codexRouteState: CodexRoute | null = null; let codexRouteLoading = false; let codexRouteError = ''; let codexRouteKey = '';
@@ -993,6 +1117,8 @@ function projectsSection() {
     section.append(empty, ...foldlessSection()); return section;
   }
   // WF-8.1 (SB-370): each group folds to one line of state; open, it reads Accounts, Repositories, Agents and keys.
+  // SB-419 (SCN-104): the arrows from the default group to each fed group.
+  wantFeed(); const map = feedMapSection(); if (map) section.append(map);
   const list = el('div', 'group-cards'); list.setAttribute('aria-label', t('Groups'));
   for (const project of projects) list.append(groupCard(project, projects.length === 1));
   section.append(list); section.append(...foldlessSection()); return section;
@@ -1037,6 +1163,9 @@ function groupCard(project: Project, only: boolean) {
     // SB-401: a group switched off says so, and turns on from its menu; the pay-per-token group
     // sets its daily ceiling there, before it is turned on, and takes its folders one by one.
     if (project.off) { const off = el('span', 'badge off-badge', t('Switched off')); off.title = t('No folder runs on this group\'s accounts while it is off.'); parts.push(off); }
+    // SB-419: a fed group says so, with its priority, folded or not.
+    const fedEntry = feedState?.available.find((g) => g.pool === project.pool);
+    if (fedEntry?.fed && fedEntry.priority) parts.push(el('span', 'badge feed-badge', feedBadge(fedEntry.priority)));
     const items: Parameters<typeof menu>[2] = [[t('Edit'), () => projectDialog(project)]];
     if (project.tokens) {
       items.push([t('Add folder…'), () => void addTokensFolders(project)]);
@@ -1089,6 +1218,8 @@ function groupCardBody(project: Project, accounts: Account[]): Node[] {
     }
     people.append(rows);
   }
+  // SB-419 (SCN-104): fed from the default group, with its priority.
+  const feedRow = groupFeedRow(project); if (feedRow) people.append(feedRow);
   // Repositories: the worktree tree as before (SB-147).
   const repos = el('div', 'fold-part'); repos.append(el('h3', 'fold-part-heading', t('Repositories')));
   // SB-401: the pay-per-token group starts with no folder: say so, and add one from here.
@@ -2237,25 +2368,98 @@ function givenFactsLine(account: Account) {
   return line;
 }
 /** SB-283: move a sign-in to another machine over ssh; nothing changes when a step fails. */
-function sendDialog(account: Account) {
-  // SB-355: from one machine to another it comes back here first, then moves.
-  const from = machineOf(snapshot!, account);
-  const context = openDialog(t('Move {label} to another machine', { label: account.label }), from ? t('It comes back from {machine} first, then its sign-in moves over ssh. If the move fails, it stays on this computer.', { machine: from.name }) : t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
-  const machine = input(''); machine.maxLength = 255; machine.placeholder = 'user@studio.local'; machine.required = true;
-  if (!from && Object.values(snapshot!.routes).includes(account.id)) context.body.append(el('p', 'form-note', t('Its groups switch to their next account here first, so their sessions go on.')));
-  const known = (snapshot?.machines ?? []).filter((m) => m.pool !== from?.pool);
-  if (known.length) { const names = el('datalist'); names.id = 'machine-names'; for (const m of known) { const option = el('option'); option.value = m.name; names.append(option); } machine.setAttribute('list', 'machine-names'); context.body.append(names); }
-  const pool = input(account.pool); pool.maxLength = 32;
-  context.body.append(field(t('Machine'), machine, t('As ssh knows it, reachable without a password prompt.')), field(t('Group there'), pool, t('Its group on the other machine.')));
+function sendDialog(account: Account) { machineMoveDialog([account.id], null); }
+/**
+ * SB-473 to SB-476 (plan section 09): one dialog moves one account or several to another machine.
+ * The machine is chosen from the machines this computer knows, its groups are read from it over
+ * ssh, and the accounts move one after another, each with its own line; one that fails stops
+ * nothing else. An account on another machine comes back here first, then moves (SB-355).
+ */
+function machineMoveDialog(checked: string[], to: Machine | null) {
+  const movable = movableAccounts(snapshot!, to);
+  const first = movable.find((a) => checked.includes(a.id)) ?? null;
+  const from = first ? machineOf(snapshot!, first) ?? null : null;
+  const context = openDialog(to ? t('Move accounts to {machine}', { machine: to.name }) : first ? t('Move {label} to another machine', { label: first.label }) : t('Move accounts to another machine'),
+    t('Each sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails for one account, nothing changes for it.'));
+  if (!movable.length) { context.body.append(el('p', 'form-note', t('No account here can move now: only a subscription sign-in that is on and used on this computer moves.'))); context.actions.append(button(t('Done'), () => context.close(), 'button primary')); return; }
+  // The accounts: the one it was opened for checked, the others offered beside it.
+  const list = el('fieldset', 'appearance-options move-options'); list.append(el('legend', 'sr-only', t('Accounts')));
+  const boxes = movable.map((a) => {
+    const option = el('label', 'appearance-option'); const box = el('input'); box.type = 'checkbox'; box.value = a.id; box.checked = checked.includes(a.id); box.dataset.focus = `move-account-${a.id}`;
+    const there = machineOf(snapshot!, a);
+    option.append(box, el('span', '', [a.label, providerName(a.provider), there ? t('on {machine}', { machine: there.name }) : poolName(a.pool, snapshot?.projects)].join(' · ')));
+    list.append(option); return box;
+  });
+  context.body.append(groupField(t('Accounts'), list, t('Accounts on another machine come back here first, then move.')));
+  // The machine: chosen, never guessed; a machine never reached is typed after *Another machine…*.
+  const OTHER = '__other';
+  const picker = select([]); const typed = input(''); typed.maxLength = 255; typed.placeholder = 'user@studio.local'; typed.required = false;
+  const typedField = field(t('Machine as ssh knows it'), typed, t('Reachable without a password prompt.')); typedField.hidden = true;
+  const fill = (choices: { name: string; detail: string }[]) => {
+    picker.replaceChildren();
+    for (const c of choices) { const o = el('option', '', `${c.name} · ${c.detail}`); o.value = c.name; picker.append(o); }
+    const other = el('option', '', t('Another machine…')); other.value = OTHER; picker.append(other);
+    if (to) picker.value = to.name;
+  };
+  const syncOther = () => { const other = picker.value === OTHER; typedField.hidden = !other; typed.required = other; return other; };
+  fill(machineChoices(snapshot?.machines ?? [], [], from)); syncOther();
+  context.body.append(field(t('Machine'), picker), typedField);
+  // The group there: read from the machine; typed only when that read fails.
+  const groupPicker = select([['default', t('Default group')]]); const groupTyped = input(''); groupTyped.maxLength = 32; groupTyped.required = false;
+  const groupNote = el('p', 'form-note'); groupNote.setAttribute('aria-live', 'polite');
+  const groupTypedField = field(t('Group id there'), groupTyped, t('As that machine names it; empty for its default group.')); groupTypedField.hidden = true;
+  context.body.append(field(t('Group there'), groupPicker), groupNote, groupTypedField);
+  let readStamp = 0;
+  const readGroups = async (machine: string) => {
+    const stamp = ++readStamp; groupTypedField.hidden = true; groupPicker.hidden = false;
+    groupNote.textContent = t('Reading the groups on {machine}…', { machine });
+    try {
+      const status = await adapter.remoteStatus(machine); if (stamp !== readStamp) return;
+      const { choices, chosen } = remoteGroupChoices(status, first && !machineOf(snapshot!, first) ? first.pool : null);
+      groupPicker.replaceChildren(); for (const [value, text] of choices) { const o = el('option', '', text); o.value = value; groupPicker.append(o); }
+      groupPicker.value = chosen; groupNote.textContent = '';
+    } catch {
+      if (stamp !== readStamp) return;
+      groupPicker.hidden = true; groupTypedField.hidden = false;
+      groupNote.textContent = t('Could not read the groups on {machine}. Type the group id, or leave it empty for its default group.', { machine });
+    }
+  };
+  const machineName = () => picker.value === OTHER ? typed.value.trim() : picker.value;
+  picker.addEventListener('change', () => { const other = syncOther(); if (other) { typed.focus(); groupPicker.hidden = true; groupTypedField.hidden = false; groupNote.textContent = ''; } else void readGroups(picker.value); });
+  typed.addEventListener('change', () => { if (typed.value.trim()) void readGroups(typed.value.trim()); });
+  // The machines `switchboard targets` knows join the list once read; the first one is read at once.
+  void adapter.targets(false).then((answer) => { const keep = picker.value; fill(machineChoices(snapshot?.machines ?? [], answer.targets, from)); if (keep && keep !== OTHER && [...picker.options].some((o) => o.value === keep)) picker.value = keep; if (!syncOther()) void readGroups(picker.value); }).catch(() => { if (!syncOther()) void readGroups(picker.value); });
   const delegated = delegateFields(context);
-  context.actions.append(submit(t('Move')));
+  const results = el('ul', 'move-results'); results.setAttribute('aria-live', 'polite'); context.body.append(results);
+  const confirm = submit(t('Move')); context.actions.append(confirm);
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
-    const to = machine.value.trim();
+    const target = machineName(); const chosen = boxes.filter((b) => b.checked).map((b) => movable.find((a) => a.id === b.value)!).filter(Boolean);
+    if (!target) { context.error.textContent = t('Choose a machine.'); return; }
+    if (!chosen.length) { context.error.textContent = t('Choose at least one account.'); return; }
+    const pool = (groupPicker.hidden ? groupTyped.value.trim() : groupPicker.value) || 'default';
     const delegate = delegated();
-    void dialogSave(context, () => adapter.sendAccount(account.id, to, pool.value.trim() || 'default', delegate), delegate ? t('{label} is delegated to {machine}. This computer calls it back when you ask.', { label: account.label, machine: to }) : t('{label} moved to {machine}. This computer no longer uses it.', { label: account.label, machine: to }));
+    void (async () => {
+      context.error.textContent = ''; results.replaceChildren(); context.setBusy(true); clock.begin();
+      let failed = 0;
+      try {
+        for (const account of chosen) {
+          const line = el('li', '', t('{label}: moving…', { label: account.label })); results.append(line);
+          const came = machineOf(snapshot!, account);
+          try {
+            await adapter.sendAccount(account.id, target, pool, delegate);
+            line.textContent = came ? t('{label}: came back from {from}, then moved to {machine}.', { label: account.label, from: came.name, machine: target }) : delegate ? t('{label}: delegated to {machine}.', { label: account.label, machine: target }) : t('{label}: moved to {machine}.', { label: account.label, machine: target });
+          } catch (error) { failed += 1; line.textContent = t('{label}: not moved. {reason}', { label: account.label, reason: t(safeError(error, 'change')) }); }
+        }
+        await refreshContext();
+        try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); }
+        render(); loadOnboarding();
+      } finally { clock.end(); context.setBusy(false); }
+      if (!failed) { showNotice(plural(chosen.length, { one: '{n} account moved to {machine}.', other: '{n} accounts moved to {machine}.' }, { machine: target })); context.close(); return; }
+      context.actions.replaceChildren(button(t('Done'), () => context.close(), 'button primary'));
+    })();
   });
-  machine.focus();
+  (boxes.find((b) => b.checked) ?? picker).focus();
 }
 /** SB-318: hands an account over to a colleague or a machine ssh does not reach: the person names the receiver and chooses where the signed record is saved; then the record and this computer's key go to them (SCN-091). */
 function handOverDialog(account: Account) {
@@ -3036,7 +3240,7 @@ function attentionSection(main: HTMLElement) {
   items.forEach((item, index) => {
     const account = item.account_id ? snapshot!.accounts.find((a) => a.id === item.account_id) : undefined;
     const row = el('li', 'attention-row'); const copy = el('div', 'attention-copy');
-    const name = item.label ?? account?.label ?? (item.reason === 'ceiling_question' ? t('Spending ceiling') : item.reason === 'dispatch_refused' ? t('Board runs') : t('An account no longer saved'));
+    const name = item.label ?? account?.label ?? (item.reason === 'ceiling_question' ? t('Spending ceiling') : item.reason === 'dispatch_refused' ? t('Board runs') : item.reason === 'keychain_too_large' ? t('Claude Code sign-in') : t('An account no longer saved'));
     const provider = item.provider ?? account?.provider ?? null; const pool = item.pool ?? account?.pool ?? null;
     const where = [provider ? providerName(provider) : '', pool ? poolName(pool, snapshot?.projects) : ''].filter(Boolean).join(' · ');
     const head = el('div', 'attention-title'); head.append(el('strong', '', name)); if (where) head.append(el('span', 'attention-where', where));
@@ -3046,8 +3250,12 @@ function attentionSection(main: HTMLElement) {
     const key = `attention-${item.account_id ?? `${item.reason}-${index}`}`;
     const act = button(offer?.label ?? attentionActionLabel(item.action.window), () => attentionAct(item, account, key, offer?.pid ?? undefined), 'button row-button', key);
     // A sign-in or a check needs the account here; without it the action has nothing to act on.
-    if ((item.action.window === 'sign_in' && !account && !item.provider) || ((item.action.window === 'check_usage' || item.action.window === 'move_tokens') && !account) || (item.action.window === 'close_copy' && (!item.session_id || !!offer?.disabled)) || (item.action.window === 'dispatch_stop' && !item.launch_id)) { act.disabled = true; act.dataset.locked = 'true'; }
-    row.append(copy, act); list.append(row);
+    // SB-472: an action with nothing to act on offers no button at all, never a disabled one the
+    // person cannot press; the line above says what happens instead.
+    const idle = (item.action.window === 'sign_in' && !account && !item.provider) || ((item.action.window === 'check_usage' || item.action.window === 'move_tokens') && !account) || (item.action.window === 'close_copy' && (!item.session_id || (offer !== null && offer.label === null))) || (item.action.window === 'dispatch_stop' && !item.launch_id);
+    // SB-420: an item whose fix is outside Switchboard offers no button.
+    if (item.action.window === 'none' || idle) row.append(copy); else row.append(copy, act);
+    list.append(row);
   });
   section.append(list); main.append(section);
 }
@@ -3064,6 +3272,7 @@ function attentionAct(item: AttentionItem, account: Account | undefined, key: st
     case 'open_sessions': goTo('sessions'); return;
     case 'open_capacity': goToSettings('session-limit'); return;
     case 'move_tokens': if (account) moveToTokens(account, key); return;
+    case 'none': return;
     // SB-388: one press closes the copy quiet longest, never a working one.
     case 'close_copy': { const id = item.session_id; if (id) void mutate(() => adapter.sessionCloseCopy(id, pid), pid ? t('Closed the older copy. The other one keeps working.') : t('Closed the quiet copy. The other one keeps working.'), key); return; }
     // SB-407: a stuck or gone board run is stopped, which records its end.
@@ -3729,6 +3938,8 @@ function endSessionDialog(row: SessionRow, target: string | null) {
 function renderActivity(main: HTMLElement) {
   main.append(sessionTreePanel());
   main.append(sessionsPanel());
+  // SB-419 (SCN-104): the feed's newest moves.
+  const feedPanel = feedActivityPanel(); if (feedPanel) main.append(feedPanel);
   if (!journal && !journalLoading) void loadJournal();
   const fromCommand = journal?.source === 'command';
   const source = fromCommand ? journal!.events : snapshot!.events;
@@ -4011,7 +4222,7 @@ function openDialog(title: string, intro: string, returnFocus?: string): DialogC
   const cancel = button(t('Cancel'), () => void requestCancel(), 'button'); actions.append(cancel);
   form.append(header, body, error, actions); dialog.append(form); document.body.append(dialog);
   dialog.addEventListener('cancel', (event) => { event.preventDefault(); void requestCancel(); });
-  dialog.addEventListener('close', () => { form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea').forEach((input) => { input.value = ''; }); dialog.remove(); if (!document.querySelector('dialog[open]')) restoreFocus(trigger); });
+  dialog.addEventListener('close', () => { form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea').forEach((input) => { input.value = ''; }); dialog.remove(); if (!document.querySelector('dialog[open]')) restoreFocus(trigger, true); });
   dialog.showModal();
   const setBusy = (value: boolean) => { pending = value; form.setAttribute('aria-busy', String(value)); form.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input, button, select, textarea').forEach((node) => { node.disabled = value || node.dataset.locked === 'true'; }); };
   return { dialog, form, body, actions, error, trigger, close, setBusy, beforeCancel: (handler) => { cancelHandler = handler; } };

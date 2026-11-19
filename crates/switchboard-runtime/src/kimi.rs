@@ -9,7 +9,7 @@
 //! never writes the ordinary `~/.kimi-code` (shown, not switched — A-6).
 use crate::launch::{
     agent_folder, ensure_idle, find_program, private_dir, private_write, script,
-    write_launch_script, Reservation, SESSION_RECORD,
+    write_launch_script, Handed, Reservation, SESSION_RECORD,
 };
 use serde_json::{json, Value};
 use std::{
@@ -801,7 +801,7 @@ fn launch_with(
     });
     crate::launches::record(root, &session, record, &launch_id)?;
     start(&path)?;
-    reservation.committed = true;
+    reservation.commit(Handed::Terminal);
     Ok(json!({"launched": true, "account": account.label}))
 }
 
@@ -888,6 +888,7 @@ pub fn launch_continuation(
     working_directory: &Path,
     continuation: &crate::continuation::Continuation,
     start: fn(&Path) -> Result<(), String>,
+    handed: Handed,
 ) -> Result<Value, String> {
     let program = find_program("kimi").ok_or(KIMI_NOT_INSTALLED)?;
     launch_continuation_with(
@@ -898,9 +899,11 @@ pub fn launch_continuation(
         continuation,
         &program,
         start,
+        handed,
     )
 }
 #[cfg_attr(windows, allow(unused_variables))]
+#[allow(clippy::too_many_arguments)]
 fn launch_continuation_with(
     root: &Path,
     store: &Store,
@@ -909,6 +912,7 @@ fn launch_continuation_with(
     continuation: &crate::continuation::Continuation,
     program: &Path,
     start: fn(&Path) -> Result<(), String>,
+    handed: Handed,
 ) -> Result<Value, String> {
     #[cfg(windows)]
     {
@@ -958,7 +962,7 @@ fn launch_continuation_with(
         });
         crate::launches::record(root, &session, record, &launch_id)?;
         start(&path)?;
-        reservation.committed = true;
+        reservation.commit(handed);
         Ok(json!({"launched": true, "account": account.label, "script": path}))
     }
 }
@@ -997,7 +1001,7 @@ pub fn sign_in_again(
         ),
     )?;
     start(&path)?;
-    reservation.committed = true;
+    reservation.commit(Handed::Terminal);
     Ok(json!({"started": true}))
 }
 
@@ -1593,11 +1597,16 @@ mod tests {
             &resumed,
             program,
             started,
+            Handed::Caller,
         )
         .unwrap();
         let session = homes(&root).join("sessions").join(&id);
         // The answer names the script, for a continuation in place (SB-108).
         assert_eq!(launched["script"], json!(session.join("launch.command")));
+        // SB-449: committed for the caller that runs it in place.
+        let marker: Value =
+            serde_json::from_slice(&fs::read(session.join(".launch-pending")).unwrap()).unwrap();
+        assert_eq!(marker, json!({"pid": null, "by": "caller"}));
         let script = fs::read_to_string(session.join("launch.command")).unwrap();
         let first = script
             .find("'/opt/kimi' '-p' 'Continue Observatory workflow wf_0123456789abcdef")

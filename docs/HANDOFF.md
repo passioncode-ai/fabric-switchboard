@@ -2,6 +2,73 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+
+## 2026-11-18: SB-452 a launch keeps its group's route, SB-453 a short rate limit of the key is waited out, on branch `tokens-spend`
+
+- **Asked.** Board thread a9844103 (Fabric Dashboards): a session on the pay-per-token group spent $53.98 by its own estimate while `spent_today_usd` read 0 and the statistics had no row for the key; its nine subagents met `429` and stood still.
+- **Cause.** Not the pricing: the key never served the session. Claude Code 2.1.327 reads a Git worktree's local settings from its main checkout and ranks local settings above the process environment, so in `_worktrees/sound-engine-audit` (group `tokens`) the main checkout's `.claude/settings.local.json` (`/claude/apps-soft` with its folder capability) replaced the launch's route. Evidence: live 2026-11-18 10:07 UTC, pid 22855 (launch 0c21ab66, home `runtimes/claude-tokens`) was the only proxy client in that folder and apps-soft/claude7/sound-engine grew 404 to 437 requests in 90 s while `tokens` stayed at none; `statistics.json` never held account 94821ba8; the binary's settings order `["userSettings","projectSettings","localSettings","flagSettings","policySettings"]` and its string "it resolves localSettings to the canonical repo root"; a synthetic repository with a worktree and a fake server reproduced it (`('main', ...)` x6) and showed `--settings` winning in print and interactive mode, before or after the prompt.
+- **Built.** `launch::ROUTE_FILE` / `route_arg` / `write_route`: each managed Claude launch writes `<home>/switchboard-route.json` (0600) and passes `--settings=<file>` last (before a caller's `--`), headless dispatch too; `duty::resume_script_for` passes it when the home has the file; `repoint_managed` rewrites it. Proxy: `LAUNCH_GROUP_HEADER`, `LAUNCH_GROUP_MISMATCH` (403 for a crossing into or out of the pay-per-token group), `FolderMap.pools` and the folder check, `Tally.mismatched`, `stats::folder_hint` reads `Primary working directory:`; `tokens_wait` (SB-453, DEC-0031). Owner: `proxy_group_mismatch` log event.
+- **Decisions.** A worktree is routed, not refused (coordinator). The launch-group header only narrows. DEC-0031 takes the next number free after open pull requests #821 (DEC-0027), #832 (DEC-0029), #836 (DEC-0030). A plain `claude` in such a worktree keeps the main checkout's group (Claude Code's rule), counted as a mismatch.
+- **Checks.** Studio: `cargo test -p switchboard-proxy` 80 passed; with the fix removed the three behaviour tests fail (77 passed, 3 failed); `cargo test -p switchboard-runtime --lib -- launch:: duty::` found the console test's expectation, updated; `./scripts/check.sh` on the PR's head (EXIT in the PR). Copylot (register ui/editorial, en-US): `1ff57716-7685-43cf-9942-59fd9519cefc`, `7dcf545d-1a2c-4677-b65c-c13ce39bc6d7`, `326b2477-4007-4b8e-9803-ec7def1e1634`, all pass 100.
+- **Not done.** The live sessions started before this release keep their old `launch.command` until relaunched. SB-455 (launch scripts without the login PATH) is separate.
+
+**Exact next task.** Review the `tokens-spend` pull request and merge once its gate reads EXIT 0 on the merged head (renumber DEC-0031 if a pull request took it first); after the release, relaunch the `tokens` sessions and read `switchboard statistics --days 1` for a `tokens` row and `switchboard ceiling` for a non-zero `spent_today_usd`.
+## 2026-11-18: SB-500 to SB-503, the session duty officer closed working sessions, on branch `duty-keeps-working-sessions`
+
+- **Asked.** Operator, session 4c635d5e: audit why the duty officer closes sessions that are working, and stop it.
+- **Found.** [Duty audit](reports/2026-11-18-duty-audit/README.md): 118 closes in three days; 3 closed while the transcript was being written (stale status file), 3 with no transcript found, 33 repeats of sessions the person had resumed; the Sound Engine orchestrator was closed with nothing running, and its own hosted launches were invisible to the check.
+- **Built.** `duty.rs`: `idle` also needs `transcript_quiet` (subagents included, unknown is not quiet) and `no_own_launches`; `closed_idle_before` keeps a session the person took up again. `session_watch.rs`: `running_children`, `children_now`. Help text, MCP description and its golden, CONTRACTS.
+- **Decisions.** Unknown counts as working everywhere (no transcript, records unread). A resumed session is kept for good rather than for a period: the person showed it is theirs.
+- **Interim.** `idle_minutes` 240 on the operator's Mac until the release is installed; set back to 60 after (the floor of 65 stays).
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Merge the `duty-keeps-working-sessions` PR after two clean review rounds; after the release that carries it is installed, `switchboard duty set --idle-minutes 60`; then SB-503.
+
+## 2026-11-19: SB-447 to SB-449, PR #831 review round 2 follow-up, on branch `launch-stale-2`
+
+- **Asked.** Round 2 of #831 (merged as `9e7026cb`): CLI.md on when statuses 3 and 4 are Switchboard's; `clear_stale` deleting a marker when the link back fails; only `Reservation::new` clears stale markers; `queued` never on the wire; Kimi in-place continue as `caller`; non-regular markers read alike everywhere; `btime` once.
+- **Built.** `launch.rs`: `ensure_idle` reads only (a stale marker is idle, never removed); `Reservation::new` clears through `clear_stale`, whose link back falls back to a rename (`clear_stale_with` for tests); `reservation_open` is `pending() == Held`; `Handed::for_continue`; Linux `BOOT` in a `OnceLock`. `lib.rs`: `#[serde(skip)] queued`; Kimi continue passes `Handed`. `kimi.rs`: `launch_continuation(.., handed)`. Docs: CLI.md, CONTRACTS, CHANGELOG, backlog.
+- **Decisions.** The read-only checks read a stale marker as idle, not busy: nothing will run its script, and a busy answer would make the fallback and the Kimi status see a session that never comes until someone launches again (the bug class SB-440 fixed). They no longer remove anything, which closes the race the review named.
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Review the `launch-stale-2` pull request and merge it once its gate reads EXIT 0 on the merged head; then SB-441, SB-444, SB-446 by priority.
+
+## 2026-11-18: SB-420 Keychain writes keep values off the command line; credential output kept off screens and files, on branch `secret-argv`
+
+- **Asked.** Two findings of a leak audit (kept outside the repository) about Keychain writes and credential output; review round 1 of PR #826 (P1-A, P1-B, P1-C).
+- **Built.** `security_cli::add_line` sends one `security -i` line on stdin: hex, else quoted text (printable ASCII, escaped), else `TOO_LARGE`; the tool's only argument is `-i` (`ADD_ARGS`). A switch (`external::activate`) whose write is refused as too large answers `CREDENTIAL_TOO_LARGE` at once, with no rollback write (nothing was written); a renewal's write answers the same; a launch's MCP sign-in copy is skipped. `item_size` keeps each such refusal in `keychain-too-large.json` until a write of that item succeeds; `status` (`keychain_too_large`), MCP `switchboard_status` and Needs attention (`keychain_too_large`, no button, SCN-094 step 4c) show it. CLI: `value_output` in `main.rs` refuses a terminal or a file; `agents key --service openrouter` and `agents anthropic key NAME` take `--to-pipe` (launch scripts pass it); `accounts surrender` expects `SWITCHBOARD_TRANSFER=surrender`, which `account_send::remote_transfer` puts on the call back's ssh command (not on a delegated seat's, which `ssh-serve` reads). `mcp::no_values` checks MCP names no value operation.
+- **Decisions.** The variable rather than a flag for `surrender`, so a newer machine calling an older one still works; an older caller calling a newer one is refused with a sentence until it updates. Quoted text on the same line rather than the Security framework: an item created by `/usr/bin/security` asks for consent when another program writes it (SB-425 for a later transport). The output checks keep a value off a screen or a file; they are not an access control (SB-426, SB-427).
+- **Review round 2 (one P1) fixed.** P1-D: an idle renewal first asks whether the renewed item would fit (`LiveItem::fits`, `security_cli::fits` with 512 bytes of headroom); when it would not, no grant is sent, the refusal is recorded and Claude Code renews its own token (`an_item_too_large_to_write_back_is_not_renewed_and_no_grant_is_sent`). P2: `item_size::record` writes and logs only a new refusal, under a lock; only a switch's write records or clears (an early return does not); over 64 KiB is `TOO_LARGE`; every printable byte round-trips; tests for the launch copy, the switch and the window item; docs name `--to-pipe` and say the output checks are not an access control.
+- **Review round 3 follow-ups.** The fit is measured on `renewed_item(&before, &live.credential)`, the item as it would be written (`the_fit_is_measured_on_the_item_as_it_would_be_written`, an item read with `\uXXXX` escapes). A renewal refused as too large keeps the item's Keychain stamp (`NativeSources::live_stamp`, attributes only); while it has not moved, later passes neither lock nor decrypt the item (`a_held_renewal_probes_only_the_stamp_until_the_item_changes`).
+- **Checks.** Build machine: focused tests and `./scripts/check.sh`, `cargo xwin check`; EXIT lines in the PR.
+
+**Exact next task.** Review round 2 on PR #826, then merge once the gate reads EXIT 0 on the merged head; the next release carries SB-420.
+
+## 2026-11-18: PR #831 review round 1 (SB-440, SB-443, SB-445 fixed; SB-444, SB-446 filed), on branch `launch-stale`
+
+- **Asked.** Review round 1 of #831 (no P1): margin between the unclaimed-marker bound and the client wait; start tokens instead of pid age; `continue --in-place` as a caller; a race in clearing a stale marker; docs on non-regular markers; `O_NOFOLLOW`; a row for `run_hosted`; Fabric's finding (thread 36572ae0) that a control timeout must be told apart by code.
+- **Built.** `UNCLAIMED_TTL` 5 min (asserted longer than `limit_secs(Launch)` plus a minute); the marker carries `token` (`copies::process_token`), judged on every platform; `Operation::Continue.queued` (never sent; set by `ContinueToConsole` and the fallback) picks the ten-minute hold, otherwise an in-place continue is the caller's; `Continue` waits 120 s; `clear_stale` renames aside, judges again, links back a fresh marker; `commit` opens with `O_NOFOLLOW`; Linux `process_started` from `/proc/<pid>/stat` (SB-445); CLI `failure`: `control-timeout`, status 4 (SB-443). Merged origin/main `ce62f8c9`.
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Review round 2 of #831, then merge once the gate reads EXIT 0 on the merged head; then SB-441, SB-444, SB-446 by priority.
+
+## 2026-11-18: SB-440 a launch nobody ran no longer blocks its home; SB-441 filed, on branch `launch-stale`
+
+- **Asked.** Operator report 2026-11-18: `switchboard launch <account> --mode managed --headless` for `runtimes/claude-tokens` timed out on its control request, left `.session.json` `starting` and an empty `.launch-pending`, and every later launch was refused until both files were moved by hand. Also file `keys observatory add` answering "The key was saved, but where it came from could not be recorded."
+- **Built.** `crates/switchboard-runtime/src/launch.rs`: `.launch-pending` names the preparing process (`{"pid": N}`), then who runs the script (`Reservation::commit(Handed::Terminal | Handed::Caller)`, rewritten in place); one judgement `pending()` for `ensure_idle`, `reservation_open` and `home_state`: a gone or reused preparer frees the home at once, a script handed to the caller of `Launch` after two minutes (`UNCLAIMED_TTL`), Terminal's, a continuation's prepared in place (it may wait in the hand-over queue for a console) and an earlier version's marker after ten as before; a stale marker is cleared by the next launch with the log line `launch_reservation`. `control::limit_secs`: `Launch` (bare or wrapped in `Launched`) waits 120 s. Kimi and sign-in launches commit as Terminal. Docs: CONTRACTS session list, OPERATIONS, CHANGELOG.
+- **Decisions.** No change to the control protocol (the CLI cannot name its pid without a new field that an older owner's `deny_unknown_fields` would refuse); a two-minute bound for an unclaimed caller marker instead. SB-441 left as a row: the cause is dropped by `after_record`, so the next step is to keep it.
+- **Checks.** See the PR (gate on the Studio, EXIT line).
+
+**Exact next task.** Review the `launch-stale` pull request and merge it once its gate reads EXIT 0 on the merged head; then SB-441 (keep the record failure's reason and reproduce it on a synthetic data folder).
+
+## 2026-11-17: SB-417 window follow-up from the design review, on branch `board-share-ui`
+
+- **Asked.** The design review of PR #818 (`~/DATA/_worktrees/design-review-feed-pool.md`, SCN-093 step 5, SCN-094 step 4b): the limit dialog said board runs wait at the limit; the default share `max(2, cap/4)` exceeded a limit of 1; a clamped share was silent in the window; the demo could not show waiting board runs.
+- **Built.** `capacity::default_board_share` is a quarter of the cap rounded up, never more than the cap (`ui-logic` `defaultBoardShare` the same); the dialog's description, hint and error rewritten; the empty *Board runs* field shows the default for the limit typed and its top follows the limit; *Save limit* adds the clamped line; `?demo=1&board-waiting=1` shows the waiting board runs.
+- **Checks.** See the PR (gate on the build machine). Copylot report ids in [strings.md](brand/strings.md).
+
+**Exact next task.** Review the `board-share-ui` pull request and merge it once its gate reads EXIT 0 on the merged head.
+
 ## 2026-11-17: SB-417 the session pool gives board runs a share and counts sessions, not folders, on branch `board-share`
 
 - **Asked.** Target-state plan wave item W1.1 (`docs/plans/2026-11-17-target-state/03-sessions.md` capability 16, on branch `target-state`): measured 17:55 CET on the operator's MacBook, cap 20 with 34 sessions counted, most of them interactive, so every board `dispatch` was refused `at_capacity` with no end; operator: the session manager must start work when it arrives.

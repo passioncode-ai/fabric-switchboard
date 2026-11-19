@@ -1,8 +1,8 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { BalanceStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView, Placement } from './types';
+import type { BalanceStatus, FeedEntry, FeedStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView, Placement } from './types';
 import type { SessionGroup, SessionRow, MachineReadStatus } from './types';
-import type { Machine, MachineCopy, RemoteRead, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
+import type { Machine, MachineCopy, RemoteRead, Target, RemoteStatus, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, UpdateOwner, DebNotice, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
 
@@ -527,8 +527,8 @@ export function accountMatches(account: Pick<Account, 'id' | 'label' | 'external
   return words.every((word) => text.includes(word));
 }
 
-const ATTENTION_REASONS: AttentionReason[] = ['session_duplicate', 'session_stuck', 'session_gone', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question'];
-const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'open_capacity', 'move_tokens'];
+const ATTENTION_REASONS: AttentionReason[] = ['keychain_too_large', 'session_duplicate', 'session_stuck', 'session_gone', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question'];
+const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'open_capacity', 'move_tokens', 'none'];
 /**
  * WF-3 (SB-365): the answer of the `attention` command, kept to the fields the window knows. An
  * answer that is not one (an older owner without the command, a malformed item) is an empty list
@@ -558,20 +558,24 @@ function closeOffer(raw: unknown): AttentionItem['close'] {
 /**
  * SB-389: what a duplicate's item says and offers. A quiet copy is closed as before; when every
  * copy works, the older one waiting on a command of its own is offered by its pid, and the line
- * says that command ends with it; when every copy is answering nothing is offered.
+ * says that command ends with it. SB-472: when every copy is answering nothing can be closed
+ * without losing work, so the item offers no button (`label` null) and says when it will: a
+ * disabled button the person cannot press is never shown.
  */
-export function duplicateOffer(item: Pick<AttentionItem, 'session_id' | 'close'>): { line: string; label: string; pid: number | null; disabled: boolean } {
+export function duplicateOffer(item: Pick<AttentionItem, 'session_id' | 'close'>): { line: string; label: string | null; pid: number | null } {
   const close = item.close;
+  // Without its session id nothing here can close a copy: the line says what the person can do.
+  if (!item.session_id) return { line: t('Both copies of this session are working. Close one in its own window when it finishes.'), label: null, pid: null };
   if (close?.why === 'older') {
     const line = close.command_age !== null
       ? t('One session runs in two processes, and both are working. The older copy has been in one command for {age}; closing it ends that command.', { age: shortAge(close.command_age) })
       : t('One session runs in two processes, and both are working. Closing the older copy ends what it is doing.');
-    return { line, label: t('Close the older copy'), pid: close.pid, disabled: !item.session_id };
+    return { line, label: t('Close the older copy'), pid: close.pid };
   }
-  if (item.close === null && item.session_id) {
-    return { line: t('One session runs in two processes, and both are answering. Close one in its own window when it finishes.'), label: t('Close the quiet copy'), pid: null, disabled: true };
+  if (close === null) {
+    return { line: t('One session runs in two processes, and both are answering now. When one of them finishes its turn, this item offers to close it.'), label: null, pid: null };
   }
-  return { line: t('One session runs in two processes. Close the quiet copy so they do not work over each other.'), label: t('Close the quiet copy'), pid: null, disabled: !item.session_id };
+  return { line: t('One session runs in two processes. Close the quiet copy so they do not work over each other.'), label: t('Close the quiet copy'), pid: null };
 }
 /** WF-3: the accounts that need a person: those the list names, and those the monitor says must sign in again. */
 export function attentionAccounts(attention: Attention | null, signInRequired: readonly string[] = []): Set<string> {
@@ -609,6 +613,11 @@ export function dispatchStopLineText(line: { reason: string; folder: string | nu
     ? t('Stopped a board run in {folder}: it reached its deadline.', { folder })
     : t('Stopped a board run in {folder} at your request.', { folder });
 }
+/** SB-417: the board's share when the person sets none: a quarter of the limit rounded up, never more than the limit (core `capacity::default_board_share`). */
+export function defaultBoardShare(limit: number): number {
+  if (!Number.isInteger(limit) || limit < 1) return 1;
+  return Math.min(limit, Math.max(1, Math.ceil(limit / 4)));
+}
 /** SB-412, SB-417: the refused board runs that still wait, however long ago, and whether a session ended since. */
 export function dispatchRefusedLine(item: { count?: number; freed?: boolean }): string {
   const n = item.count ?? 0;
@@ -623,6 +632,7 @@ export function dispatchStopNotice(state: string): string {
 }
 export function attentionReasonText(reason: AttentionReason): string {
   switch (reason) {
+    case 'keychain_too_large': return t("Claude Code's sign-in is too large to write to the Keychain safely, so Switchboard could not update it. Sign out of MCP servers you no longer use in Claude Code.");
     case 'session_duplicate': return t('One session runs in two processes. Close the quiet copy so they do not work over each other.');
     case 'session_stuck': return t('A board run has been quiet for 30 minutes. Look at it, or stop it.');
     case 'session_gone': return t("A board run's process is gone, but its end was not recorded. Stop the run to record it.");
@@ -649,6 +659,8 @@ export function attentionActionLabel(window: AttentionWindow): string {
     case 'dispatch_stop': return t('Stop the run');
     case 'open_capacity': return t('Open the session limit');
     case 'move_tokens': return t('Move to Pay-per-token keys');
+    // SB-420: the fix is in Claude Code; no button.
+    case 'none': return '';
   }
 }
 /** WF-2.4: the facts line of an account given to an agent; each part is said even when it is not recorded. */
@@ -2090,11 +2102,126 @@ export function balancingNotice(change: { group?: string; on: boolean; allNew?: 
   return change.on ? t('{group} takes part in balancing.', { group: change.group ?? '' }) : t('{group} no longer takes part. Accounts it lent or borrowed are back in their own groups.', { group: change.group ?? '' });
 }
 
+/** SB-419 (DEC-0028, SCN-104): the feed from the default group as the Groups page shows it. */
+export interface FeedView {
+  state: 'reading' | 'failed' | 'on' | 'off';
+  line: string;
+  error: string | null;
+  retry: boolean;
+  /** Each group that can be fed, with its feed. */
+  groups: Map<string, { fed: boolean; priority: number | null }>;
+  /** The fed groups, highest priority first, as the map draws them. */
+  arrows: { pool: string; label: string; priority: number }[];
+  /** The rule a fed group follows, with the person's targets. */
+  rule: string;
+}
+export function feedView(status: FeedStatus | null, error: string | null = null): FeedView {
+  const none = { groups: new Map(), arrows: [], rule: '' };
+  if (!status) {
+    if (error) return { ...none, state: 'failed', line: t('The feed from the default group could not be read.'), error, retry: true };
+    return { ...none, state: 'reading', line: t('Reading the feed…'), error: null, retry: false };
+  }
+  const groups = new Map(status.available.map((g) => [g.pool, { fed: g.fed, priority: g.priority }]));
+  const arrows = [...status.fed].sort((a, b) => a.priority - b.priority || a.pool.localeCompare(b.pool)).map((f) => ({ pool: f.pool, label: f.name, priority: f.priority }));
+  const line = status.on ? plural(arrows.length, { one: '{n} group is fed from the default group.', other: '{n} groups are fed from the default group.' }) : t('No group is fed from the default group.');
+  const rule = plural(status.ready, { one: 'A fed group keeps {n} ready account: the default group lends it accounts with room, or whose limit resets within {minutes} minutes, and takes back one that runs out once another serves the group.', other: 'A fed group keeps {n} ready accounts: the default group lends it accounts with room, or whose limit resets within {minutes} minutes, and takes back one that runs out once another serves the group.' }, { minutes: status.lookahead_minutes });
+  return { state: status.on ? 'on' : 'off', line, error, retry: false, groups, arrows, rule };
+}
+/** The badge on a fed group's card. */
+export function feedBadge(priority: number): string {
+  return t('Fed from Default · priority {n}', { n: priority });
+}
+/** One feed move in plain words; the group named is the fed one, never the default group. */
+export function feedMoveLine(entry: Pick<FeedEntry, 'from' | 'to' | 'reason' | 'outcome'>, account: string, groupName: (pool: string) => string): string {
+  const fedPool = entry.to === 'default' ? entry.from : entry.to;
+  const group = groupName(fedPool);
+  if (entry.outcome === 'failed') return t('{account} could not be moved. The next pass tries again.', { account });
+  // Review round 3: a return held because the account that would replace it was not placed.
+  if (entry.outcome === 'held') return t('{account} ran out in {group} and stays: the account that would replace it was not placed.', { account, group });
+  switch (entry.reason) {
+    case 'feed': return t('{account} was placed in {group} from the default group.', { account, group });
+    case 'priority': return t('{account} moved to {group}, which has a higher priority and had no ready account.', { account, group });
+    case 'taken': return t('{account} left {group} for a group with a higher priority.', { account, group });
+    case 'park': return t('{account} ran out in {group} and is shared with the default group until its limit resets.', { account, group });
+    case 'spent': return t('{account} ran out in {group} and went back; another ready account serves the group.', { account, group });
+    case 'rested': return t('{account} has room again and is no longer shared with the default group.', { account });
+    case 'surplus': return t('{account} went back: {group} has more ready accounts than it keeps.', { account, group });
+    case 'sign_in': return t('{account} went back: it waits for a sign-in.', { account });
+    case 'feed_off': return t('{account} went back: {group} is no longer fed.', { account, group });
+    default: return t('{account} went back to its own group.', { account });
+  }
+}
+/** The notice after a change on a group's card. */
+export function feedNotice(change: { group: string; on?: boolean; priority?: number }): string {
+  if (change.on === false) return t('{group} is no longer fed. Accounts the feed moved are back in their own groups.', { group: change.group });
+  if (change.on === true) return t('{group} is fed from the default group, priority {n}.', { group: change.group, n: change.priority ?? 1 });
+  return t('{group} has priority {n} now.', { group: change.group, n: change.priority ?? 1 });
+}
+/** A priority typed in the field: a whole number from 1 to 99, else null. */
+export function feedPriority(text: string): number | null {
+  const trimmed = text.trim();
+  if (!/^[0-9]{1,2}$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  return n >= 1 && n <= 99 ? n : null;
+}
+/** The arrows of the feed map: from the default group's node, centred on the rows, to the middle
+ * of each fed group's row. One path per row, `width` wide, rows `rowHeight` apart. */
+export function feedArrows(rows: number, rowHeight: number, width: number): string[] {
+  const from = (rows * rowHeight) / 2;
+  const end = Math.max(0, width - 6);
+  return Array.from({ length: rows }, (_, i) => {
+    const to = i * rowHeight + rowHeight / 2;
+    const mid = width / 2;
+    return `M0 ${from} C${mid} ${from} ${mid} ${to} ${end} ${to}`;
+  });
+}
+
 /** SB-355 (DEC-0013): a machine group's pool; a group of folders never takes this prefix. */
 export const MACHINE_POOL_PREFIX = 'machine_';
 /** SB-355: the machine group an account lives in, if any. */
 export function machineOf(snapshot: { machines?: Machine[] }, account: Pick<Account, 'pool'>): Machine | undefined {
   return account.pool.startsWith(MACHINE_POOL_PREFIX) ? snapshot.machines?.find((m) => m.pool === account.pool) : undefined;
+}
+/**
+ * SB-473: the machines a move can go to, chosen rather than typed: the machine groups and every
+ * machine `switchboard targets` knows (moves and runs), each once (a name or alias of either),
+ * newest first, without the machine the account is on now. `detail` says how it is known.
+ */
+export function machineChoices(machines: readonly Machine[], targets: readonly Target[], exclude: Machine | null = null): { name: string; detail: string }[] {
+  const names = (m: Machine) => [m.name, ...(m.aliases ?? [])];
+  const skip = new Set(exclude ? names(exclude) : []);
+  const out: { name: string; detail: string; at: number }[] = [];
+  const seen = new Set<string>();
+  const add = (name: string, aliases: readonly string[], detail: string, at: number) => {
+    const all = [name, ...aliases];
+    if (all.some((n) => skip.has(n) || seen.has(n))) return;
+    all.forEach((n) => seen.add(n)); out.push({ name, detail, at });
+  };
+  for (const tgt of targets) {
+    const group = machines.find((m) => names(m).includes(tgt.machine) || (tgt.aliases ?? []).some((a) => names(m).includes(a)));
+    const how = group ? t('accounts live there') : (tgt.known_by ?? []).includes('dispatch') ? t('runs started there') : t('accounts moved there before');
+    add(tgt.machine, [...(tgt.aliases ?? []), ...(group ? names(group) : [])], how, tgt.last_at ?? 0);
+  }
+  for (const m of machines) add(m.name, m.aliases ?? [], t('accounts live there'), m.created_at);
+  return out.sort((a, b) => b.at - a.at || a.name.localeCompare(b.name)).map(({ name, detail }) => ({ name, detail }));
+}
+/**
+ * SB-474: the groups a move can join on the other machine, read from it: the default group first,
+ * then its groups by name (machine groups there left out), each with its organization and account
+ * count. `chosen` is the account's own group id when that machine has it, else the default group.
+ */
+export function remoteGroupChoices(status: RemoteStatus, prefer: string | null): { choices: [string, string][]; chosen: string } {
+  const count = (n: number) => plural(n, { one: '{n} account', other: '{n} accounts' });
+  const groups = status.groups.filter((g) => g.pool !== 'default' && !g.pool.startsWith(MACHINE_POOL_PREFIX))
+    .sort((a, b) => (a.name ?? a.pool).localeCompare(b.name ?? b.pool));
+  const defaults = status.groups.find((g) => g.pool === 'default');
+  const choices: [string, string][] = [['default', defaults ? `${t('Default group')} · ${count(defaults.accounts)}` : t('Default group')]];
+  for (const g of groups) choices.push([g.pool, [g.name ?? g.pool, g.organization, count(g.accounts)].filter(Boolean).join(' · ')]);
+  return { choices, chosen: prefer && choices.some(([pool]) => pool === prefer) ? prefer : 'default' };
+}
+/** SB-476: the accounts a move can take: a subscription sign-in on this computer that is on, or one on another machine; never one already on `to`. */
+export function movableAccounts<A extends Pick<Account, 'id' | 'kind' | 'enabled' | 'pool'>>(snapshot: { accounts: A[]; elsewhere?: Record<string, number>; machines?: Machine[] }, to: Machine | null = null): A[] {
+  return snapshot.accounts.filter((a) => a.kind === 'oauth' && (to ? a.pool !== to.pool : true) && (machineOf(snapshot, a) !== undefined || (a.enabled && snapshot.elsewhere?.[a.id] === undefined)));
 }
 /** Q2 item 6: the groups that hold accounts but have no folders (no group record): no session uses those accounts, so the Groups page names them. */
 export function foldlessGroups<A extends Pick<Account, 'id' | 'pool'>>(snapshot: { accounts: A[]; projects?: { pool: string }[] }): { pool: string; accounts: A[] }[] {

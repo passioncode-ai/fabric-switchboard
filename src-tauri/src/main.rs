@@ -446,6 +446,30 @@ async fn recall_account(
         })
         .await
 }
+/// SB-473: every machine this computer knows (moves and runs), as `switchboard targets` lists them,
+/// for the move dialog's machine picker; with `probe`, each asked whether it answers.
+#[tauri::command]
+async fn targets(probe: bool, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Targets { probe })
+        .await
+}
+/// SB-474: another machine's groups, organizations and accounts, read over ssh as `switchboard
+/// remote status` reads them, for the move dialog's group picker.
+#[tauri::command]
+async fn remote_status(target: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::RemoteStatus {
+            target,
+            program: None,
+            remote_data_dir: None,
+        })
+        .await
+}
 /// SB-355: the machine groups with their accounts; with `live`, each machine read over ssh.
 #[tauri::command]
 async fn machines(live: bool, state: State<'_, Slot>) -> Result<Value, String> {
@@ -946,6 +970,35 @@ async fn balance(
             all_new,
             backup_add,
             backup_remove,
+        }
+    };
+    state.runtime().await?.execute(operation).await
+}
+/// SB-419 (DEC-0028): groups fed from the default group. With nothing named, the state (`feed
+/// status`); otherwise a group's feed on or off with its priority, or the targets.
+#[tauri::command]
+async fn feed(
+    pool: Option<String>,
+    on: Option<bool>,
+    priority: Option<u32>,
+    ready: Option<u32>,
+    lookahead_minutes: Option<u32>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    let operation = if pool.is_none()
+        && on.is_none()
+        && priority.is_none()
+        && ready.is_none()
+        && lookahead_minutes.is_none()
+    {
+        Operation::FeedStatus
+    } else {
+        Operation::Feed {
+            pool,
+            on,
+            priority,
+            ready,
+            lookahead_minutes,
         }
     };
     state.runtime().await?.execute(operation).await
@@ -2130,6 +2183,8 @@ fn main() {
             send_account,
             recall_account,
             machines,
+            targets,
+            remote_status,
             attention,
             given_accounts,
             events,
@@ -2188,6 +2243,7 @@ fn main() {
             project_add_accounts,
             codex_route,
             balance,
+            feed,
             capacity,
             duty,
             own_sign_in,

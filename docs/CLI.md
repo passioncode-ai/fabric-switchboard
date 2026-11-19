@@ -45,7 +45,7 @@ switchboard accounts receive handover.json --signer KEY [--apply] [--headless]  
 switchboard accounts recall ACCOUNT_UUID --from member@vm   # SB-292: take a moved sign-in back; its copy there is removed and proved gone (Claude and Codex)
 switchboard accounts send ACCOUNT_UUID --to user@studio.local --remote /usr/local/bin/switchboard --remote-data-dir /srv/switchboard   # SB-315: a Switchboard there that runs with --data-dir; a recall uses the same by default
 switchboard accounts seats [--limit 50]                     # SB-312: the moves, hand-overs and call backs recorded here, with the id there
-switchboard agents anthropic set team-a --key-stdin --model claude-sonnet-5-5   # SB-390: an Anthropic API key under a name (piped, never echoed); list | model | remove | key
+switchboard agents anthropic set team-a --key-stdin --model claude-sonnet-5-5   # SB-390: an Anthropic API key under a name (piped, never echoed); list | model | remove | key NAME --to-pipe
 switchboard agents launch hermes --anthropic personal --dir /abs/folder     # SB-390: Hermes on the Anthropic key saved as personal
 switchboard agents launch-keys hermes --folder /abs/folder   # SB-392: the keys this agent can start on, by name: the folder's OpenRouter key first, then the others and the Anthropic keys
 use_secret.py run --vault-only --env prod team-a ANTHROPIC_API_KEY -- sh -c 'printf %s "$ANTHROPIC_API_KEY" | switchboard agents anthropic set team-a --key-stdin'   # SB-392 K-0: save a key from Observatory without seeing it (an Admin key is refused)
@@ -68,7 +68,7 @@ switchboard sessions restart cancel WAVE              # SB-397: sessions still w
 switchboard monitor hold --session ID --until UNIX [--reason fabric_claim]    # SB-399: the session holds live work (a Fabric task's claim) until then; 0 releases; the reason is one short word, echoed and logged as a code
 switchboard sessions close-copy SESSION_ID [--pid N] [--target M]  # SB-388, SB-389 (--pid: the copy attention offers when both work) (--target: the copy on another machine, closed by its Switchboard): one session in two processes: close the copy quiet longest (SIGTERM, SIGKILL after 10 s); never a busy one or one running a command
 switchboard duty [on | off | set … | run [--dry-run]]   # SB-384: the session duty officer: closes a finished session, restarts a stalled one, never one still working
-switchboard capacity [set N [--board M|default] | clear] # SB-378, SB-417: this computer's cap on working coding sessions (a session quiet outside a turn, on a limit stop or on a wait of its own is not counted); launch --hosted waits at it, a board run (dispatch, --hosted --surface fabric) starts inside the board's share M (default a quarter of N, at least 2; set N alone keeps M, clamped to N); the waiting board runs show until one starts
+switchboard capacity [set N [--board M|default] | clear] # SB-378, SB-417: this computer's cap on working coding sessions (a session quiet outside a turn, on a limit stop or on a wait of its own is not counted); launch --hosted waits at it, a board run (dispatch, --hosted --surface fabric) starts inside the board's share M (default a quarter of N, rounded up; set N alone keeps M, clamped to N); the waiting board runs show until one starts
 switchboard machines list [--live]                     # SB-355: each machine group with its accounts, and accounts used elsewhere in none; --live reads each machine over ssh (20 s per call)
 switchboard machines adopt [--apply]                   # SB-355: place accounts already used elsewhere in their machines' groups (recorded move, else location); never guessed
 switchboard machines place ACCOUNT_UUID --on studio-sshlg   # SB-355: record where it lives without ssh; it leaves every group here
@@ -368,7 +368,7 @@ switchboard --json activity
 
 Without an ID, usage reads cached observations; an ID requests a provider check, refused without a request while a wait the provider asked for lasts (SB-39; [ACCOUNTS-AND-ROTATION](ACCOUNTS-AND-ROTATION.md)). Human output prints times as RFC 3339 UTC, marks an observation older than 900 seconds as stale (the idle quota cadence plus slack, SB-48; rotation judges by its policy's `--max-age`) and shows the last check's health (`ok`, `failed`, `unavailable` or `not checked`) with the next check time; `events` prints RFC 3339 times too, oldest first; `--kind`, `--account`, `--before` (Unix seconds, exclusive) and `--limit` (1 to 500; without it every event the journal holds) page it as the window and `switchboard_events` do ([CONTRACTS](CONTRACTS.md#activity-by-kind-and-page-sb-373)). `--json` output keeps Unix seconds (`human_usage_and_events_print_utc_times_and_health`). Unsupported/unknown quota is an error or unknown state, never zero. The human percentage is the account's own; a Codex feature limit is listed in `--json` and MCP (`scope: feature`) but does not count toward it (SB-40). API billing is not subscription utilization.
 
-`--json` writes `{ "ok": true, "data": ... }` to stdout on success and `{ "ok": false, "error": "..." }` to stderr on failure. Exit status is 0 for success, 1 for an operational failure and 2 for invalid arguments. `--help` succeeds without touching the vault. Do not log stdin or treat parser diagnostics as a place to print credentials. Output never includes the control capability, provider token, credential JSON or provider request/response payload. The [CLI implementation and integration fixtures](../crates/switchboard-cli/src/main.rs) define this envelope.
+`--json` writes `{ "ok": true, "data": ... }` to stdout on success and `{ "ok": false, "error": "..." }` to stderr on failure. Exit status is 0 for success, 1 for an operational failure and 2 for invalid arguments; 3 with `code: "no-route"` when no account serves the folder (SB-343), and 4 with `code: "control-timeout"` when the owner did not answer the control request in time (SB-443): the owner may still do what was asked, so check its state (for a launch, `switchboard sessions`) before trying again. Match `code` and the status, never the error text. Statuses 3 and 4 are Switchboard's only when the `--json` error envelope with its `code` is on stderr (SB-447): `launch --in-place`, `--headless` and `--hosted`, `attach` and any command run with `--target` end with the agent's own exit status once the session has started, which may be any number, 3 and 4 included. `--help` succeeds without touching the vault. Do not log stdin or treat parser diagnostics as a place to print credentials. Output never includes the control capability, provider token, credential JSON or provider request/response payload. The [CLI implementation and integration fixtures](../crates/switchboard-cli/src/main.rs) define this envelope.
 
 The local `control.json` contains a capability and is private runtime state. It is not an API discovery file to share. It does not grant authority on LAN: clients require exact loopback host/port, no redirects/proxies, bounded bodies and a per-runtime bearer. Browser Origins are refused. Same-user malicious processes are outside the protection boundary, just as for the official CLIs they could inspect.
 
@@ -542,6 +542,39 @@ borrows only a personal account while organizations exist. The choice and the lo
 with its figures in `balancing.jsonl` (0600); each is also an activity entry, `balancing lent` or
 `balancing returned` (`switchboard events`). The window has the same choice on the Groups page.
 MCP: `switchboard_balance`.
+
+### Groups fed from the default group (SB-419)
+
+```sh
+switchboard project feed agents on --priority 1          # Agents is fed from the default group, served first
+switchboard project feed apps-soft on                    # after the groups already fed
+switchboard project feed apps-soft off                   # every account the feed moved in or out of it goes back
+switchboard feed status                                  # reads only: fed groups, the default group's accounts, the moves and why
+switchboard feed set --ready 3 --lookahead 45            # each fed group keeps 3 ready; a reset within 45 minutes counts
+```
+
+Off until you turn a group's feed on ([DEC-0028](DECISIONS.md#dec-0028-a-group-fed-from-the-default-group-keeps-its-ready-accounts-by-priority)).
+A fed group keeps `ready` ready accounts (2 until you change it) of each provider it works with:
+an account is ready when it has room now, or when its limit resets within the look-ahead (30
+minutes). Each balancing pass (every 15 minutes, a minute after a group ran out or after any change
+of the feed) lends the default group's accounts to a fed group, the most room first, then the
+soonest reset, and takes one back when it is out (refused for a limit, or at the switching
+threshold) once another account with room serves the group, so a group never loses its last account.
+A fed group's own account that is out is shared with the default group (it keeps serving its own
+group) so another fed group can use it once its limit resets. A higher priority (1 is the highest;
+equal priorities go by group id) is served first; a fed group whose sessions asked for accounts and
+that has none may take a lower fed group's last ready account, though not one that served a
+request in about the last 30 minutes unless the higher group is refusing requests now. A group holding at
+least two more accounts with room than it keeps gives the extra ones back. A group with no account is fed only
+the providers its sessions asked for. Like a loan, a move keeps the account's own group (`project
+list` shows it under both) and takes effect from the next request; an account waits an hour
+between moves, except one that ran out. The ordinary Claude Code's or Codex's account, an account
+given to an agent, turned off, delegated or used on another machine is never moved, and no account
+crosses an organization's boundary. `default` cannot be fed, and `off` takes no `--priority`. Each
+move is a line of `balancing.jsonl` with its reason (`feed`, `park`, `spent`, `rested`, `priority`,
+`taken`, `surplus`, `sign_in`, `feed_off`) and figures, and an activity entry `balancing lent` or
+`balancing returned`. The window has the same switch and priority on each group's card. MCP:
+`switchboard_feed`.
 
 ### A project's folders follow its work and the disk (SB-117, SB-121, SB-131)
 
@@ -842,11 +875,19 @@ switchboard agents openrouter model anthropic/claude-sonnet-4.5
 switchboard agents openrouter remove
 switchboard agents openrouter set --key-stdin --pool client-alpha   # SB-144: the key agents in that project's folders run on
 switchboard agents openrouter list         # every saved key with its project, and the projects without one
-switchboard agents key --service openrouter --pool client-alpha   # exactly that group's own key (launch scripts call this, SB-213)
-switchboard agents key --service openrouter --machine   # exactly the machine's key (launch scripts call this, SB-213)
-switchboard agents key --service openrouter --dir /work/app   # the key of that folder's group, else the machine's (scripts written before 0.7.0)
-switchboard agents key --service openrouter   # the value, for a session script's export only
+switchboard agents key --service openrouter --pool client-alpha --to-pipe   # exactly that group's own key (launch scripts call this, SB-213)
+switchboard agents key --service openrouter --machine --to-pipe   # exactly the machine's key (launch scripts call this, SB-213)
+switchboard agents key --service openrouter --dir /work/app --to-pipe   # the key of that folder's group, else the machine's
 ```
+
+A command that prints a key (`agents key --service openrouter`, `agents anthropic key NAME`)
+takes `--to-pipe` and writes into a pipe, a session script's `$(...)`; without the flag, to a
+terminal or into a file it refuses and prints nothing (SB-420). Session scripts Switchboard writes
+pass it; a script an earlier version wrote (Hermes or OpenCode on a saved key) is written again at
+the next launch. `accounts surrender` is run by `accounts recall` over ssh, which names the
+hand-over in its command (`SWITCHBOARD_TRANSFER=surrender`); to a terminal or a file it refuses.
+These checks keep a value off a screen and out of a file. They are not an access control: a
+program running as the same user can still pass them.
 
 A session script names the key slot its start's spending check read (`--pool` or `--machine`),
 never its folder: a folder that joins another group between the launch and the script's first

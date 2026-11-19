@@ -810,3 +810,96 @@ research notes); the ones still in force that the board cites are seeded below w
 - **Source:** studio-agent board request bc06a63d (board thread dca6e14d), 2026-11-17; decided by
   the implementing agent under the operator's standing delegation (`~/.claude/CLAUDE.md`, "Act,
   then report"), recorded in this change.
+
+### DEC-0028: A group fed from the default group keeps its ready accounts, by priority
+
+- **Date:** 2026-11-17
+- **Status:** Accepted (built on branch `default-feed`: SB-419)
+- **Context:** balancing (DEC-0012) lends between chosen groups by their last hours and days, one
+  account a pass, and only once a group is already out of room. The operator asked for a switch
+  per group that keeps it always working: accounts that ran out go back to the default group,
+  accounts with room, or soon to have it, are placed ahead of need, and when there are not enough,
+  a group with a higher priority is served first.
+- **Decision:** a group can be fed from the default group (off by default; `default` itself never).
+  A fed group keeps `ready` ready accounts per provider it works with (2 by default; 1 to 10): an
+  account is ready when it has room on fresh figures (the group's switching threshold less its
+  hysteresis) or every window holding it resets within the look-ahead (30 minutes by default;
+  0 to 720). An account is *out* only when a limit refusal holds it or one of its windows is at or
+  past the switching threshold itself (90 % by default, DEC-0008), with no reset within the
+  look-ahead; between the room line and the threshold it is still in use. A group works with a
+  provider when an account of it serves the group or was fed to it, or its sessions asked for it in
+  6 hours; a group with no account is fed only what its sessions asked for. The feed is a second
+  policy on balancing's pass (every 15 minutes, a minute after a group ran out or after any change
+  of the feed) and files. After balancing's own plan, on the accounts it left alone, it:
+  (1) gives back a placement waiting for a sign-in (`sign_in`) and ends a park whose account has
+  room again, after its cooldown (`rested`); (2) parks each own account of a fed group that is out:
+  a park shares it with `default` (it keeps serving its own group, where automatic switching
+  passes it by) so another fed group can take it once its limit resets (`park`, never delayed by
+  the cooldown); (3) fills the fed groups from the reservoir, the default group's accounts lent
+  nowhere and parked accounts of other groups, highest priority first (equal priorities by group
+  id), first to one ready account each, then to `ready`, the account with room now first (the most
+  room, then the latest reset), then the soonest reset (`feed`); (4) gives a fed group with demand
+  (requests in 6 hours, or a limit refusal in about the last 15 minutes as this owner counted it:
+  never the day counts a fresh start reads, so a refusal this morning is not one now) and still no
+  ready account one ready account of the lowest fed group of a lower priority, even its last (an
+  account the feed placed there moves, `taken` then `priority`; its own account is shared with it),
+  but not an account that served that group in about the last 30 minutes unless the higher group is
+  refusing requests now; (5) after those takes, gives back a placement that is out, never delayed,
+  but only while another account with room now serves its group, so a fed group never loses its
+  last account and its sessions always have one to go to (`spent`); a return that relies on an
+  account lent in the same pass is held when that lend did not happen; (6) gives back the extra
+  placements of a group holding at least `ready` + 2 accounts with room now, down to `ready`,
+  never the one its sessions use now (`surplus`). The two short windows are read in the statistics'
+  quarter-hour buckets, so they are about 30 and 15 minutes; "serving" reads the day counts after a
+  restart (erring toward protecting an account), and a lost `statistics.json` leaves it empty until
+  this owner has counted for about 30 minutes, when a priority move may take an account in use.
+  Every move is a loan like balancing's (a
+  share; nobody's home changes), takes effect from the next request, waits out the account's
+  one-hour cooldown except a park, a spent placement and one waiting for a sign-in, and is one
+  `balancing.jsonl` line with its reason and figures. Never moved: the ordinary CLI's sign-in, an
+  account given to an agent, one turned off (today `enabled`; the person's own off switch of SB-418
+  replaces it), a delegated seat, one used on another machine or in a machine group; nothing
+  crosses an organization's boundary (`loan_admits`). Turning a group's feed off gives back at once
+  every account the feed moved in or out of it, and takes no priority. A move is recorded in the
+  store's activity as a `balancing` entry (`lent`, `returned`), so an older Switchboard still reads
+  the store; the window's Activity names the feed's moves from the journal.
+- **Consequences / affects:** `balancing.json` gains `fed`, `ready`, `lookahead_minutes` and the
+  loans' `feed` mark. An older Switchboard reads the file but does not keep the feed: it drops
+  `fed`, `ready` and `lookahead_minutes` the next time it writes, and its balancing pass returns
+  every feed loan as `not_chosen` (a loan between groups it does not see chosen; one between two
+  groups chosen for balancing it takes for its own and returns once the borrower is quiet), so after
+  a downgrade the feed is off and what it moved goes back. CLI `project feed`, `feed status`,
+  `feed set`; MCP `switchboard_feed`; the Groups page's switch, priority field and map, Activity's
+  *Fed from Default* (SCN-104); [CONTRACTS](CONTRACTS.md#groups-fed-from-the-default-group-sb-419-dec-0028).
+- **Source:** operator 2026-11-17 («хочется, чтобы появилась автоматизация ротации из дефолтной
+  группы в папке. Она включаемая и выключаемая для каждой папки … показываем стрелочками, что это
+  связано … Те, которые выбывают, они уходят в дефолтную папку отстаиваться … аккаунты, которые
+  скоро станут активными, наперед мы подготавливаем … У папок типа есть свой приоритет»); design
+  target-state `06-default-feed.md`.
+
+### DEC-0031: A short rate limit of the pay-per-token key is waited out inside the proxy
+
+- **Date:** 2026-11-18
+- **Status:** Accepted (built on branch `tokens-spend`: SB-453). The number is the next one free
+  after the decisions on open pull requests (DEC-0027 #821, DEC-0029 #832, DEC-0030 #836); a
+  pull request that lands first with the same number moves this one to the next free.
+- **Context:** the pay-per-token group usually holds one Claude API key, so DEC-0002's move to the
+  group's next account finds none, and a `429` for the key's rate limit reached the session as an
+  error. On 2026-11-18 (board thread a9844103) a session and its nine subagents met `429` within
+  two minutes and stood still until they were closed for inactivity. An API rate limit refills
+  within the minute and the provider says how long to wait (`Retry-After`).
+- **Decision:** a `429` for a Claude API key at home in the pay-per-token group, when no DEC-0002
+  move takes the request, is waited out inside the proxy and the same request sent again on the
+  same key, when the provider asked for at most 30 seconds and did not say `x-should-retry:
+  false`: at most three tries and 60 seconds of waiting per request, the group's switch and
+  ceiling checked again before each try. Nothing reached the session before, so it sees only the
+  final answer. This is a second deliberate replay beside DEC-0002, limited to a request that did
+  no work and charged nothing; no other replay is added.
+- **Consequences / affects:** a waiting request holds one of the proxy's 64 slots; a session that
+  goes away ends its wait. Each refused try counts as `limited` in the statistics and the journal
+  records `rate_limited` once per request. `AGENTS.md` (Local rules),
+  [CONTRACTS](CONTRACTS.md#pay-per-token-group-sb-401-dec-0023).
+- **Source:** board thread a9844103 (Fabric Dashboards, 2026-11-18), relayed by the coordinator
+  of SB-452/SB-453: "the proxy should handle an upstream 429 with retry-after: a bounded wait and
+  retry inside the proxy before any byte reached the client (a request that did no work, like
+  DEC-0002's rule; never retry after bytes were sent)".

@@ -31,6 +31,7 @@ pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
 mod fallback;
+pub(crate) mod feed;
 pub mod github;
 pub mod given;
 pub mod handovers;
@@ -38,6 +39,7 @@ mod headless_login;
 pub mod health;
 pub mod hermes;
 mod inbox;
+pub mod item_size;
 pub mod kimi;
 pub mod launch;
 pub mod launch_keys;
@@ -117,7 +119,11 @@ pub fn rfc3339(seconds: i64) -> Option<String> {
         .ok()
 }
 
-/// No credential retrieval operation exists. Never derive Debug on this type.
+/// Never derive Debug on this type. Five operations answer a credential or key value:
+/// `AgentKey` (the agents' proxy key), `AgentKeyValue` and `AnthropicKeyValue` (a saved
+/// provider key), `SurrenderAccount` and `SurrenderDelegated` (a sign-in handed back to the
+/// machine that moved it). No MCP tool and no window command maps to any of them; the CLI
+/// refuses to print a provider key or a sign-in to a terminal or a file (SB-420).
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
@@ -271,6 +277,11 @@ pub enum Operation {
         /// terminal (an embedded console, SB-108), instead of opening Terminal.
         #[serde(default)]
         in_place: bool,
+        /// SB-440: in place for the hand-over queue (`ContinueToConsole`, the automatic fallback),
+        /// where the script may wait for a console; set only inside the owner, never sent nor read
+        /// from the wire (SB-449).
+        #[serde(skip)]
+        queued: bool,
     },
     /// SB-247: Fabric's start of the default agent, with no person, on a workflow Fabric opened
     /// for a board request and offered to the agent's provider (`handoff_id`). The answer is the
@@ -1055,6 +1066,24 @@ pub enum Operation {
     /// SB-352: the chosen groups, the accounts lent now, the last pass and the newest lends and
     /// returns.
     BalanceStatus,
+    /// SB-419 (DEC-0028): a group's feed from the default group on or off, with its priority
+    /// (1 is the highest), and how many ready accounts a fed group keeps and how far ahead a
+    /// reset counts. Turning a group's feed off gives back every account the feed moved in or
+    /// out of it at once.
+    Feed {
+        #[serde(default)]
+        pool: Option<String>,
+        #[serde(default)]
+        on: Option<bool>,
+        #[serde(default)]
+        priority: Option<u32>,
+        #[serde(default)]
+        ready: Option<u32>,
+        #[serde(default)]
+        lookahead_minutes: Option<u32>,
+    },
+    /// SB-419: the fed groups, the reservoir, the accounts the feed moved and its newest moves.
+    FeedStatus,
     /// The recommended OpenRouter models and OpenRouter's tool-capable list (SB-119).
     OpenrouterModels,
     /// Replaces the repository owners whose new repositories a project is offered.
@@ -1264,6 +1293,9 @@ pub(crate) struct NativeSources {
     pub(crate) activate: Activate,
     /// Claude Code's live credential item under its locks, for renewing it while idle.
     pub(crate) live: fn() -> Result<Box<dyn external::LiveItem>, String>,
+    /// SB-420: the Keychain stamp of Claude Code's credential item, from its attributes only
+    /// (nothing decrypted, no lock); None when unknown.
+    pub(crate) live_stamp: fn() -> Option<String>,
     /// Claude Swap's saved profiles, read on demand before switching to an account it holds.
     pub(crate) swap: fn() -> Result<external::ImportBatch, String>,
     /// Whether Claude Swap runs and switches, read from the process table in-process.
@@ -1295,6 +1327,7 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
         Err("Current Claude credential is unavailable; activation was cancelled.".into())
     },
     live: no_live,
+    live_stamp: || None,
     swap: no_swap,
     swap_activity: external::SwapActivity::none,
     swap_signature: || None,
@@ -1316,6 +1349,7 @@ pub(crate) const NATIVE: NativeSources = NativeSources {
     fresh: Some(external::capture_current),
     activate: external::activate_claude,
     live: external::lock_live,
+    live_stamp: external::live_stamp,
     swap: external::read_claude_swap,
     swap_activity: external::claude_swap_activity,
     swap_signature: external::claude_swap_signature,
@@ -1759,6 +1793,8 @@ impl Runtime {
                 | Operation::OpenrouterModels
                 // SB-352: balancing.json and its journal, and the owner's memory of the last pass.
                 | Operation::BalanceStatus
+                // SB-419: the same files.
+                | Operation::FeedStatus
                 // Hand-overs are files: listing reads them, and taking one is claimed by an
                 // exclusive create (`handovers::take`). Behind the owner transaction a console's
                 // read waited out renewals and syncs for up to 366 s (Fabric Dashboards FD-71).
@@ -2245,6 +2281,7 @@ impl Runtime {
             mode: "isolated".into(),
             working_directory: working_directory.clone(),
             in_place: true,
+            queued: true,
         }))
         .await?;
         let snapshot = self.store.snapshot().ok();
@@ -2468,6 +2505,17 @@ impl Runtime {
         let new = self.proxy.take_statistics();
         if new.is_empty() {
             return;
+        }
+        // SB-452: requests served by another group than their own since the last pass.
+        let mismatched: u64 = new.values().map(|t| t.mismatched).sum();
+        if mismatched > 0 {
+            oplog::event(
+                "proxy_group_mismatch",
+                &[(
+                    "count",
+                    oplog::Field::Number(i64::try_from(mismatched).unwrap_or(i64::MAX)),
+                )],
+            );
         }
         let Ok(snapshot) = self.store.snapshot() else {
             self.statistics.absorb(new);
@@ -3315,7 +3363,8 @@ impl Runtime {
                 return;
             }
         };
-        if !settings.on() && settings.lent.is_empty() {
+        // SB-419: a group fed from the default group keeps the pass running too.
+        if !settings.on() && settings.lent.is_empty() && settings.fed.is_empty() {
             return;
         }
         let Ok(snapshot) = self.store.snapshot() else {
@@ -3348,7 +3397,21 @@ impl Runtime {
                 .collect(),
             limited: self.store.limited(),
         };
-        let actions = balancing::plan(&snapshot, &signals, &held, &planned, time);
+        let mut actions = balancing::plan(&snapshot, &signals, &held, &planned, time);
+        // SB-419 (DEC-0028): the feed decides after balancing, on the accounts it left alone.
+        let busy: HashSet<String> = actions.iter().map(|a| a.account.clone()).collect();
+        let activity = feed::Activity::from_windows(
+            &snapshot,
+            &self.statistics.window(feed::SERVING_SECONDS, time),
+            // Review round 2: refusals from this owner's own quarters only, never the day
+            // counts a fresh start adds (a refusal this morning is not one now).
+            &self
+                .statistics
+                .window_in_memory(feed::REFUSING_SECONDS, time),
+        );
+        actions.extend(feed::plan(
+            &snapshot, &signals, &activity, &held, &planned, time, &busy,
+        ));
         let summary = balancing::summary(&snapshot, &signals, &held, &planned, &actions, time);
         let _mutation = self.hold("balance").await;
         // The person changed the groups meanwhile: the next pass decides on what they chose.
@@ -5468,6 +5531,7 @@ fn attention_report(
         watch: &session_watch::last(root),
         // SB-417: the board starts waiting since the pool last admitted one, with no cutoff.
         refusals: dispatch_refusals::waiting(root).as_ref(),
+        too_large: &item_size::read(root),
         now,
     }))
 }
@@ -5513,7 +5577,7 @@ async fn execute(
         // null offline, where no owner answered) and `online` says whether an owner runs,
         // beside the display string `live_mode`.
         Operation::Status => Ok(
-            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "owner_kind": runtime.map(|r| if r.app_doors().is_some() { "app" } else { "serve" }), "owner_copy": runtime.and_then(|_| copies::this_copy()).map(|c| c.to_string_lossy().into_owned()), "owner_updates_copy": runtime.map(|r| r.app_doors().is_some() || serve_update::updates_copy(root)), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok()}),
+            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "owner_kind": runtime.map(|r| if r.app_doors().is_some() { "app" } else { "serve" }), "owner_copy": runtime.and_then(|_| copies::this_copy()).map(|c| c.to_string_lossy().into_owned()), "owner_updates_copy": runtime.map(|r| r.app_doors().is_some() || serve_update::updates_copy(root)), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok(), "keychain_too_large": item_size::status(root)}),
         ),
         Operation::CurrentAccounts => match runtime {
             Some(runtime) => runtime.current_accounts(),
@@ -6537,6 +6601,7 @@ async fn execute(
             mode,
             working_directory,
             in_place,
+            queued,
         } => {
             if in_place && cfg!(windows) {
                 return Err(launch::IN_PLACE_UNSUPPORTED.into());
@@ -6681,9 +6746,16 @@ async fn execute(
                     observatory,
                     previous_provider: plan.from_provider.clone(),
                 };
-                let launched =
-                    kimi::launch_continuation(root, &store, &id, &directory, &resumed, start)
-                        .map_err(|e| continuation::launch_failed(&offer, &e))?;
+                // SB-449: in place, the caller (or the hand-over queue) runs Kimi's script too.
+                let handed = if in_place {
+                    launch::Handed::for_continue(queued)
+                } else {
+                    launch::Handed::Terminal
+                };
+                let launched = kimi::launch_continuation(
+                    root, &store, &id, &directory, &resumed, start, handed,
+                )
+                .map_err(|e| continuation::launch_failed(&offer, &e))?;
                 return Ok(json!({
                     "script": if in_place { launched["script"].clone() } else { Value::Null },
                     "message": "Terminal launch requested; the Kimi Code session accepts the handoff itself. Provider response is not yet verified.",
@@ -6730,6 +6802,8 @@ async fn execute(
                     &mode,
                     &directory,
                     &resumed,
+                    // SB-440: a queued script may wait for a console; the CLI runs its own at once.
+                    launch::Handed::for_continue(queued),
                 )
                 .map_err(|e| continuation::launch_failed(&offer, &e))?;
                 (tools, Some(script))
@@ -6858,7 +6932,12 @@ async fn execute(
                 }
             }
             let pool = pool.unwrap_or_else(|| "default".into());
-            let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
+            // SB-475: the switchboard the machine is known to run (the newest move or run there),
+            // as every other call to it does; the macOS app's only for a machine never reached. A
+            // Linux machine runs the .deb's `/usr/bin/switchboard`, and the macOS default made
+            // every move there fail as if the machine had not answered.
+            let (program, remote_data_dir) =
+                targets::program_for(root, &to, program, remote_data_dir);
             let remote = account_send::Program {
                 path: &program,
                 data_dir: remote_data_dir.as_deref(),
@@ -8047,6 +8126,62 @@ async fn execute(
             let mut view = balancing::status(root, &store.snapshot()?, &settings, last.as_ref());
             view["changed"] = json!(changed);
             Ok(view)
+        }
+        Operation::Feed {
+            pool,
+            on,
+            priority,
+            ready,
+            lookahead_minutes,
+        } => {
+            let snapshot = store.snapshot()?;
+            let mut settings = match runtime {
+                Some(rt) => rt.balance_settings()?,
+                None => balancing::read(root)?,
+            };
+            let changed = feed::change(
+                &mut settings,
+                &snapshot,
+                pool.as_deref(),
+                on,
+                priority,
+                ready,
+                lookahead_minutes,
+            )?;
+            let now = monitor::now();
+            if changed {
+                // A group whose feed went off gets back every account the feed moved, now.
+                let owed =
+                    feed::returns_owed(&snapshot, &balancing::Held::default(), &settings, now);
+                balancing::apply(&store, root, &mut settings, &owed, now);
+                balancing::write(root, &settings)?;
+                if let Some(rt) = runtime {
+                    if let Ok(mut watch) = rt.balancing.lock() {
+                        watch.settings = Some(settings.clone());
+                    }
+                    // Any change of the feed is decided on within a minute, not at the next
+                    // quarter hour.
+                    rt.balance_soon(now);
+                }
+            }
+            let last = runtime.and_then(|rt| rt.balancing.lock().ok().and_then(|w| w.last.clone()));
+            let mut view = feed::status(root, &store.snapshot()?, &settings, last.as_ref(), now);
+            view["changed"] = json!(changed);
+            Ok(view)
+        }
+        Operation::FeedStatus => {
+            let settings = match runtime {
+                Some(rt) => rt.balance_settings()?,
+                None => balancing::read(root)?,
+            };
+            let last = runtime.and_then(|rt| rt.balancing.lock().ok().and_then(|w| w.last.clone()));
+            Ok(feed::status(
+                root,
+                &store.snapshot()?,
+                &settings,
+                last.as_ref(),
+                monitor::now(),
+            ))
         }
         Operation::BalanceStatus => {
             let settings = match runtime {
@@ -9455,7 +9590,17 @@ fn replace_native(
         }
         Ok(())
     };
-    (native.activate)(&credential, identity, expected.as_ref(), &mut preserve)?;
+    let activated = (native.activate)(&credential, identity, expected.as_ref(), &mut preserve);
+    // SB-420: only the write itself records or clears the refusal: a switch that returned
+    // early (the account already in use) wrote nothing and says nothing about the item's size.
+    item_size::note(
+        store.root(),
+        item_size::ORDINARY,
+        item_size::DURING_SWITCH,
+        &activated,
+        monitor::now(),
+    );
+    activated?;
     // SB-102: the switch has happened; failing to note its time must not report it as failed
     // (the monitor would set the account now in use aside and try another).
     if store.snapshot().is_ok_and(|s| {
@@ -12553,6 +12698,58 @@ mod owner_tests {
             );
             assert_eq!(stored.refresh_token.as_deref(), Some("synthetic-a-refresh"));
         }
+    }
+    /// SB-420: a switch refused because Claude Code's item is too large is recorded and shown;
+    /// one that returns early (the account already in use) leaves the record; one that writes
+    /// clears it.
+    #[tokio::test]
+    async fn a_switch_refused_as_too_large_is_recorded_until_a_switch_writes() {
+        static REFUSE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+        fn activate(
+            credential: &Credential,
+            identity: &ExternalIdentity,
+            expected: Option<&ExternalIdentity>,
+            preserve: &mut dyn FnMut(&external::Outgoing<'_>) -> Result<(), String>,
+        ) -> Result<(), String> {
+            if REFUSE.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(external::CREDENTIAL_TOO_LARGE.into());
+            }
+            activates(credential, identity, expected, preserve)
+        }
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activate).await;
+        runtime
+            .refresh
+            .set_profile_endpoint(profile_of("synthetic-a").await);
+        let a = stale_copy(&runtime.store, "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let switch = |id: String| {
+            let runtime = runtime.clone();
+            async move {
+                runtime
+                    .execute(Operation::ActivateNative { id, force: false })
+                    .await
+            }
+        };
+        assert_eq!(
+            switch(b.id.clone()).await.unwrap_err(),
+            external::CREDENTIAL_TOO_LARGE
+        );
+        let recorded = item_size::read(root.path());
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(
+            (recorded[0].item.as_str(), recorded[0].during.as_str()),
+            (item_size::ORDINARY, item_size::DURING_SWITCH)
+        );
+        let attention = runtime.execute(Operation::Attention).await.unwrap();
+        assert_eq!(attention["items"][0]["reason"], "keychain_too_large");
+        // The account already in use: nothing written, so the record stays.
+        switch(a.id.clone()).await.unwrap();
+        assert_eq!(item_size::read(root.path()).len(), 1);
+        // A switch that writes clears it.
+        REFUSE.store(false, std::sync::atomic::Ordering::SeqCst);
+        switch(b.id.clone()).await.unwrap();
+        assert!(item_size::read(root.path()).is_empty());
     }
     #[tokio::test]
     async fn a_copy_newer_than_claude_codes_item_is_not_overwritten_on_switch() {

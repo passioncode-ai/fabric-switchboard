@@ -164,9 +164,9 @@ enum Command {
         command: Option<CapacityCmd>,
     },
     /// The session duty officer: every five minutes it closes and continues a Claude Code session
-    /// that stopped moving, closes one that finished and only holds a terminal, and gives a
-    /// long-lived one a fresh process at the end of a turn. Without a subcommand: its settings,
-    /// its last actions and what a check would do now.
+    /// that stopped moving, and closes one that finished and only holds a terminal (nothing it
+    /// started still runs or writes). Nothing is restarted for its age. Without a subcommand: its
+    /// settings, its last actions and what a check would do now.
     Duty {
         #[command(subcommand)]
         command: Option<DutyCmd>,
@@ -537,6 +537,13 @@ enum Command {
         #[command(subcommand)]
         command: BalanceCommand,
     },
+    /// Groups fed from the default group: `status` reads the fed groups, the default group's
+    /// accounts and the newest moves; `set` changes how many ready accounts a fed group keeps.
+    /// Turn a group's feed on or off with `switchboard project feed`.
+    Feed {
+        #[command(subcommand)]
+        command: FeedCommand,
+    },
     /// Kimi Code subscription accounts: sign in with the official `kimi login`, see each plan's
     /// usage, and launch `kimi` on an account. Each login stays in its own folder.
     Kimi {
@@ -853,6 +860,21 @@ enum Project {
         /// The folder, as `project suggestions` lists it.
         folder: String,
     },
+    /// Feed a group from the default group, or stop: Switchboard keeps the group's ready
+    /// accounts by lending it accounts of the default group and taking back one that runs out
+    /// once another serves the group. Turning it off gives back every account the feed moved.
+    Feed {
+        /// The group id (`switchboard project list`).
+        pool: String,
+        /// on or off.
+        #[arg(value_enum)]
+        state: OnOff,
+        /// 1 is the highest: a higher group is served first when accounts run short; of two
+        /// with the same priority, the group id first in alphabetical order. Without it, a
+        /// group fed for the first time goes after the others. Not with off.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=99))]
+        priority: Option<u32>,
+    },
     /// The repository owners whose new repositories join a group, as host/owner
     /// (`github.com/example`). Without --add or --remove, prints them.
     Source {
@@ -1088,7 +1110,7 @@ enum CapacityCmd {
         /// The most working coding sessions at once, 1 to 500.
         cap: u32,
         /// How many board runs may run whatever the cap holds: a number from 0 to the cap, or
-        /// `default` (a quarter of the cap, at least 2). Left out: the share set before is kept,
+        /// `default` (a quarter of the cap, rounded up). Left out: the share set before is kept,
         /// clamped to the new cap.
         #[arg(long, value_parser = board_share_arg)]
         board: Option<BoardShare>,
@@ -1303,7 +1325,8 @@ enum Accounts {
         /// The group it joins there (`default`: the default group).
         #[arg(long)]
         pool: Option<String>,
-        /// The other machine's switchboard, an absolute path; by default the macOS app's.
+        /// The other machine's switchboard, an absolute path; by default the one the newest move or
+        /// run there used (`switchboard targets`), else the macOS app's.
         #[arg(long)]
         remote: Option<String>,
         /// The other machine's data folder, an absolute path, when its Switchboard runs with
@@ -1379,7 +1402,8 @@ enum Accounts {
         limit: usize,
     },
     /// On the machine an account was moved to: give its sign-in back to the machine that calls
-    /// it back. Run only by `accounts recall` over ssh; it refuses to print to a terminal.
+    /// it back. Run by `accounts recall` over ssh; it refuses to print to a terminal or into a
+    /// file.
     Surrender {
         /// The account id on this machine.
         id: String,
@@ -1682,6 +1706,23 @@ enum BalanceCommand {
     },
 }
 #[derive(Subcommand)]
+enum FeedCommand {
+    /// The fed groups with their priority and ready accounts, the default group's accounts, what
+    /// the feed moved and why. Reads only.
+    Status,
+    /// How many ready accounts each fed group keeps and how far ahead a reset counts, for every
+    /// fed group.
+    Set {
+        /// How many ready accounts each fed group keeps, 1 to 10 (2 until you change it).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=10))]
+        ready: Option<u32>,
+        /// Minutes ahead an account whose limit resets counts as ready, 0 to 720 (30 until you
+        /// change it).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(0..=720))]
+        lookahead: Option<u32>,
+    },
+}
+#[derive(Subcommand)]
 enum AgentsCommand {
     /// Every agent in the catalog with what it supports: mcp, proxy or launch.
     List,
@@ -1738,6 +1779,10 @@ enum AgentsCommand {
         /// With --service: exactly the machine's key, never a group's.
         #[arg(long, requires = "service", conflicts_with = "dir")]
         machine: bool,
+        /// With --service: print the key into the pipe the caller reads it from (a session
+        /// script's `$(...)`). Required: without it, or to a terminal or a file, it is refused.
+        #[arg(long, requires = "service")]
+        to_pipe: bool,
     },
     /// The OpenRouter key agents run on: save it (piped on stdin), see what it may still spend,
     /// change the default model, or remove it.
@@ -1975,6 +2020,10 @@ enum AnthropicCommand {
     Key {
         /// The key's name.
         name: String,
+        /// Print the key into the pipe the caller reads it from (a session script's `$(...)`).
+        /// Required: without it, or to a terminal or a file, it is refused.
+        #[arg(long)]
+        to_pipe: bool,
     },
 }
 #[derive(Subcommand)]
@@ -2232,6 +2281,52 @@ impl From<Kind> for AuthKind {
 enum Mode {
     Isolated,
     Managed,
+}
+/// SB-420: printed when a command that prints a key is run without `--to-pipe` or into a
+/// terminal or a file. Names the use, never the key.
+const KEY_TO_PIPE_ONLY: &str = "This prints a key, only for a session script that reads it from a pipe with --to-pipe. See what is saved with `switchboard agents openrouter status` or `switchboard agents anthropic list`.";
+
+/// SB-420: a command that prints a credential writes it only when its caller named the hand-over
+/// (`named`) and reads the value from a pipe or socket: never to a terminal, never into a file,
+/// never for a caller that did not ask for the value by name.
+fn value_output(named: bool, refusal: &str) -> Result<(), String> {
+    if named && stdout_is_pipe() {
+        Ok(())
+    } else {
+        Err(refusal.into())
+    }
+}
+fn stdout_is_pipe() -> bool {
+    if io::stdout().is_terminal() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: fstat writes only into the zeroed buffer it is given.
+        let mut status: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstat(libc::STDOUT_FILENO, &mut status) } != 0 {
+            return false;
+        }
+        let kind = status.st_mode & libc::S_IFMT;
+        kind == libc::S_IFIFO || kind == libc::S_IFSOCK
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetFileType(file: *mut std::ffi::c_void) -> u32;
+        }
+        const FILE_TYPE_PIPE: u32 = 3;
+        // SAFETY: GetFileType only reads the handle's type.
+        unsafe {
+            GetFileType(io::stdout().as_raw_handle() as *mut std::ffi::c_void) == FILE_TYPE_PIPE
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        false
+    }
 }
 fn read_secret() -> Result<String, String> {
     if io::stdin().is_terminal() {
@@ -2795,8 +2890,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 remote_data_dir: remote_data_dir.clone(),
             },
             Accounts::Surrender { id, undo } => {
-                if !undo && io::stdout().is_terminal() {
-                    return Err(switchboard_runtime::account_send::SURRENDER_TO_TERMINAL.into());
+                // SB-420: the sign-in goes out only to the ssh call that asked for it by name.
+                if !undo {
+                    let named = std::env::var(switchboard_runtime::account_send::TRANSFER_ENV)
+                        .is_ok_and(|v| v == switchboard_runtime::account_send::TRANSFER_SURRENDER);
+                    value_output(
+                        named,
+                        switchboard_runtime::account_send::SURRENDER_TO_TERMINAL,
+                    )?;
                 }
                 Operation::SurrenderAccount {
                     id: id.clone(),
@@ -3604,6 +3705,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 backup_remove: backup_remove.clone(),
             },
         },
+        Command::Feed { command } => match command {
+            FeedCommand::Status => Operation::FeedStatus,
+            FeedCommand::Set { ready, lookahead } => {
+                if ready.is_none() && lookahead.is_none() {
+                    return Err("Give --ready, --lookahead or both.".into());
+                }
+                Operation::Feed {
+                    pool: None,
+                    on: None,
+                    priority: None,
+                    ready: *ready,
+                    lookahead_minutes: *lookahead,
+                }
+            }
+        },
         Command::Agents { command } => match command {
             AgentsCommand::List => Operation::AgentCatalog,
             AgentsCommand::Status => Operation::AgentsOverview,
@@ -3632,7 +3748,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 dir,
                 pool,
                 machine,
+                to_pipe,
             } => {
+                value_output(*to_pipe, KEY_TO_PIPE_ONLY)?;
                 use switchboard_runtime::spend::KeySlot;
                 // SB-213: a slot named is the key fetched, whatever group the folder is in now.
                 let slot = match (pool, machine) {
@@ -3703,7 +3821,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 AnthropicCommand::Remove { name } => {
                     Operation::AnthropicKeyRemove { name: name.clone() }
                 }
-                AnthropicCommand::Key { name } => {
+                AnthropicCommand::Key { name, to_pipe } => {
+                    value_output(*to_pipe, KEY_TO_PIPE_ONLY)?;
                     Operation::AnthropicKeyValue { name: name.clone() }
                 }
             },
@@ -3879,6 +3998,17 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             },
             Project::Dismiss { folder } => Operation::ProjectSuggestionDismiss {
                 folder: folder.clone(),
+            },
+            Project::Feed {
+                pool,
+                state,
+                priority,
+            } => Operation::Feed {
+                pool: Some(pool.clone()),
+                on: Some(matches!(state, OnOff::On)),
+                priority: *priority,
+                ready: None,
+                lookahead_minutes: None,
             },
             Project::Source { pool, add, remove } => {
                 return project_sources(&root, pool, add, remove).await
@@ -4516,6 +4646,7 @@ async fn continue_workflow(
                 .into(),
                 working_directory: dir.to_owned(),
                 in_place,
+                queued: false,
             },
             launches::LaunchedBy::from_caller(launches::Surface::Cli, None, None),
         ),
@@ -5933,12 +6064,21 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
-        Command::Status => println!(
-            "Mode: {}\nPlatform: {}\nProxy: {}",
-            text(&value["live_mode"]),
-            text(&value["platform"]),
-            text(&value["proxy_address"])
-        ),
+        Command::Status => {
+            println!(
+                "Mode: {}\nPlatform: {}\nProxy: {}",
+                text(&value["live_mode"]),
+                text(&value["platform"]),
+                text(&value["proxy_address"])
+            );
+            // SB-420: a Claude Code Keychain item Switchboard could not write.
+            if value["keychain_too_large"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+            {
+                println!("{}", switchboard_runtime::item_size::DETAIL);
+            }
+        }
         Command::Capacity { .. } => print_capacity(value),
         _ => print_value(value, false),
     }
@@ -6123,6 +6263,20 @@ fn print_value(value: &Value, json_output: bool) {
 /// died on its first offline call, nightly `39676565992`); a fixed size makes the limit the same
 /// on every platform instead of the platform's default.
 const STACK_BYTES: usize = 16 * 1024 * 1024;
+/// A failed command's `code` in `--json` and its exit status. SB-343: no account for the folder
+/// is `no-route` and 3, which `launch --target` carries back through ssh. SB-443 (Fabric board
+/// finding, thread 36572ae0): a control request the owner did not answer in time is
+/// `control-timeout` and 4, since the owner may still do the act; a caller never matches text.
+/// Anything else is 1.
+fn failure(error: &str) -> (Option<&'static str>, u8) {
+    if switchboard_runtime::projects::is_no_route(error) {
+        (Some("no-route"), 3)
+    } else if switchboard_runtime::control::is_timeout(error) {
+        (Some("control-timeout"), 4)
+    } else {
+        (None, 1)
+    }
+}
 fn main() -> ExitCode {
     // `shell env` runs on every change of folder in a hooked terminal: answered here, before the
     // runtime starts, within its 25 ms budget (SB-183).
@@ -6311,26 +6465,42 @@ async fn start() -> ExitCode {
             // SB-189: the sentence the window shows, which says what to do; `--json` keeps the
             // backend's own text in `raw` for a script that matches it.
             let sentence = switchboard_runtime::person_errors::for_person(&error);
-            // SB-343: no account for the folder is told apart by its code and status 3, which
-            // `launch --target` carries back through ssh.
-            let no_route = switchboard_runtime::projects::is_no_route(&error);
+            // SB-343, SB-443: a failure a caller must tell apart has a code and a status of its own.
+            let (code, status) = failure(&error);
             if cli.json {
                 let mut body = json!({"ok":false,"error":sentence});
                 if sentence != error {
                     body["raw"] = json!(error);
                 }
-                if no_route {
-                    body["code"] = json!("no-route");
+                if let Some(code) = code {
+                    body["code"] = json!(code);
                 }
                 eprintln!("{body}");
             } else {
                 eprintln!("{sentence}");
             }
-            ExitCode::from(if no_route { 3 } else { 1 })
+            ExitCode::from(status)
         }
     }
 }
 
+#[cfg(test)]
+mod failure_tests {
+    #[test]
+    fn a_control_timeout_has_its_own_code_and_status() {
+        assert_eq!(
+            super::failure(switchboard_runtime::control::CONTROL_TIMED_OUT),
+            (Some("control-timeout"), 4)
+        );
+        assert_eq!(
+            super::failure(
+                "Select an account for this provider first (switchboard accounts select)."
+            ),
+            (Some("no-route"), 3)
+        );
+        assert_eq!(super::failure("Account not found."), (None, 1));
+    }
+}
 #[cfg(all(test, unix))]
 mod in_place_tests {
     #[test]
@@ -6717,6 +6887,9 @@ mod mcp_parity {
         ("project accept", Tool("switchboard_project_suggestion")),
         ("project dismiss", Tool("switchboard_project_suggestion")),
         ("project source", Tool("switchboard_project_sources")),
+        ("project feed", Tool("switchboard_feed")),
+        ("feed status", Tool("switchboard_feed")),
+        ("feed set", Tool("switchboard_feed")),
         ("project apply", Tool("switchboard_project_apply")),
         ("backup list", Tool("switchboard_backups")),
         ("backup now", Tool("switchboard_backup_now")),
