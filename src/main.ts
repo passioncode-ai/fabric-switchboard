@@ -550,10 +550,12 @@ function loadMachinesRead() {
   if (machinesReadLoading || !(snapshot?.machines?.length)) return;
   // Review of PR #861: a failed read waits its minute too (it sets machinesReadAt), so a window
   // whose first read fails does not ask again at every redraw.
-  if (machinesReadAt && Date.now() - machinesReadAt < 60_000) return;
-  machinesReadLoading = true;
+  // Review round 3: stamped when the read is asked, with a 55 s guard, so the minute's refresh
+  // never finds it a few milliseconds too fresh and waits a second minute.
+  if (machinesReadAt && Date.now() - machinesReadAt < 55_000) return;
+  machinesReadLoading = true; machinesReadAt = Date.now();
   // SB-550: read every minute now, so the page is redrawn as the background redraws it: never under an open menu or dialog.
-  void adapter.machinesList().then((v) => { machinesRead = v; machinesReadAt = Date.now(); }, () => { machinesReadAt = Date.now(); }).finally(() => { machinesReadLoading = false; backgroundRender(); });
+  void adapter.machinesList().then((v) => { machinesRead = v; }, () => { /* the next minute asks again */ }).finally(() => { machinesReadLoading = false; backgroundRender(); });
 }
 /**
  * SB-550: the usage cell of an account on another machine: the bar, share and age of its copy

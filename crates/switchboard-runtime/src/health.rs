@@ -119,9 +119,11 @@ pub fn report(inputs: &Inputs) -> Value {
     // SB-550: the machines this computer's accounts live on, read every minute: one that stopped
     // answering, a failing health check there, or sessions there that need a person.
     let machines = count(&["machine_unreachable", "machine_health", "machine_sessions"]);
+    // The area is the contract's closed list (HL-3): the other machines are reached over ssh,
+    // `connection` (review round 3 of PR #861).
     checks.push(check(
         "machines",
-        "machines",
+        "connection",
         if machines > 0 { "warn" } else { "ok" },
         machines,
         (machines > 0).then_some("switchboard_machines"),
@@ -268,6 +270,33 @@ mod tests {
             }
             let states = checks.iter().map(|c| c["state"].as_str().unwrap());
             assert_eq!(r["state"], worst(states));
+        }
+    }
+
+    /// Review round 3 of PR #861: every area the report emits is one of the contract's closed
+    /// list (`agent-health.schema.json`, HL-3), read from the vendored fixture; an area outside it
+    /// makes every report fail the schema and readers count Switchboard as unknown (HL-5).
+    #[test]
+    fn every_area_the_report_emits_is_in_the_contracts_list() {
+        let areas: Vec<String> = vectors()["areas"]
+            .as_array()
+            .expect("the fixture carries the schema's area list")
+            .iter()
+            .map(|a| a.as_str().unwrap().to_owned())
+            .collect();
+        assert!(areas.len() >= 9, "{areas:?}");
+        let attention = json!({"items": [
+            {"reason": "machine_unreachable"}, {"reason": "sign_in"}, {"reason": "session_stuck"}]});
+        for counting in [true, false] {
+            let r = run(
+                attention.clone(),
+                json!({"crashes": [], "counting": counting, "errors": []}),
+                true,
+            );
+            for c in r["checks"].as_array().unwrap() {
+                let area = c["area"].as_str().unwrap();
+                assert!(areas.iter().any(|a| a == area), "{} uses area {area}", c["id"]);
+            }
         }
     }
 

@@ -949,7 +949,7 @@ research notes); the ones still in force that the board cites are seeded below w
     not running (`machine_health`) and its sessions that need a person: a second copy or a board
     run gone quiet (`machine_sessions`; a gone run is history there). The last good items are
     kept through one or two failed reads, so they do not come and go; `since` is when a read that
-    worked first saw the condition. `agent-health/1` counts them in the check `machines`.
+    worked first saw the condition. `agent-health/1` counts them in the check `machines` (area `connection`).
     Switchboard itself sends no message about them.
   - The leases of seats delegated to a machine are extended at most every 15 minutes, as before;
     a failed extension is tried again five minutes later, not at every read.

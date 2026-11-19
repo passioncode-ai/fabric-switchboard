@@ -708,7 +708,9 @@ minute while the owner runs, through that machine's own Switchboard over ssh, `s
 remote-status`; every five minutes after three failures in a row; `reason` is `unreachable`,
 `refused` or `unreadable`; `call` is `status`, or `accounts` for an older Switchboard there;
 `sessions` is `{counts, troubled, degraded}`, its rows per group and the rows that need a person by
-`why` and ids; `health` is `{state, failing}`), and each account `there`: `{used_percent,
+`why` and ids; `health` is `{state, failing}`; `health_since` and `sessions_since` are when a read
+that worked first saw a failing check, or sessions there that need a person, null otherwise), and
+each account `there`: `{used_percent,
 observed_at, usage_status, enabled, as_of, tried_at, reason}` of its copy on that machine, or null
 before a first read. The numbers are shown, never used to switch or route here.
 ### `switchboard_machine_set`: `action`, `apply?`, `account_id?`, `on?`, `machine?`, `key?`, `decision?`

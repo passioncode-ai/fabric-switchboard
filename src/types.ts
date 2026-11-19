@@ -67,7 +67,7 @@ export interface RemoteRead { used_percent: number | null; /** SB-550: when that
 /** SB-550: a machine's sessions at its last read: rows per group, and the rows that need a person. */
 export interface MachineSessionsRead { counts: Record<string, number>; troubled: { why: string; session_id: string | null; launch_id: string | null; since: number | null }[]; degraded?: string[] }
 /** SB-550: the last background read of a machine (every minute), with its sessions and health. */
-export interface MachineRead { as_of: number | null; tried_at: number; reason: string | null; failures: number; call?: string | null; sessions?: MachineSessionsRead | null; health?: { state: string; failing: string[] } | null }
+export interface MachineRead { as_of: number | null; tried_at: number; reason: string | null; failures: number; /** Review of PR #861: when a read that worked first saw a failing check there, or sessions there that need a person; null otherwise. */ health_since?: number | null; sessions_since?: number | null; call?: string | null; sessions?: MachineSessionsRead | null; health?: { state: string; failing: string[] } | null }
 /** SB-366: `machines` without `live`: each machine group with its last background read. */
 export interface MachinesList { machines: { pool: string; name: string; read?: MachineRead | null; accounts: { id: string; there?: RemoteRead | null }[] }[] }
 /** SB-355: `machines --live`: each machine group, read over ssh. */

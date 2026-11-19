@@ -1307,7 +1307,7 @@ mod tests {
     }
 
     /// SB-550: reads every minute, but the leases of seats delegated there are extended every 15
-    /// minutes as before, and again the next minute when an extension failed.
+    /// minutes as before, and an extension that failed is tried again five minutes later.
     #[test]
     fn leases_are_extended_every_fifteen_minutes_not_every_read() {
         let root = tempfile::tempdir().unwrap();
