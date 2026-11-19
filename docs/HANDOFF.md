@@ -12,6 +12,14 @@
 
 **Exact next task.** Review the `boot-resume` pull request and merge it once its gate reads EXIT 0 on the merged head; after the release, reply on thread a9844103 with DEC-0030's rule so Fabric Dashboards removes `ai.passioncode.resume-after-boot`.
 
+## 2026-11-19: release 0.7.123 (SB-450, SB-451, SB-507 boot resume; SB-508 live-session ledger; SB-510 watchdog)
+
+- **Done (merged to main):** sessions a computer restart cut in a turn are continued as themselves at the first pass after it (#836, DEC-0030, never a session closed on purpose, a board run or, with own sign-in off, one outside Switchboard's homes; at most six hours after the boot); launch records name their process's session (SB-451); a session seen live and cut by the restart is listed on the Sessions page with *Continue* (SB-508); a watchdog apart from the owner checks it every five minutes (SB-510, launchd or systemd user job installed by the installed app only).
+- **Also:** the duplicate error-vocabulary key for the reasoning level removed; SB-557 holds the reviews' follow-ups.
+- **Ecosystem digest for PM agents:** agents base R33 O19 (D-83), `patterns/ecosystem-sync`, `org-administrator` 1.35.0; Kira is moving to publisher (thread 6f62a3e0), Anya reads (thread cdd02c37); the base's daily review bridges the daily digest until Kira publishes (item ib-20261119-3afd30b123).
+- **Checks run:** the Mac Studio gate on every merged head; two consecutive clean review rounds per PR; the release's Nightly on the tag.
+- **Exact next task:** #856 SB-518 smart usage checks (review rounds, merge); the teammate's seat once the Appvillis PM agent returns `user@host` and the group id (thread 04f5833c); check `switchboard machines list` reads `call: status` once 0.7.123 runs on both sides; then W10.4 to W10.8, SB-548, SB-519.
+
 ## 2026-11-19: release 0.7.122 (SB-549, SB-550, SB-517) and the seat for a teammate's Mac
 
 - **Objective.** The operator's orders of 2026-11-19: stale Keychain warnings in Needs attention (screenshot), one figure per account on another machine with a minute ping of each machine through its own Switchboard (screenshot), and a Claude Code seat (claude12) for a teammate's Mac, coordinated through the Appvillis PM agent and set up through Claude Code over MCP.
