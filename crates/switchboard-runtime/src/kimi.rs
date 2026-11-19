@@ -1576,7 +1576,7 @@ mod tests {
             let (a, b) = (Uuid::new_v4().to_string(), Uuid::new_v4().to_string());
             for id in [&a, &b] {
                 store
-                    .add_kimi_account(id, "Work", "global", None, None)
+                    .add_kimi_account(id, "Work", "mainland-cn", None, None)
                     .unwrap();
                 let home = home(&root, id).unwrap();
                 fs::create_dir_all(&home).unwrap();
