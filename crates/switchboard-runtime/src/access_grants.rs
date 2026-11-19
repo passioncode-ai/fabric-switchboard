@@ -359,12 +359,12 @@ fn seat_grants(
         match s.event.as_str() {
             "granted" | "handed_over" | "unknown" => {
                 // A retry of a move whose answer was lost: the newer line is the grant.
-                out.retain(|g| {
-                    g.revoked
-                        || !(g.account == s.account
-                            && g.machine.as_deref() == Some(machine.as_str())
-                            && g.record["scopes"][0] == "seat.outcome_unknown")
-                });
+                let lost = |g: &Building| {
+                    g.account == s.account
+                        && g.machine.as_deref() == Some(machine.as_str())
+                        && g.record["scopes"][0] == "seat.outcome_unknown"
+                };
+                out.retain(|g| g.revoked || !lost(g));
                 let Some(subject) = subject_of(snapshot, &s.account) else {
                     gone += 1;
                     continue;
