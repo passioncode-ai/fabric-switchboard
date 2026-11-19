@@ -151,6 +151,14 @@ did not answer three reads a minute apart: `failures`, `code`), and from its las
 worked, `machine_health` (its failing health checks, or its owner not running: `checks`) and
 `machine_sessions` (sessions there that need a person, a second copy or a board run gone quiet:
 `count`, `kinds`, `session_ids`; `action.window` `open_sessions`).
+
+Since SB-560 `machine_key_changed` names a machine whose proof answered with another key than the
+one trusted for its ssh name: nothing is sent to it until the person trusts a key. The item
+carries `public_key` and `action.command` (`switchboard machines trust <machine> --key <key>`);
+its `action.tool` is `switchboard_machine_set` (action `trust`, with the operator's `decision`),
+run only once the person knows it is still their machine. Moves, call backs, settings carried
+there, a session ended there and a dispatched run need a machine that proved a trusted key; a
+read of another machine never pins a key.
 ### `switchboard_anthropic_keys`: `name?` (string), `model?` (string)
 
 The Anthropic API keys agents run on directly (SB-390), each under a name the person chose

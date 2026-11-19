@@ -79,12 +79,16 @@ pub struct Inputs<'a> {
     pub watchdog: &'a [Value],
     /// SB-509: the sessions left on the proxy's old token (`token_rotation::sessions`), or none.
     pub rotated: Option<&'a Value>,
+    /// SB-560: machines whose last proof answered with another key (`machine_proof::key_changes`).
+    pub key_changes: &'a [crate::machine_proof::KeyChange],
     pub now: i64,
 }
 
 /// SB-550: a machine whose Switchboard did not answer three reads in a row (a minute apart).
 pub const MACHINE_UNREACHABLE: &str =
     "Another machine's Switchboard has not answered three reads in a row. Check that the machine is on and reachable over ssh.";
+/// SB-560 (spec S2.2): a machine answered the proof with another key than the one trusted for it.
+pub const MACHINE_KEY_CHANGED: &str = "Another machine answered with a different key than the one Switchboard trusts for it, so nothing is sent to it. If it is still your machine, trust its new key.";
 /// SB-550: that machine's Switchboard reports a failing health check, or that it is not running.
 pub const MACHINE_HEALTH: &str =
     "Another machine's Switchboard reports a failing health check. Open Other machines to see which.";
@@ -112,7 +116,7 @@ pub const WATCHDOG_DUPLICATE_SESSION: &str =
     "One session has run in two processes for over 15 minutes.";
 
 /// Reasons in the order they are listed.
-const ORDER: [&str; 19] = [
+const ORDER: [&str; 20] = [
     "watchdog",
     "keychain_too_large",
     "token_rotated",
@@ -126,6 +130,7 @@ const ORDER: [&str; 19] = [
     "renewal_refused",
     "move_unknown",
     "refused_there",
+    "machine_key_changed",
     "machine_unreachable",
     "machine_health",
     "machine_sessions",
@@ -352,6 +357,27 @@ pub fn build(inputs: &Inputs) -> Value {
             }),
         );
     }
+    // SB-560: a machine whose proof answered with another key; nothing is sent to it until the
+    // person trusts a key (`switchboard machines trust`). The machine is named as the label.
+    for change in inputs.key_changes {
+        push(
+            "machine_key_changed",
+            change.machine.clone(),
+            json!({
+                "account_id": null, "label": change.machine, "provider": null, "pool": null,
+                "machine": change.machine, "public_key": change.public_key,
+                "reason": "machine_key_changed", "detail": MACHINE_KEY_CHANGED,
+                "since": change.since,
+                "action": {
+                    "tool": "switchboard_machine_set", "window": "open_machines",
+                    "command": format!(
+                        "switchboard machines trust {} --key {}",
+                        change.machine, change.public_key
+                    ),
+                },
+            }),
+        );
+    }
     // SB-550: each machine group's Switchboard, read every minute: one that stopped answering,
     // and from a read that worked, its failing health checks and its sessions that need a person.
     // Each item names the machine as its label; the sentence names none.
@@ -568,6 +594,7 @@ mod tests {
             too_large: &[],
             watchdog: &[],
             rotated: None,
+            key_changes: &[],
             now: 10_000,
         })
     }
@@ -592,6 +619,7 @@ mod tests {
             too_large: &[],
             watchdog: &[],
             rotated: None,
+            key_changes: &[],
             now: 10_000,
         });
         // A launch that is gone is shown in the session tree, not here, unless it is a board run
@@ -645,6 +673,7 @@ mod tests {
             too_large: &[],
             watchdog: &[],
             rotated: Some(&rotated),
+            key_changes: &[],
             now: 10_000,
         });
         assert_eq!(reasons(&answer), ["token_rotated", "session_continuable"]);
@@ -690,6 +719,7 @@ mod tests {
             too_large: &too_large,
             watchdog: &[],
             rotated: None,
+            key_changes: &[],
             now: 10_000,
         });
         assert_eq!(
@@ -726,6 +756,7 @@ mod tests {
             too_large: &[],
             watchdog: &watchdog,
             rotated: None,
+            key_changes: &[],
             now: 10_000,
         });
         assert_eq!(
@@ -773,6 +804,7 @@ mod tests {
             too_large: &[],
             watchdog: &[],
             rotated: None,
+            key_changes: &[],
             now: 10_000,
         });
         assert_eq!(reasons(&answer), ["session_duplicate", "dispatch_refused"]);
@@ -947,6 +979,7 @@ mod tests {
             too_large: &[],
             watchdog: &[],
             rotated: None,
+            key_changes: &[],
             now: 10_000,
         });
         assert_eq!(reasons(&answer), ["refused_there"]);
@@ -1043,6 +1076,7 @@ mod tests {
             refusals: None,
             too_large: &[],
             rotated: None,
+            key_changes: &[],
             watchdog: &[],
             now: 10_000,
         });
@@ -1073,6 +1107,43 @@ mod tests {
             assert!(!item["detail"].as_str().unwrap().contains("alpha"));
             assert_eq!(item["action"]["tool"], "switchboard_machines");
         }
+    }
+
+    #[test]
+    fn a_machine_whose_key_changed_is_listed_with_the_trust_command() {
+        let snapshot = Snapshot::default();
+        let change = crate::machine_proof::KeyChange {
+            machine: "studio".into(),
+            public_key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".into(),
+            since: 4_000,
+        };
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &crate::remote_usage::State::default(),
+            watch: &[],
+            refusals: None,
+            too_large: &[],
+            rotated: None,
+            key_changes: std::slice::from_ref(&change),
+            watchdog: &[],
+            now: 10_000,
+        });
+        assert_eq!(reasons(&answer), ["machine_key_changed"]);
+        let item = &answer["items"][0];
+        assert_eq!(item["label"], "studio");
+        assert_eq!(item["since"], 4_000);
+        assert_eq!(item["detail"], MACHINE_KEY_CHANGED);
+        assert_eq!(item["action"]["tool"], "switchboard_machine_set");
+        assert_eq!(item["action"]["window"], "open_machines");
+        assert_eq!(
+            item["action"]["command"],
+            format!("switchboard machines trust studio --key {}", change.public_key)
+        );
+        assert!(!MACHINE_KEY_CHANGED.contains("studio"));
     }
 
     #[test]

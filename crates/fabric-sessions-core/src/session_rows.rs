@@ -173,6 +173,8 @@ pub fn build(sources: &Sources) -> Value {
                 "agent": live["agent"], "folder": live["folder"], "pid": live["pid"],
                 "session_id": live["session_id"], "launch_id": launch_id,
                 "account": label(sources, &live["account_id"]),
+                // SB-560: a restricted entry cuts the rows to its seats by this id.
+                "account_id": live["account_id"],
                 "pool": live["pool"].as_str().map(str::to_owned).or(context),
                 "origin": live["surface"], "since": live["started_at"],
                 "quiet_minutes": live["quiet_minutes"], "task": live["task"],
@@ -212,7 +214,8 @@ pub fn build(sources: &Sources) -> Value {
             json!({
                 "agent": agent_of(&stop["provider"]), "folder": stop["directory"],
                 "session_id": session, "launch_id": s["launch_id"],
-                "account": label(sources, &stop["account"]), "pool": stop["pool"],
+                "account": label(sources, &stop["account"]), "account_id": stop["account"],
+                "pool": stop["pool"],
                 "origin": Value::Null, "since": stop["stopped_at"], "probe_at": s["probe_at"],
             }),
             acts,
@@ -243,7 +246,8 @@ pub fn build(sources: &Sources) -> Value {
             format!("launch:{}", l["launch_id"].as_str().unwrap_or_default()),
             json!({
                 "agent": agent_of(&l["provider"]), "folder": l["folder"], "launch_id": l["launch_id"],
-                "session_id": session, "account": label(sources, &l["account_id"]), "pool": l["pool"],
+                "session_id": session, "account": label(sources, &l["account_id"]),
+                "account_id": l["account_id"], "pool": l["pool"],
                 "origin": l["surface"], "since": l["ended"]["at"].as_i64().or(l["launched_at"].as_i64()),
                 "task": l["task"],
             }),

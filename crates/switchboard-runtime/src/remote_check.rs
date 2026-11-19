@@ -22,14 +22,15 @@ fn read(target: &str, program: &Program<'_>, run: &Run<'_>) -> Result<There, Str
         return Err(TARGET_INVALID.into());
     }
     program.check()?;
+    // SB-560 (M2-02): a proof's refusal is passed on as itself, never as "did not answer".
     let ask = |args: &[&str]| -> Result<Value, String> {
-        run(
-            &[target.to_owned(), "--".to_owned(), remote(program, args)],
-            None,
+        crate::account_send::answer_or(
+            run(
+                &[target.to_owned(), "--".to_owned(), remote(program, args)],
+                None,
+            ),
+            UNREACHABLE,
         )
-        .ok()
-        .and_then(|out| data(&out))
-        .ok_or_else(|| UNREACHABLE.to_owned())
     };
     let list = |v: Value, key: &str| -> Vec<Value> {
         match v {
@@ -243,7 +244,11 @@ pub fn sync(
         args.push("--apply");
     }
     let line = [target.to_owned(), "--".to_owned(), remote(program, &args)];
-    match run(&line, Some(bundle)) {
+    let answer = run(&line, Some(bundle));
+    if let Some(refusal) = crate::machine_proof::refused(&answer) {
+        return Err(refusal);
+    }
+    match answer {
         Ok(out) => data(&out).ok_or_else(|| UNREACHABLE.to_owned()),
         Err(out) => Err(
             serde_json::from_str::<Value>(out.lines().last().unwrap_or(""))

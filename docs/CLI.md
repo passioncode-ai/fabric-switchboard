@@ -198,11 +198,14 @@ switchboard accounts recall ACCOUNT_UUID    # take it back, a seat whose lease r
 
 `ssh-serve` answers only what a delegation into the group its line names (`--pool`) needs:
 `machines prove`, `accounts list` (only the caller's seats there), `remote-status` (SB-550: the
-caller's seats and that group's sessions as ids and codes, no health), `project list` (that group:
+caller's seats and, since SB-560, only the sessions on those seats, as ids and codes, no health), `project list` (that group:
 id, name, organizations; no folder), `org list` (that group's organizations), `org assign` of a
 seat (to those organizations or personal), and the delegation calls `accounts add --delegated`,
 `usage`, `accounts surrender`, `accounts lease` and `accounts remove` with `--sender-key KEY`,
-read from `SSH_ORIGINAL_COMMAND` without a shell. Only `ssh-serve` sends these delegation calls:
+read from `SSH_ORIGINAL_COMMAND` without a shell. Since SB-560 it answers nothing when `--pool`
+names the default group, the pay-per-token group or no group of that computer; it holds at most
+16 seats from one key; and each call writes one `ssh_serve` line (its kind and `ok` or
+`refused`) to that computer's log. Only `ssh-serve` sends these delegation calls:
 the local CLI, MCP and window never send them; a process holding the control token can, with the
 same trust as the person's own Keychain; against an uncooperative teammate the real revocation is
 signing the subscription out at the provider. A plain move there is refused with “That machine takes seats only as delegated ones.

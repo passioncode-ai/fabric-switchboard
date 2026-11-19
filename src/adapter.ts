@@ -214,6 +214,9 @@ const safeErrors = new Set([
   'The challenge is not 64 hexadecimal characters.',
   "That is not a machine's key. Give the key switchboard settings signer printed on that machine.",
   'The machine keys Switchboard trusts could not be read or saved. Check its data folder, then retry.',
+  // SB-560: an act needs a trusted key; a signature that does not hold.
+  'That machine has not proved it is the one Switchboard trusts for it, so nothing was sent. Update Switchboard there to 0.7.104 or later, then retry.',
+  'That machine answered the challenge with a signature that does not hold, so nothing was sent. Check what that ssh name reaches.',
   // SB-355: machine groups.
   'This account works on another machine. Call it back to use it in a group here.',
   'A machine group takes accounts only by a move to that machine.',

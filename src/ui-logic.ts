@@ -528,7 +528,7 @@ export function accountMatches(account: Pick<Account, 'id' | 'label' | 'external
   return words.every((word) => text.includes(word));
 }
 
-const ATTENTION_REASONS: AttentionReason[] = ['watchdog', 'keychain_too_large', 'token_rotated', 'session_duplicate', 'session_stuck', 'session_gone', 'session_continuable', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'machine_unreachable', 'machine_health', 'machine_sessions', 'key_outside_tokens', 'ceiling_question'];
+const ATTENTION_REASONS: AttentionReason[] = ['watchdog', 'keychain_too_large', 'token_rotated', 'session_duplicate', 'session_stuck', 'session_gone', 'session_continuable', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'machine_key_changed', 'machine_unreachable', 'machine_health', 'machine_sessions', 'key_outside_tokens', 'ceiling_question'];
 const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'continue_session', 'restart_wave', 'open_capacity', 'move_tokens', 'none'];
 /**
  * WF-3 (SB-365): the answer of the `attention` command, kept to the fields the window knows. An
@@ -666,6 +666,7 @@ export function attentionReasonText(reason: AttentionReason): string {
     case 'usage_failing': return t('Its usage check has failed for over an hour.');
     case 'move_unknown': return t('A move to another machine did not report how it ended. Check it under Other machines.');
     case 'refused_there': return t('The provider refused its copy on the other machine: it needs a sign-in there.');
+    case 'machine_key_changed': return t('This machine answered with a different key than the one Switchboard trusts for it, so nothing is sent to it. If it is still your machine, trust its new key.');
     case 'machine_unreachable': return t("This machine's Switchboard has not answered three reads in a row. Check that the machine is on and reachable over ssh.");
     case 'machine_health': return t("This machine's Switchboard reports a failing health check. Open Other machines to see which.");
     case 'machine_sessions': return t('Sessions on this machine need a look: a second copy, or a board run that has gone quiet.');

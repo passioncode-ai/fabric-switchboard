@@ -121,7 +121,12 @@ pub fn report(inputs: &Inputs) -> Value {
     ));
     // SB-550: the machines this computer's accounts live on, read every minute: one that stopped
     // answering, a failing health check there, or sessions there that need a person.
-    let machines = count(&["machine_unreachable", "machine_health", "machine_sessions"]);
+    let machines = count(&[
+        "machine_key_changed",
+        "machine_unreachable",
+        "machine_health",
+        "machine_sessions",
+    ]);
     // The area is the contract's closed list (HL-3): the other machines are reached over ssh,
     // `connection` (review round 3 of PR #861).
     checks.push(check(

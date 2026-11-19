@@ -2429,8 +2429,45 @@ async fn serve_ssh(
     if from.is_some_and(|f| !delegation::from_valid(f)) {
         return Err(delegation::FROM_INVALID.into());
     }
-    let command = std::env::var("SSH_ORIGINAL_COMMAND").map_err(|_| ssh_serve::NOT_THROUGH_SSH)?;
-    let request = ssh_serve::parse(&ssh_serve::words(&command)?, sender_key, pool, root)?;
+    // SB-560 (M3-17): each call is logged on this computer with its kind and how it ended, codes
+    // only (never its words, the key or a seat).
+    if let Some(log) = oplog::for_root(root, default_root().ok().as_deref()) {
+        oplog::install(log);
+    }
+    let parsed = std::env::var("SSH_ORIGINAL_COMMAND")
+        .map_err(|_| ssh_serve::NOT_THROUGH_SSH.to_string())
+        .and_then(|command| ssh_serve::parse(&ssh_serve::words(&command)?, sender_key, pool, root));
+    let kind = parsed.as_ref().map_or("unknown", ssh_serve::Request::kind);
+    let answer = match parsed {
+        Ok(request) => serve_ssh_call(root, sender_key, pool, from, request).await,
+        Err(error) => Err(error),
+    };
+    oplog::event(
+        "ssh_serve",
+        &[
+            ("call", oplog::Field::Code(kind)),
+            (
+                "result",
+                oplog::Field::Code(if answer.is_ok() { "ok" } else { "refused" }),
+            ),
+        ],
+    );
+    answer
+}
+/// One parsed call of [`serve_ssh`], answered only while the forced command names a group this
+/// computer serves (SB-560, M3-09).
+#[cfg(unix)]
+async fn serve_ssh_call(
+    root: &std::path::Path,
+    sender_key: &str,
+    pool: &str,
+    from: Option<&str>,
+    request: ssh_serve::Request,
+) -> Result<Value, String> {
+    use switchboard_core::delegation;
+    if !ssh_serve::pool_served(&call(root, Operation::Snapshot).await?, pool) {
+        return Err(ssh_serve::POOL_NOT_SERVED.into());
+    }
     let key = sender_key.to_owned();
     // A call that names a seat acts only on one this key delegated into the group its line names.
     let owned = |snapshot: &Value, id: &str| {
@@ -2456,10 +2493,12 @@ async fn serve_ssh(
             use switchboard_runtime::remote_usage;
             let snapshot = call(root, Operation::Snapshot).await?;
             let seats = ssh_serve::accounts_view(&snapshot, sender_key, pool);
+            // SB-560 (M3-09, M2-21): only the sessions on this key's seats in that group.
+            let ids = ssh_serve::seats_of(&snapshot, sender_key, pool);
             let sessions = call(root, Operation::SessionRows)
                 .await
                 .ok()
-                .map(|rows| remote_usage::sessions_digest(&rows, Some(pool)));
+                .map(|rows| remote_usage::sessions_digest(&rows, Some(pool), Some(&ids)));
             Ok(json!({
                 "schema": remote_usage::STATUS_SCHEMA,
                 "version": env!("CARGO_PKG_VERSION"),
@@ -2589,7 +2628,7 @@ async fn remote_status(root: &std::path::Path) -> Result<Value, String> {
     let sessions = call(root, Operation::SessionRows)
         .await
         .ok()
-        .map(|rows| remote_usage::sessions_digest(&rows, None));
+        .map(|rows| remote_usage::sessions_digest(&rows, None, None));
     let health = call(root, Operation::Health).await.ok();
     Ok(json!({
         "schema": remote_usage::STATUS_SCHEMA,

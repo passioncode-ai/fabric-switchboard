@@ -47,6 +47,9 @@ pub const GROUP_HOLDS_GUEST: &str = "This group holds a seat another machine del
 pub const LEASE_INVALID: &str = "Give the lease in whole hours, from 1 to 720.";
 pub const KEY_INVALID: &str = "That is not a machine's key. Give the key switchboard settings signer printed on the machine that delegates.";
 pub const DELEGATE_GROUP: &str = "A delegated seat joins one of this computer's groups, never the default group. Name a group this computer has.";
+/// SB-560 (M3-18): one sending machine delegates at most this many seats to this computer.
+pub const MAX_SEATS_PER_SENDER: usize = 16;
+pub const TOO_MANY_SEATS: &str = "The calling machine already delegated 16 seats to this computer. Ask it to call one back before delegating another.";
 pub const FROM_INVALID: &str =
     "Name the machine that delegates in at most 80 characters, on one line.";
 
@@ -294,6 +297,15 @@ impl crate::Store {
                 || state.projects.iter().any(|p| p.pool == pool && p.tokens)
             {
                 return Err(DELEGATE_GROUP.into());
+            }
+            // SB-560 (M3-18): a sender cannot fill this computer's store and vault.
+            let held = state
+                .delegated
+                .values()
+                .filter(|d| d.sender_key == sender_key)
+                .count();
+            if held >= MAX_SEATS_PER_SENDER {
+                return Err(TOO_MANY_SEATS.into());
             }
         }
         let time = now();
@@ -571,6 +583,30 @@ mod tests {
         assert_eq!(d.lease_until - d.granted_at, 48 * 3600);
         assert_eq!(d.pool, a.pool);
         assert!(s.is_delegated(&a.id));
+    }
+
+    /// SB-560 (M3-18): one sender delegates at most `MAX_SEATS_PER_SENDER` seats here; another
+    /// sender is counted on its own.
+    #[test]
+    fn a_sender_delegates_at_most_its_cap_of_seats() {
+        let (_r, _f, store) = store_with_group();
+        let add = |key: &str, n: usize| {
+            store.add_delegated(
+                format!("seat {n}"),
+                Provider::Claude,
+                pool(&store),
+                oauth(&format!("{key}-{n}")),
+                key,
+                None,
+                48,
+            )
+        };
+        for n in 0..MAX_SEATS_PER_SENDER {
+            add(KEY, n).unwrap();
+        }
+        assert_eq!(add(KEY, 99).unwrap_err(), TOO_MANY_SEATS);
+        add(OTHER, 0).unwrap();
+        assert!(TOO_MANY_SEATS.contains(&MAX_SEATS_PER_SENDER.to_string()));
     }
 
     #[test]
