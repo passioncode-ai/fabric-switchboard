@@ -159,7 +159,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_project_move_root","title":"Move a repository to another group","description":"Move a repository (its root folder) with the worktrees and clones under it into another group in one step, add one that is in no group, or with also add it to one more group and keep it in its others (a repository may be in several groups). Only when the operator asks. A group keeps at least one folder; a repository inside a group folder moves with that folder.","inputSchema":{"type":"object","properties":{"folder":{"type":"string","minLength":1,"description":"The repository's absolute folder, as switchboard_projects or switchboard_repository_map lists it."},"pool":{"type":"string","minLength":1,"description":"The group id from switchboard_projects."},"also":{"type":"boolean","description":"Add it to this group and keep it in its other groups (a repository may be in several)."},"from":{"type":"string","minLength":1,"description":"The group id it leaves, when it is in several."}},"required":["folder","pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_app","title":"Updates and opening at login","description":"What the installed app's About and tray do, answered by the running app only. action updates: the update state, or with enabled turns Install updates automatically on or off; where switchboard serve or nothing runs Switchboard, the state alone still answers who does, its version, its own update check and the version of an app window beside it (reason not_owner or no_owner); check_for_updates: check now; restart_to_update: install a downloaded update and restart (Switchboard drains as on Quit); login_item: whether Switchboard opens at login, or with enabled sets it. Changing anything only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["updates","check_for_updates","restart_to_update","login_item"]},"enabled":{"type":"boolean"}},"required":["action"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_link_cli","title":"Put switchboard on PATH","description":"Link this switchboard into ~/.local/bin, as the window's Link the CLI does. Never replaces a file that is not Switchboard's. Only when the operator asks.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_analytics","title":"Usage analytics","description":"Switchboard's own usage analytics (counts and kinds only), as the window's Settings sets it. Without enabled, the state: available, enabled, notice_pending, sending (false while the notice was not shown yet or the shared installation file cannot be read: held names which), shared_no (off because the shared file said no before the first send) and installation_id. enabled true or false turns them on or off and needs decision, the operator's own words relayed (by operator, instruction verbatim, at RFC 3339, source): a change of policy is the operator's. Only the installed app sends them.","inputSchema":{"type":"object","properties":{"enabled":{"type":"boolean"},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered the change."}},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_analytics","title":"Usage analytics","description":"Switchboard's own usage analytics (counts and kinds only), as the window's Settings sets it. Without enabled, the state: available, enabled, notice_pending, sending (false while the notice was not shown yet or the shared installation file cannot be read: held names which), shared_no (off because the shared file said no before the first send) and installation_id. enabled true or false turns them on or off and needs decision, the operator's own words relayed (by operator, instruction verbatim, at RFC 3339, source): a change of policy is the operator's. Only the installed app sends them.","inputSchema":{"type":"object","properties":{"enabled":{"type":"boolean"},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200},"via":{"type":"string","maxLength":100},"action":{"type":"string","maxLength":100},"target":{"type":"string","maxLength":300}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered the change."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_github","title":"GitHub owners and repositories","description":"Through the person's own gh: without owner, the owners gh can see (the person and their organizations); with owner, that owner's repositories, each with where it is on this computer and its group. Reads only.","inputSchema":{"type":"object","properties":{"owner":{"type":"string","minLength":1,"maxLength":100}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_github_clone","title":"Clone a GitHub repository","description":"Clone one repository with the person's own gh into an absolute folder that does not exist yet, as the window's GitHub page does. Only when the operator asks.","inputSchema":{"type":"object","properties":{"owner":{"type":"string","minLength":1,"maxLength":100},"name":{"type":"string","minLength":1,"maxLength":100},"into":{"type":"string","minLength":1,"description":"An absolute folder that does not exist yet."}},"required":["owner","name","into"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_repository_map","title":"Repositories on disk","description":"The Git repositories under the folders named (absolute; none: ~/DATA, else the home folder; up to three folders deep, not into a repository, a hidden folder or dependencies), each with its group (pool as its id, name; place folder or inside) or none. Linked worktrees are listed under their root in switchboard_projects, not here. Reads only.","inputSchema":{"type":"object","properties":{"under":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}}},"additionalProperties":false}})),
@@ -168,15 +168,15 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). An account whose sign-in was moved with switchboard_account_send is called back with switchboard_account_recall, not used here again, unless force. assigned_to gives the account to an agent or service that holds its sign-in now (its name, at most 120 characters; empty takes it back): Switchboard keeps renewing it and observing its usage but never selects it, switches to it or launches on it by itself, and giving it clears elsewhere. Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80},"assigned_to":{"type":"string","maxLength":120,"description":"The agent or service that holds the account now; empty takes it back."},"force":{"type":"boolean","description":"With elsewhere false, enabled true or assigned_to: use it here although its sign-in was moved to another machine and not called back."}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_remove","title":"Remove an account","description":"Only when the operator asks. Remove one account from Switchboard and delete its stored sign-in or key here, as the window's Remove account does; this cannot be undone. Refused while its group has it selected: select another account first. Clients signed in elsewhere are not signed out. An account moved to another machine is called back or removed there with switchboard_account_recall.","inputSchema":{"type":"object","properties":{"account_id":account},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another group","description":"Move an account into a group (pool: its group id), or back to the default group (pool: default). Only when the operator asks. Joining or leaving a group is that group's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a group, and a second copy of a login already in that group is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A group id from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_account_send","title":"Move an account to another machine","description":"Move an account's sign-in to another machine over ssh, without a new sign-in there: it is marked here as used elsewhere first (this machine never renews it again), saved there with switchboard accounts add (the tokens on stdin), checked there with a quota check, and both are undone on any failure. Only a Claude or Codex subscription sign-in; a group that has it selected first moves to its next account here (one with room, else the one free first), and a group with no other account refuses; when the ordinary Claude Code here is signed in to it, Claude Code first switches to another Claude account here (answer.cli_switched_to). to: the machine as ssh knows it, reachable without a prompt; pool: its group there (default); remote: that machine's switchboard, an absolute path (default the one the newest move or run there used, else the macOS app's); remote_data_dir: its data folder when it runs with --data-dir. Only when the operator asks. The person's word on its organizations goes with it (organizations match by name; one the other machine lacks is added there); answer.organizations says whether it was carried. delegate true delegates the seat instead: the other machine (a teammate's, reached through its restricted entry switchboard ssh-serve) keeps it as a guest in the group named in pool (never its default group), pinned to this machine's key; there it cannot be moved on, given to an agent, lent or made the ordinary sign-in, and only this machine calls it back with switchboard_account_recall. lease_hours (1 to 720, default 48): this machine's background read of that machine extends it; past it, the copy there is switched off and its sign-in removed.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"to":{"type":"string","minLength":1,"maxLength":255},"pool":{"type":"string"},"delegate":{"type":"boolean","description":"Delegate the seat to a teammate's machine: a guest there, called back only from here."},"lease_hours":{"type":"integer","minimum":1,"maximum":720,"description":"With delegate: the lease in hours, extended at each background read; 48 by default."},"remote":{"type":"string"},"remote_data_dir":{"type":"string","description":"The other machine's data folder, an absolute path, when its Switchboard runs with --data-dir."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_account_recall","title":"Take a moved account back","description":"Take back a Claude or Codex subscription sign-in this machine moved to another one with switchboard_account_send, out of its machine group into a group here: that machine stops using it and gives its tokens back over ssh, the provider is checked here (on failure it goes back there), then its copy there is removed and its account list read to prove it. Answers recalled, removed_there and proved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"from":{"type":"string","minLength":1,"maxLength":255,"description":"The other machine as ssh knows it, as the move named it; by default the recorded move's machine, else the account's machine group."},"pool":{"type":"string","minLength":1,"maxLength":32,"description":"The group here it comes back to (a group id, or default); by default the group it left, else the default group."},"remote_id":{"type":"string","maxLength":64,"description":"The account's id there; by default the one the recorded move names."},"remote":{"type":"string","description":"That machine's switchboard; by default the one the move ran."},"remote_data_dir":{"type":"string","description":"That machine's data folder; by default the one the move named."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_send","title":"Move an account to another machine","description":"Move an account's sign-in to another machine over ssh, without a new sign-in there: it is marked here as used elsewhere first (this machine never renews it again), saved there with switchboard accounts add (the tokens on stdin), checked there with a quota check, and both are undone on any failure. Only a Claude or Codex subscription sign-in; a group that has it selected first moves to its next account here (one with room, else the one free first), and a group with no other account refuses; when the ordinary Claude Code here is signed in to it, Claude Code first switches to another Claude account here (answer.cli_switched_to). to: the machine as ssh knows it, reachable without a prompt; pool: its group there (default); remote: that machine's switchboard, an absolute path (default the one the newest move or run there used, else the macOS app's); remote_data_dir: its data folder when it runs with --data-dir. Only when the operator asks. The person's word on its organizations goes with it (organizations match by name; one the other machine lacks is added there); answer.organizations says whether it was carried. delegate true delegates the seat instead: the other machine (a teammate's, reached through its restricted entry switchboard ssh-serve) keeps it as a guest in the group named in pool (never its default group), pinned to this machine's key; there it cannot be moved on, given to an agent, lent or made the ordinary sign-in, and only this machine calls it back with switchboard_account_recall. lease_hours (1 to 720, default 48): this machine's background read of that machine extends it; past it, the copy there is switched off and its sign-in removed.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"to":{"type":"string","minLength":1,"maxLength":255},"pool":{"type":"string"},"delegate":{"type":"boolean","description":"Delegate the seat to a teammate's machine: a guest there, called back only from here."},"lease_hours":{"type":"integer","minimum":1,"maximum":720,"description":"With delegate: the lease in hours, extended at each background read; 48 by default."},"remote":{"type":"string"},"remote_data_dir":{"type":"string","description":"The other machine's data folder, an absolute path, when its Switchboard runs with --data-dir."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200},"via":{"type":"string","maxLength":100},"action":{"type":"string","maxLength":100},"target":{"type":"string","maxLength":300}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_recall","title":"Take a moved account back","description":"Take back a Claude or Codex subscription sign-in this machine moved to another one with switchboard_account_send, out of its machine group into a group here: that machine stops using it and gives its tokens back over ssh, the provider is checked here (on failure it goes back there), then its copy there is removed and its account list read to prove it. Answers recalled, removed_there and proved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"from":{"type":"string","minLength":1,"maxLength":255,"description":"The other machine as ssh knows it, as the move named it; by default the recorded move's machine, else the account's machine group."},"pool":{"type":"string","minLength":1,"maxLength":32,"description":"The group here it comes back to (a group id, or default); by default the group it left, else the default group."},"remote_id":{"type":"string","maxLength":64,"description":"The account's id there; by default the one the recorded move names."},"remote":{"type":"string","description":"That machine's switchboard; by default the one the move ran."},"remote_data_dir":{"type":"string","description":"That machine's data folder; by default the one the move named."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200},"via":{"type":"string","maxLength":100},"action":{"type":"string","maxLength":100},"target":{"type":"string","maxLength":300}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_seats","title":"Moves between machines","description":"The moves, hand-overs and call backs this machine recorded, newest last: account id here, the other machine as ssh named it, the group, the account's id there, who ordered it (operator with their words, or agent) and when. Use it to find what is on another machine before calling an account back. Never a credential.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":1000}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_remote","title":"Another machine's Switchboard","description":"Read another machine's Switchboard over ssh, or check it against the moves recorded here. action status: its accounts (label, group, on or off, used elsewhere, used percent, usage check; never a credential), groups (accounts and folders each holds, organization), organizations and whether it is connected to PassionCode.ai. action check: findings, each with kind missing_there (a move recorded here whose copy is gone there), off_there (the copy is turned off or used elsewhere there, so nobody uses it), refused_there (the provider refused the copy at its last check: it needs a sign-in), not_marked_here (moved there but still used here), held_twice (the same sign-in used on both machines), no_record (marked used elsewhere here with no location and no recorded move); empty findings is a clean check. on is the machine as ssh knows it; remote and remote_data_dir default to the newest move there. Reads only, on both machines.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["status","check"]},"on":{"type":"string","minLength":1,"maxLength":255},"remote":{"type":"string"},"remote_data_dir":{"type":"string"}},"required":["action","on"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_machines","title":"Machine groups","description":"Every other machine this Switchboard's accounts live on, one group each: pool (its id), name (as ssh knows it), aliases, identity (user@host:port as ssh -G read it), and its accounts (id, label, provider, since, location, returns_to: the group here it comes back to). An account on a machine is in that machine's group and in no group here. unplaced: accounts marked used elsewhere that no machine group holds. live true also reads each machine's Switchboard over ssh, all at once, 20 s per call at most: live.reachable, and each account's copy there (there.pool, enabled, used_percent, usage_status). Without live, each machine's read (as_of, tried_at, reason, failures) and each account's there (used_percent, usage_status, enabled, as_of, reason) come from the owner's background read every 15 minutes; shown, never used to switch here. Move one here with switchboard_account_recall (pool: the group here), there with switchboard_account_send. Reads only.","inputSchema":{"type":"object","properties":{"live":{"type":"boolean"}},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_machine_set","title":"Place accounts in machine groups","description":"Only when the operator asks. action adopt: places each account marked used elsewhere and in no machine group into its machine's group, by the move recorded in seats.jsonl, else its location naming a known machine; without apply, only what it would do (placed, unplaced, never guessed). action place: account_id lives on machine on (as ssh knows it), without ssh: it joins that machine's group and leaves every group here. action forget: removes the machine group machine (its pool, name or an alias) once it holds no account. Every move, call back, remote read or dispatch first has the other machine sign a fresh challenge with its own key: its first answer is trusted and a later one signed by another key is refused. action keys: the keys trusted, by machine. action trust: machine (as ssh knows it) is trusted with key, the key switchboard settings signer printed there; it needs decision, the operator's words.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["adopt","place","forget","keys","trust"]},"apply":{"type":"boolean"},"account_id":{"type":"string"},"on":{"type":"string","minLength":1,"maxLength":255},"machine":{"type":"string","minLength":1,"maxLength":255},"key":{"type":"string","minLength":1,"maxLength":100},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"For trust: the operator's words that ordered it."}},"required":["action"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_machine_set","title":"Place accounts in machine groups","description":"Only when the operator asks. action adopt: places each account marked used elsewhere and in no machine group into its machine's group, by the move recorded in seats.jsonl, else its location naming a known machine; without apply, only what it would do (placed, unplaced, never guessed). action place: account_id lives on machine on (as ssh knows it), without ssh: it joins that machine's group and leaves every group here. action forget: removes the machine group machine (its pool, name or an alias) once it holds no account. Every move, call back, remote read or dispatch first has the other machine sign a fresh challenge with its own key: its first answer is trusted and a later one signed by another key is refused. action keys: the keys trusted, by machine. action trust: machine (as ssh knows it) is trusted with key, the key switchboard settings signer printed there; it needs decision, the operator's words.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["adopt","place","forget","keys","trust"]},"apply":{"type":"boolean"},"account_id":{"type":"string"},"on":{"type":"string","minLength":1,"maxLength":255},"machine":{"type":"string","minLength":1,"maxLength":255},"key":{"type":"string","minLength":1,"maxLength":100},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200},"via":{"type":"string","maxLength":100},"action":{"type":"string","maxLength":100},"target":{"type":"string","maxLength":300}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"For trust: the operator's words that ordered it."}},"required":["action"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_mcp_homes","title":"MCP sign-ins per home","description":"Which of the person's Claude homes (ordinary, and each one Switchboard made: account, group, shell) is signed in to which MCP server: per home its item state (present, absent, unknown when a read would ask for access) and each server's name, url, signed_in, own (it holds its own refresh token) and expires_at; findings: partial (a server signed in in some homes and not in others, with the homes signed in) and same_url (two names for one URL in one home, which are two separate sign-ins). A launch carries an own sign-in into the home it starts as an access-token copy. Names, URLs and booleans only, never a token. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_targets","title":"Other machines","description":"The other machines this Switchboard knows, from accounts moved there and runs started there: machine (as ssh names it), program and data_dir used there, last_at, known_by (moves, dispatch), aliases (other ssh names of the same account, as ssh -G reads them). probe true also asks each one's Switchboard over ssh whether it answers now and its version (probe.answered, probe.online, probe.owner_version). A session on one starts in a terminal with switchboard launch --target MACHINE --in-place. Reads only.","inputSchema":{"type":"object","properties":{"probe":{"type":"boolean"}},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_account_hand_over","title":"Hand an account over","description":"Only when the operator asks. Hand an account over to another machine or a colleague's Switchboard: answers a signed record without its credential and marks the account here as used elsewhere, with to as where it works. The receiver passes the record to switchboard_account_receive and signs in there. Hand a personal subscription only to the operator's own machines unless the operator says otherwise.","inputSchema":{"type":"object","properties":{"account_id":account,"to":{"type":"string","minLength":1,"maxLength":80,"description":"Who receives it: a machine and its user, or a colleague."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_hand_over","title":"Hand an account over","description":"Only when the operator asks. Hand an account over to another machine or a colleague's Switchboard: answers a signed record without its credential and marks the account here as used elsewhere, with to as where it works. The receiver passes the record to switchboard_account_receive and signs in there. Hand a personal subscription only to the operator's own machines unless the operator says otherwise.","inputSchema":{"type":"object","properties":{"account_id":account,"to":{"type":"string","minLength":1,"maxLength":80,"description":"Who receives it: a machine and its user, or a colleague."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200},"via":{"type":"string","maxLength":100},"action":{"type":"string","maxLength":100},"target":{"type":"string","maxLength":300}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_receive","title":"Receive a handed-over account","description":"Receive an account handed over: answers whose sign-in, into which group (the record's pool when this machine has it, else default), whether the signature holds and whether this machine already holds that sign-in. apply starts the sign-in (the person signs in; headless gives the URL in switchboard_login status and takes the code), only with signer and never for a sign-in this machine already holds; nothing travels but the record.","inputSchema":{"type":"object","properties":{"record":{"type":"object"},"signer":{"type":"string","description":"The giver's published key: the record must be signed by it. Required with apply."},"apply":{"type":"boolean"},"headless":{"type":"boolean"}},"required":["record"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_organizations","title":"Organizations","description":"The organizations accounts belong to: each with its e-mail domains and account count, then every account with its organization (null: personal), what decided it: person (the operator's word) or provider (its Claude Team or ChatGPT workspace is the organization's), and suggested with suggested_name: the organization its address's domain suggests (null when none or already settled). A domain only suggests; the operator confirms with switchboard_organization_set assign. Empty until the operator adds one. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_organization_set","title":"Change organizations","description":"Only when the operator asks. action add (name, domains), edit (id, name and/or domains, which replaces the list), remove (id; its accounts are attributed again by the other rules) or assign (account_id, organization: an organization's id, personal, or auto to let the rules decide; or organizations: every context of an account that works for several, the first its own, the rest it also works for, empty to let the rules decide; personal can only be first; or also: organizations added to the ones it has). An organization is a label: groups that hold the account keep it, and the answer's outside and warnings name the groups whose organizations it does not hold. Only this account is placed; team: true also places the other seats of its Claude Team or ChatGPT workspace, and the answer's team says claimed or not_claimed with teammates. passioncode_read reads the person's PassionCode.ai organizations again now, when PassionCode.ai is connected (connecting is the person's: switchboard org connect); passioncode_cancel stops a connection waiting for the browser; passioncode_disconnect deletes the PassionCode.ai token and keeps the organizations as local ones.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["add","edit","remove","assign","passioncode_read","passioncode_cancel","passioncode_disconnect"]},"id":{"type":"string","description":"An organization's id from switchboard_organizations."},"name":{"type":"string","minLength":1,"maxLength":80},"domains":{"type":"array","maxItems":16,"items":{"type":"string","minLength":3}},"account_id":account,"organization":{"type":"string","description":"An organization's id, personal, or auto."},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every context of the account in order: organization ids or names, or personal."},"also":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Organizations (ids or names) the account also works for, added to the ones it has; used without organization and organizations."},"team":{"type":"boolean","description":"Also place the other seats of its Claude Team or ChatGPT workspace; default false: only this account."}},"required":["action"],"additionalProperties":false}})),
@@ -186,7 +186,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_backup_now","title":"Back up now","description":"Write an encrypted backup now. Restore one with switchboard_backup_restore.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_backup_restore","title":"Restore a backup","description":"Restore one backup of switchboard_backups by its file name, as the window's Restore does: accounts, groups, rules, the person's words and settings in it come back where this computer has none (accounts already here stay as they are; nothing is deleted). An account its group here does not take goes to the default group (returned_to_default). Answers the counts. Only when the operator asks.","inputSchema":{"type":"object","properties":{"file":{"type":"string","minLength":1,"maxLength":200,"description":"A file name from switchboard_backups."}},"required":["file"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_switch","title":"Switch a group off or on","description":"Switch a group off (no folder is routed to it and its accounts serve no request; the proxy refuses them) or on again, as the group's switch in the window does. The pay-per-token group (where Claude API keys go) starts off and turns on only with a daily spending ceiling set (switchboard_ceiling_set with scope project:<pool>). Only when the operator asks.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1,"description":"The group id from switchboard_projects."},"on":{"type":"boolean"}},"required":["pool","on"],"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_project_delete","title":"Delete a group","description":"Delete a group, as the window's Delete group does: its folders stop routing to its accounts and its own accounts go to the default group (nothing is signed out). A group with its own key or spending ceiling needs decision, the operator's words. Only when the operator asks.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1,"description":"The group id from switchboard_projects."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it."}},"required":["pool"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_project_delete","title":"Delete a group","description":"Delete a group, as the window's Delete group does: its folders stop routing to its accounts and its own accounts go to the default group (nothing is signed out). A group with its own key or spending ceiling needs decision, the operator's words. Only when the operator asks.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1,"description":"The group id from switchboard_projects."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200},"via":{"type":"string","maxLength":100},"action":{"type":"string","maxLength":100},"target":{"type":"string","maxLength":300}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it."}},"required":["pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_settings_sync","title":"Carry settings to another machine","description":"Carry this machine's settings (groups found there by their repositories, organizations, agents' settings, rotation settings; never an account or credential) to another machine over ssh, signed with this computer's key, and show what importing them there would do; apply: true imports them there. groups keeps only those groups (ids from switchboard_projects). to is the machine as ssh knows it; remote and remote_data_dir default to the newest move there. Only when the operator asks to apply.","inputSchema":{"type":"object","properties":{"to":{"type":"string","minLength":1,"maxLength":255},"groups":{"type":"array","items":{"type":"string"},"maxItems":64},"apply":{"type":"boolean"},"remote":{"type":"string"},"remote_data_dir":{"type":"string"}},"required":["to"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_settings_import","title":"Import settings from another machine","description":"Read a switchboard-settings/1 file (switchboard settings export on another machine) and say what it would add here: groups found by their repositories under the folders named, organizations, agents' settings, rotation policies, teams, ceilings. apply: true adds them (never raising or clearing a ceiling); clone: true with apply clones the groups' missing GitHub repositories first with the person's gh; signer: the organization's published key the file must be signed by. Only when the operator asks to apply.","inputSchema":{"type":"object","properties":{"file":{"type":"string","minLength":1,"description":"The settings file, an absolute path on this computer."},"under":{"type":"array","items":{"type":"string"},"maxItems":16,"description":"Absolute folders to look for the groups' repositories in; default the usual ones."},"apply":{"type":"boolean"},"clone":{"type":"boolean"},"signer":{"type":"string"}},"required":["file"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_recovery","title":"Stopped sessions","description":"Sessions that stopped on a limit and the accounts ready for them to continue: each stop's mode and when to try again.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
@@ -199,19 +199,21 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_chain_get","title":"Fallback chains","description":"Which agents continue a workflow, in what order, when its executor's accounts run out: every chain the operator set (per machine, group or workflow), the presets, and the chain that applies: the workflow's own, else its group's, else the machine's. With folder (the workflow's checkout) the group is found as the automatic fallback finds it. None applies until the operator sets one. walks: the newest automatic hand-overs, each candidate passed over with the contract's probe result.","inputSchema":{"type":"object","properties":{"workflow_id":{"type":"string","description":"An Observatory workflow id (wf_ and 16 hex digits)."},"pool":{"type":"string","description":"A group id; with folder, the executor account's group."},"folder":{"type":"string","description":"An absolute folder: the workflow's checkout."}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_chain_set","title":"Set fallback chain","description":"Set the operator's chain for a scope, first agent tried first; an empty list clears it. Only when the operator asks. Agents are catalog ids, or the contract's runner kinds (cursor-agent), that load MCP servers and take a prompt without a person (claude-code, codex, kimi-code, hermes, …); an agent may pin an account (account_id) or a paid key by its Observatory vault name (key: project/env/NAME), never a key value. Another agent than Claude Code or Codex never runs on a subscription sign-in.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<group id> or workflow:<wf_id>.","default":"machine"},"preset":{"type":"string","enum":["subscriptions-first"]},"executors":{"type":"array","maxItems":8,"items":{"type":"object","properties":{"agent":{"type":"string"},"account_id":account,"key":{"type":"string"}},"required":["agent"],"additionalProperties":false}}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_ceilings","title":"Spending ceilings","description":"Spending ceilings for paid fallback agents (Hermes and OpenCode on an OpenRouter key, Claude Code or Codex on an API-key account): each ceiling with its scope and dollars (this computer's and a group's per UTC day, a task's since its first paid hand-over), the open questions a reached ceiling asked, the last hand-over and the limits. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_ceiling_set","title":"Set a spending ceiling","description":"Set a first spending ceiling for a scope, or lower one, in dollars from 0.01 to 1000. Only when the operator asks. Raising it, or clearing it with usd null, takes decision: the operator's own words (by operator, instruction verbatim, at RFC 3339, source), recorded in the ceilings; without them it is the window's. A group takes one only with its own OpenRouter key.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<group id> or workflow:<wf_id>.","default":"machine"},"usd":{"type":["number","null"],"minimum":0.01,"maximum":1000,"description":"Dollars: per UTC day for this computer and a group, since the first paid hand-over for a task; null clears (with decision)."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false}},"required":["usd"],"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_ceiling_answer","title":"Answer a reached ceiling","description":"Answer the question a reached spending ceiling asked: keep (the ceiling stays as it is) or double, which takes decision: the operator's own words (by operator, instruction verbatim, at RFC 3339, source), recorded in the ceilings; without them doubling is the window's. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","description":"The question's id from switchboard_ceilings."},"answer":{"type":"string","enum":["keep","double"],"default":"keep"},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false}},"required":["id"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_ceiling_set","title":"Set a spending ceiling","description":"Set a first spending ceiling for a scope, or lower one, in dollars from 0.01 to 1000. Only when the operator asks. Raising it, or clearing it with usd null, takes decision: the operator's own words (by operator, instruction verbatim, at RFC 3339, source), recorded in the ceilings; without them it is the window's. A group takes one only with its own OpenRouter key.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<group id> or workflow:<wf_id>.","default":"machine"},"usd":{"type":["number","null"],"minimum":0.01,"maximum":1000,"description":"Dollars: per UTC day for this computer and a group, since the first paid hand-over for a task; null clears (with decision)."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200},"via":{"type":"string","maxLength":100},"action":{"type":"string","maxLength":100},"target":{"type":"string","maxLength":300}},"required":["by","instruction","at","source"],"additionalProperties":false}},"required":["usd"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_ceiling_answer","title":"Answer a reached ceiling","description":"Answer the question a reached spending ceiling asked: keep (the ceiling stays as it is) or double, which takes decision: the operator's own words (by operator, instruction verbatim, at RFC 3339, source), recorded in the ceilings; without them doubling is the window's. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","description":"The question's id from switchboard_ceilings."},"answer":{"type":"string","enum":["keep","double"],"default":"keep"},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200},"via":{"type":"string","maxLength":100},"action":{"type":"string","maxLength":100},"target":{"type":"string","maxLength":300}},"required":["by","instruction","at","source"],"additionalProperties":false}},"required":["id"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_openrouter_status","title":"OpenRouter key for agents","description":"Whether the operator saved an OpenRouter key for agents, its default model, and what the key may still spend today and in total (asked of OpenRouter); with pool, that group's own key. Also lists every saved key with the group it is for (keys) and the groups with or without one (projects): an agent starting in a group's folder runs on that group's key, else on the machine's. Never a key itself.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"A group id from switchboard_projects; omit for the machine's key."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_hermes_status","title":"Hermes model and provider","description":"The model and provider the operator's ordinary Hermes Agent runs on (hermes config get model): model, provider, endpoint, API mode. Never a key.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_hermes_set","title":"Change Hermes's model or provider","description":"Change the provider and/or the default model of the operator's ordinary Hermes Agent through Hermes's own hermes config set. Only when the operator asks. Changing the provider makes Hermes drop an endpoint that belonged to the previous one; the new provider needs its own key in Hermes.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","description":"A Hermes provider id, for example openrouter, anthropic, nous, openai-codex, kimi-coding."},"model":{"type":"string","description":"The default model, for example moonshotai/kimi-k2."}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_anthropic_keys","title":"Anthropic keys for agents","description":"The Anthropic API keys agents run on directly, each under a name the person chose, such as team-a or personal: name, saved_at and default model, never a key. With name and model, changes that key's default model (an Anthropic id such as claude-sonnet-5-5). Saving or removing a key is the person's: switchboard agents anthropic set <name> --key-stdin. A launch picks one: switchboard agents launch hermes --anthropic <name> [--model ...]; Switchboard counts no ceiling for these keys.","inputSchema":{"type":"object","properties":{"name":{"type":"string","description":"With model: the key whose default model changes."},"model":{"type":"string","description":"With name: the new default model."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_observatory_keys","title":"Provider keys in Observatory","description":"The Anthropic, OpenAI and OpenRouter keys Project Observatory holds that an agent can run on, by project, env and name (slot), never a value: kind, expiry, and where each is already saved here (added: an account in the pay-per-token group, a named Anthropic key, an OpenRouter key). Admin, management, provisioning and BYOK keys are left out. state is ok, absent (Observatory is not installed; why says so) or unreadable. Add one with switchboard_observatory_key_add.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_observatory_key_add","title":"Add a key from Observatory","description":"Saves a key Project Observatory holds in Switchboard by its slot (project/env/NAME), so an agent starts on it at once. The value goes from Observatory's vault to Switchboard's through a pipe; it never appears in an argument, a file, a log or this answer. An Anthropic key becomes an account in the pay-per-token group (to: account, the default), counted against that group's daily ceiling; to: agent or both also saves it as a named key Hermes runs on directly (no ceiling counts that). An OpenRouter key becomes this computer's OpenRouter key, or a group's with pool. An OpenAI key is refused for now. A name or key already saved is kept unless replace is true. The answer lists what was saved and the next steps.","inputSchema":{"type":"object","properties":{"slot":{"type":"string","description":"project/env/NAME, as switchboard_observatory_keys lists it."},"to":{"type":"string","enum":["account","agent","both"],"description":"For an Anthropic key; default account."},"as":{"type":"string","description":"The account's name, or the named key's name; default from the project."},"pool":{"type":"string","description":"For an OpenRouter key: the group id whose folders run on it."},"model":{"type":"string","description":"The named key's default model."},"replace":{"type":"boolean","description":"Replace a named key or an OpenRouter key already saved there."}},"required":["slot"],"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_launch_keys","title":"Keys an agent can start on","description":"Every key an agent can start on here, by name and never a value: the OpenRouter key a launch in the folder spends, marked default (its group's own, else this computer's), the other OpenRouter keys with the group whose folders use them (why_not), then the Anthropic keys for an agent that takes one (Hermes), and for Claude Code and Hermes the pay-per-token group's Claude API keys as kind group (pool, group, account_id, selected; usable once the group is on, has a daily ceiling, holds the folder and has the key selected, else why_not). Every key carries metered: whether a ceiling counts it (an Anthropic key's direct launch does not). none_usable says no key is saved to start on. Launch with switchboard_launch_agent on the default OpenRouter key, or with an Anthropic key's name.","inputSchema":{"type":"object","properties":{"agent":{"type":"string","description":"The agent's catalog id, such as hermes."},"folder":{"type":"string","description":"The absolute folder it would start in; without it, this computer's key counts as the default."}},"required":["agent"],"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_launch_keys","title":"Keys an agent can start on","description":"Every key an agent can start on here, by name and never a value: the OpenRouter key a launch in the folder spends, marked default (its group's own, else this computer's), the other OpenRouter keys with the group whose folders use them (why_not), then the Anthropic keys for an agent that takes one (Hermes), and for Claude Code and Hermes the pay-per-token group's Claude API keys as kind group (pool, group, account_id, selected; usable once the group is on, has a daily ceiling, holds the folder and has the key selected, else why_not). Every key carries metered: whether a ceiling counts it (an Anthropic key's direct launch does not). none_usable says no key is saved to start on. No MCP tool launches an agent yet: launch from the window, or with switchboard agents launch on the default OpenRouter key, or with --anthropic and a key's name.","inputSchema":{"type":"object","properties":{"agent":{"type":"string","description":"The agent's catalog id, such as hermes."},"folder":{"type":"string","description":"The absolute folder it would start in; without it, this computer's key counts as the default."}},"required":["agent"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_agents","title":"Coding agents on this computer","description":"The coding agents Switchboard knows: which are installed here, which the operator enabled for taking over work (fallback chains and switchboard continue; account switching is separate), the machine's default agent (null is Auto: switchboard continue without an account hands work to it, and Fabric starts with it unless a project sets its own), the command Switchboard runs for each, and the recommended OpenRouter models. Changing these is the operator's (the Agents page or switchboard agents enable|disable|default).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_kimi_accounts","title":"Kimi Code accounts","description":"The operator's Kimi Code subscription accounts saved in Switchboard: label, region, membership tier and each plan window's used percent and reset (5-hour, 7-day, monthly), asked of Kimi; plus the ordinary kimi CLI's sign-in. Never a token. Signing in, launching and removing are the operator's (the app or switchboard kimi).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_kimi_login","title":"Sign in a Kimi Code account","description":"Start the official Kimi Code sign-in for a new account (action begin: label, region; the person finishes it in the browser), follow it (status, finish once the person signed in, cancel), or sign an existing account in again (again: id). The person signs in; this never takes a password or a token. Only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["begin","status","finish","cancel","again"]},"id":{"type":"string","minLength":1},"label":{"type":"string","maxLength":80},"region":{"type":"string","enum":["mainland-cn","global"],"description":"mainland-cn (kimi.com, the default) or global (kimi.ai)."}},"required":["action"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_kimi_rename","title":"Rename a Kimi Code account","description":"Rename a saved Kimi Code account. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","minLength":1,"description":"The account id from switchboard_kimi_accounts."},"label":{"type":"string","minLength":1,"maxLength":80}},"required":["id","label"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_kimi_remove","title":"Remove a Kimi Code account","description":"Forget a saved Kimi Code account and delete its home here, as the window's Remove does; this cannot be undone (sign the account in again to bring it back). Refused while a kimi session runs in it. removed is false when no such account was saved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":200,"description":"The account id from switchboard_kimi_accounts."}},"required":["id"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_openrouter_remove","title":"Remove an OpenRouter key","description":"Remove the OpenRouter key agents run on, or with pool that group's own key, as the window's Remove does: the saved key and its vault item are deleted, which cannot be undone (save or issue a new key to replace it). A key whose spend a ceiling counts is removed only with decision, the operator's own words. removed is false when no key was saved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1,"maxLength":200,"description":"A group id from switchboard_projects; omit for the machine's key."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200},"via":{"type":"string","maxLength":100},"action":{"type":"string","maxLength":100},"target":{"type":"string","maxLength":300}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words, when a spending ceiling counts the key."}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_handovers_set","title":"Hand-overs in Fabric's console","description":"Whether hand-overs open in Fabric's console (on) or straight in Terminal (off). Only when the operator asks.","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"}},"required":["on"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_openrouter_models","title":"OpenRouter models","description":"The models OpenRouter offers (its public list, kept six hours), with the recommended ones first: id, name, maker, context and price per million tokens. No key is used. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_project_suggestions","title":"Folders joining groups","description":"Folders Switchboard is still adding to a group (retried by itself, never asked), and those added or taken out as deleted in the last day, each with its group and why (worktree, clone, worked in). Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
@@ -226,9 +228,13 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
     ]
     .into_iter()
     .map(|(write, mut tool)| {
-        tool["annotations"] = if write && STOPS_PROCESSES.contains(&tool["name"].as_str().unwrap_or("")) {
+        let name = tool["name"].as_str().unwrap_or("").to_owned();
+        tool["annotations"] = if write && STOPS_PROCESSES.contains(&name.as_str()) {
             // Review round 1: a tool that ends a process cannot be taken back.
             json!({"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false})
+        } else if write && DELETES.contains(&name.as_str()) {
+            // SB-517: a deletion cannot be taken back; asking twice removes nothing more.
+            json!({"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false})
         } else if write {
             json!({"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false})
         } else {
@@ -245,6 +251,303 @@ const STOPS_PROCESSES: [&str; 3] = [
     "switchboard_session_close_copy",
     "switchboard_session_end",
 ];
+
+/// SB-517: the tools that delete what cannot be restored (the window's Remove buttons).
+const DELETES: [&str; 2] = ["switchboard_kimi_remove", "switchboard_openrouter_remove"];
+
+/// SB-517: the write tools that also have a read form. Called without the fields that change
+/// something they only read, so a read-only server lists them and answers that form
+/// ([`writes`] decides per call); the full server lists them as before.
+pub(crate) const READ_FORMS: [&str; 12] = [
+    "switchboard_capacity",
+    "switchboard_own_sign_in",
+    "switchboard_duty",
+    "switchboard_app",
+    "switchboard_analytics",
+    "switchboard_balance",
+    "switchboard_feed",
+    "switchboard_anthropic_keys",
+    "switchboard_codex_route",
+    "switchboard_project_sources",
+    "switchboard_machine_set",
+    "switchboard_login",
+];
+
+/// SB-517: whether this call of `name` changes something. A tool without a read form answers
+/// its one flag; a tool in [`READ_FORMS`] changes something only with the fields that do.
+pub(crate) fn writes(name: &str, write: bool, args: &Map<String, Value>) -> bool {
+    if !write || !READ_FORMS.contains(&name) {
+        return write;
+    }
+    let given = |key: &str| args.get(key).is_some_and(|v| !v.is_null());
+    let any = |keys: &[&str]| keys.iter().any(|k| given(k));
+    let flag = |key: &str| args.get(key).and_then(Value::as_bool) == Some(true);
+    let listed = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|a| !a.is_empty())
+    };
+    let action = args.get("action").and_then(Value::as_str);
+    match name {
+        "switchboard_capacity" => any(&["cap", "board"]) || flag("clear") || flag("board_default"),
+        "switchboard_duty" => {
+            any(&["on", "stuck_minutes", "waiting_minutes", "idle_minutes", "max_age_hours"])
+                // A check acts unless it is a dry run.
+                || (flag("run") && !flag("dry_run"))
+        }
+        "switchboard_own_sign_in" => given("on"),
+        "switchboard_app" => given("enabled") || !matches!(action, Some("updates" | "login_item")),
+        "switchboard_analytics" | "switchboard_codex_route" => given("enabled"),
+        "switchboard_balance" => {
+            ["add", "remove", "backup_add", "backup_remove"]
+                .iter()
+                .any(|k| listed(k))
+                || given("all_new")
+        }
+        "switchboard_feed" => any(&["pool", "on", "priority", "ready", "lookahead_minutes"]),
+        "switchboard_anthropic_keys" => any(&["name", "model"]),
+        "switchboard_project_sources" => listed("add") || listed("remove"),
+        "switchboard_machine_set" => match action {
+            Some("keys") => false,
+            Some("adopt") => flag("apply"),
+            _ => true,
+        },
+        "switchboard_login" => !matches!(action, Some("status" | "pending")),
+        _ => true,
+    }
+}
+
+/// SB-517: added to a tool's description on a read-only server, which answers its read form.
+const READ_FORM_HERE: &str = "This server is read-only: it answers only the form that reads, without the fields that change something.";
+
+/// SB-517: a write tool, or a tool's write form, called on a read-only server.
+fn read_only_refusal(name: &str) -> String {
+    if READ_FORMS.contains(&name) {
+        format!("This server is read-only (switchboard mcp --read-only): {name} answers here only without the fields that change something. Use a server started without --read-only to change it.")
+    } else {
+        format!("This server is read-only (switchboard mcp --read-only): {name} changes Switchboard, so it is refused here. Use a server started without --read-only.")
+    }
+}
+
+/// SB-517: the schema keywords [`validate`] checks. Every other keyword a tool's schema carries
+/// (`description`, `title`, `default`) only documents; a test keeps the schemas inside this set.
+const CHECKED_KEYWORDS: [&str; 12] = [
+    "type",
+    "properties",
+    "required",
+    "additionalProperties",
+    "enum",
+    "minimum",
+    "maximum",
+    "minLength",
+    "maxLength",
+    "items",
+    "minItems",
+    "maxItems",
+];
+
+/// SB-517: one argument the schema refuses: the field (a dotted path, `executors[0].agent`)
+/// and the sentence that says what it takes.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Invalid {
+    pub field: String,
+    pub message: String,
+}
+
+/// SB-517: checks a tool's arguments against its `inputSchema` before its handler runs, over the
+/// subset of JSON Schema the tools use ([`CHECKED_KEYWORDS`]). The first fault is answered.
+pub(crate) fn validate(schema: &Value, value: &Value, field: &str) -> Result<(), Invalid> {
+    let name = if field.is_empty() { "arguments" } else { field };
+    let fault = |message: String| {
+        Err(Invalid {
+            field: name.to_owned(),
+            message,
+        })
+    };
+    if let Some(types) = schema.get("type") {
+        let types: Vec<&str> = match types {
+            Value::String(t) => vec![t.as_str()],
+            Value::Array(list) => list.iter().filter_map(Value::as_str).collect(),
+            _ => Vec::new(),
+        };
+        if !types.is_empty() && !types.iter().any(|t| of_type(value, t)) {
+            let words: Vec<&str> = types.iter().map(|t| type_words(t)).collect();
+            return fault(format!("{name} must be {}.", words.join(" or ")));
+        }
+    }
+    if let Some(Value::Array(allowed)) = schema.get("enum") {
+        if !allowed.contains(value) {
+            let list: Vec<String> = allowed
+                .iter()
+                .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))
+                .collect();
+            return fault(format!("{name} is one of: {}.", list.join(", ")));
+        }
+    }
+    match value {
+        Value::Number(n) => {
+            let x = n.as_f64().unwrap_or(f64::NAN);
+            let low = schema.get("minimum").and_then(Value::as_f64);
+            let high = schema.get("maximum").and_then(Value::as_f64);
+            if low.is_some_and(|l| x < l) || high.is_some_and(|h| x > h) {
+                let kind = if schema["type"] == "integer" {
+                    "a whole number"
+                } else {
+                    "a number"
+                };
+                let bound = |key: &str| schema[key].to_string();
+                return fault(match (low, high) {
+                    (Some(_), Some(_)) => {
+                        format!(
+                            "{name} is {kind} from {} to {}.",
+                            bound("minimum"),
+                            bound("maximum")
+                        )
+                    }
+                    (Some(_), None) => {
+                        format!("{name} is {kind} of at least {}.", bound("minimum"))
+                    }
+                    _ => format!("{name} is {kind} of at most {}.", bound("maximum")),
+                });
+            }
+        }
+        Value::String(text) => {
+            let length = text.chars().count() as u64;
+            if let Some(min) = schema.get("minLength").and_then(Value::as_u64) {
+                if length < min {
+                    return fault(if min == 1 {
+                        format!("{name} must not be empty.")
+                    } else {
+                        format!("{name} has at least {min} characters.")
+                    });
+                }
+            }
+            if let Some(max) = schema.get("maxLength").and_then(Value::as_u64) {
+                if length > max {
+                    return fault(format!("{name} has at most {max} characters."));
+                }
+            }
+        }
+        Value::Array(items) => {
+            let count = items.len() as u64;
+            if let Some(min) = schema.get("minItems").and_then(Value::as_u64) {
+                if count < min {
+                    return fault(format!("{name} lists at least {min}."));
+                }
+            }
+            if let Some(max) = schema.get("maxItems").and_then(Value::as_u64) {
+                if count > max {
+                    return fault(format!("{name} lists at most {max}."));
+                }
+            }
+            if let Some(item) = schema.get("items") {
+                for (i, v) in items.iter().enumerate() {
+                    validate(item, v, &format!("{name}[{i}]"))?;
+                }
+            }
+        }
+        Value::Object(map) => {
+            let child = |key: &str| {
+                if field.is_empty() {
+                    key.to_owned()
+                } else {
+                    format!("{field}.{key}")
+                }
+            };
+            for key in schema["required"].as_array().into_iter().flatten() {
+                if let Some(key) = key.as_str() {
+                    if !map.contains_key(key) {
+                        return Err(Invalid {
+                            field: child(key),
+                            message: format!("{} is required.", child(key)),
+                        });
+                    }
+                }
+            }
+            let properties = schema.get("properties").and_then(Value::as_object);
+            for (key, v) in map {
+                match properties.and_then(|p| p.get(key)) {
+                    Some(property) => validate(property, v, &child(key))?,
+                    None if schema.get("additionalProperties") == Some(&Value::Bool(false)) => {
+                        let known: Vec<&str> = properties
+                            .map(|p| p.keys().map(String::as_str).collect())
+                            .unwrap_or_default();
+                        return Err(Invalid {
+                            field: child(key),
+                            message: if known.is_empty() {
+                                format!("{} is not an argument here: this takes none.", child(key))
+                            } else {
+                                format!(
+                                    "{} is not an argument here. It takes: {}.",
+                                    child(key),
+                                    known.join(", ")
+                                )
+                            },
+                        });
+                    }
+                    None => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn of_type(value: &Value, kind: &str) -> bool {
+    match kind {
+        "string" => value.is_string(),
+        "boolean" => value.is_boolean(),
+        "integer" => value.is_i64() || value.is_u64(),
+        "number" => value.is_number(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        "null" => value.is_null(),
+        _ => true,
+    }
+}
+
+fn type_words(kind: &str) -> &str {
+    match kind {
+        "string" => "text",
+        "boolean" => "true or false",
+        "integer" => "a whole number",
+        "number" => "a number",
+        "array" => "a list",
+        "object" => "an object",
+        "null" => "null",
+        other => other,
+    }
+}
+
+/// SB-517: a typed refusal as a tool result: `isError`, the sentence for a person, and the
+/// code (and the field it names) for an agent.
+fn refusal(code: &str, field: Option<&str>, message: &str) -> Value {
+    let mut error = json!({"code": code, "message": message});
+    if let Some(field) = field {
+        error["field"] = json!(field);
+    }
+    json!({"content": [{"type": "text", "text": message}], "structuredContent": {"error": error}, "isError": true})
+}
+
+/// SB-517: an operation that refused as data (`{state: refused, reason}`, as a dispatch or a
+/// run on another machine answers) is an error to an agent: `isError` with its reason as the
+/// code. Only the MCP answer changes; the CLI prints the same JSON as before.
+fn refused_answer(value: &Value) -> Option<Value> {
+    if value.get("state").and_then(Value::as_str) != Some("refused") {
+        return None;
+    }
+    let code = value["reason"].as_str().unwrap_or("refused");
+    let message = value["message"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| switchboard_runtime::dispatch::sentence(code).to_owned());
+    let mut structured = value.clone();
+    structured["error"] = json!({"code": code, "message": message});
+    Some(
+        json!({"content": [{"type": "text", "text": message}], "structuredContent": structured, "isError": true}),
+    )
+}
 
 /// SB-385: turning usage data on or off through MCP without the operator's relayed words.
 const MACHINE_TRUST_DECISION_REQUIRED: &str = "Trusting another key for a machine decides which computer receives sign-ins: pass decision with the operator's own words (by operator, instruction, at, source).";
@@ -289,6 +592,26 @@ impl Server {
             proved: std::sync::atomic::AtomicBool::new(false),
             program: Program::here(),
         }
+    }
+    /// The tools this server lists. A read-only server lists the tools that only read and,
+    /// SB-517, the tools with a read form, described and annotated as reads here.
+    fn listed(&self) -> Vec<Value> {
+        tools()
+            .into_iter()
+            .filter(|(write, tool)| {
+                !self.read_only
+                    || !write
+                    || READ_FORMS.contains(&tool["name"].as_str().unwrap_or(""))
+            })
+            .map(|(write, mut tool)| {
+                if self.read_only && write {
+                    let text = tool["description"].as_str().unwrap_or("").to_owned();
+                    tool["description"] = json!(format!("{text} {READ_FORM_HERE}"));
+                    tool["annotations"] = json!({"readOnlyHint":true,"openWorldHint":false});
+                }
+                tool
+            })
+            .collect()
     }
     async fn call(&self, operation: Operation) -> Result<Value, String> {
         // Waits out an owner's update restart and another command's offline lock (SB-181).
@@ -1489,8 +1812,9 @@ impl Server {
         args: &Map<String, Value>,
     ) -> Option<Result<Value, String>> {
         let (write, _) = tools().into_iter().find(|(_, t)| t["name"] == name)?;
-        if write && self.read_only {
-            return None;
+        // SB-517: `handle` refuses a write here first; this keeps the gate on every path.
+        if self.read_only && writes(name, write, args) {
+            return Some(Err(read_only_refusal(name)));
         }
         Some(match name {
             "switchboard_status" => self.status().await,
@@ -1907,6 +2231,28 @@ impl Server {
             "switchboard_kimi_accounts" => self.call(Operation::KimiAccounts).await,
             "switchboard_kimi_login" => self.kimi_login(args).await,
             "switchboard_kimi_rename" => self.kimi_rename(args).await,
+            // SB-517: the window's Remove of a Kimi Code account and of the OpenRouter key.
+            "switchboard_kimi_remove" => {
+                self.call(Operation::KimiRemove {
+                    id: args
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                })
+                .await
+            }
+            "switchboard_openrouter_remove" => {
+                let remove = Operation::AgentKeyRemove {
+                    service: "openrouter".into(),
+                    pool: args.get("pool").and_then(Value::as_str).map(str::to_owned),
+                    by: switchboard_runtime::spend::Surface::Mcp,
+                };
+                match on_operators_word(args, remove) {
+                    Ok(operation) => self.call(operation).await,
+                    Err(e) => Err(e),
+                }
+            }
             "switchboard_handovers_set" => match args.get("on").and_then(Value::as_bool) {
                 Some(on) => self.call(Operation::HandoverSetting { on: Some(on) }).await,
                 None => Err("on must be true or false.".into()),
@@ -2044,10 +2390,7 @@ impl Server {
                 )
             }
             "ping" => ok(id, json!({})),
-            "tools/list" => ok(
-                id,
-                json!({"tools": tools().into_iter().filter(|(w, _)| !(*w && self.read_only)).map(|(_, t)| t).collect::<Vec<_>>()}),
-            ),
+            "tools/list" => ok(id, json!({"tools": self.listed()})),
             "tools/call" => {
                 let name = params["name"].as_str().unwrap_or_default();
                 let empty = Map::new();
@@ -2056,9 +2399,30 @@ impl Server {
                     Some(Value::Object(args)) => args,
                     Some(_) => return Some(error(id, -32602, "arguments must be an object.")),
                 };
+                let Some((write, tool)) = tools().into_iter().find(|(_, t)| t["name"] == name)
+                else {
+                    return Some(error(id, -32602, "Unknown tool."));
+                };
+                // SB-517: a write on a read-only server is refused by name, not as unknown.
+                if self.read_only && writes(name, write, args) {
+                    return Some(ok(id, refusal("read_only", None, &read_only_refusal(name))));
+                }
+                // SB-517: the arguments are checked against the tool's schema before it runs.
+                if let Err(invalid) =
+                    validate(&tool["inputSchema"], &Value::Object(args.clone()), "")
+                {
+                    return Some(ok(
+                        id,
+                        refusal("invalid_arguments", Some(&invalid.field), &invalid.message),
+                    ));
+                }
                 match self.call_tool(name, args).await {
                     None => error(id, -32602, "Unknown tool."),
                     Some(Ok(value)) => {
+                        // SB-517: a refusal answered as data reaches an agent as an error.
+                        if let Some(answer) = refused_answer(&value) {
+                            return Some(ok(id, answer));
+                        }
                         // The first answered call proves the connection (SB-93); once per server.
                         if !self.proved.swap(true, std::sync::atomic::Ordering::Relaxed) {
                             let client = self.client.lock().ok().and_then(|c| c.clone());
@@ -2495,5 +2859,316 @@ mod no_values {
         ] {
             assert!(!named.contains(value), "{value}");
         }
+    }
+}
+
+/// SB-517: the schema check, the read forms and the refusals answered as data.
+#[cfg(test)]
+mod checks {
+    use super::*;
+
+    fn args(v: Value) -> Map<String, Value> {
+        v.as_object().unwrap().clone()
+    }
+
+    /// Every keyword a tool's schema uses is one `validate` checks or one that only documents,
+    /// so no declared limit goes unchecked; every object schema with properties closes them.
+    #[test]
+    fn every_schema_stays_inside_the_checked_keywords() {
+        const DOCUMENTS: [&str; 3] = ["description", "title", "default"];
+        fn walk(schema: &Value, path: &str, out: &mut Vec<String>) {
+            let Some(map) = schema.as_object() else {
+                return;
+            };
+            for (key, value) in map {
+                if !CHECKED_KEYWORDS.contains(&key.as_str()) && !DOCUMENTS.contains(&key.as_str()) {
+                    out.push(format!("{path}: {key}"));
+                }
+                if key == "properties" {
+                    for (name, property) in value.as_object().into_iter().flatten() {
+                        walk(property, &format!("{path}.{name}"), out);
+                    }
+                }
+                if key == "items" {
+                    walk(value, &format!("{path}[]"), out);
+                }
+            }
+            // An object with named properties closes them; an opaque one (a hand-over record)
+            // is passed through whole.
+            if map.get("type") == Some(&json!("object"))
+                && map.contains_key("properties")
+                && map.get("additionalProperties") != Some(&json!(false))
+            {
+                out.push(format!("{path}: an open object"));
+            }
+        }
+        let mut found = Vec::new();
+        for (_, tool) in tools() {
+            walk(
+                &tool["inputSchema"],
+                tool["name"].as_str().unwrap(),
+                &mut found,
+            );
+        }
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_fault_names_its_field_and_what_it_takes() {
+        let schema = json!({"type":"object","properties":{
+            "n":{"type":"integer","minimum":1,"maximum":720},
+            "usd":{"type":["number","null"],"minimum":0.01,"maximum":1000},
+            "kind":{"type":"string","enum":["a","b"]},
+            "name":{"type":"string","minLength":1,"maxLength":3},
+            "list":{"type":"array","maxItems":2,"items":{"type":"object","properties":{"agent":{"type":"string"}},"required":["agent"],"additionalProperties":false}},
+            "on":{"type":"boolean"}},
+            "required":["on"],"additionalProperties":false});
+        let check = |v: Value| validate(&schema, &v, "").map_err(|i| (i.field, i.message));
+        assert_eq!(check(json!({"on": true})), Ok(()));
+        assert_eq!(check(json!({"on": true, "usd": null, "n": 720})), Ok(()));
+        assert_eq!(
+            check(json!({})),
+            Err(("on".into(), "on is required.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": "yes"})),
+            Err(("on".into(), "on must be true or false.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "n": 0})),
+            Err(("n".into(), "n is a whole number from 1 to 720.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "n": 1.5})),
+            Err(("n".into(), "n must be a whole number.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "usd": 0})),
+            Err(("usd".into(), "usd is a number from 0.01 to 1000.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "usd": "5"})),
+            Err(("usd".into(), "usd must be a number or null.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "kind": "c"})),
+            Err(("kind".into(), "kind is one of: a, b.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "name": ""})),
+            Err(("name".into(), "name must not be empty.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "name": "four"})),
+            Err(("name".into(), "name has at most 3 characters.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "list": [{}, {}, {}]})),
+            Err(("list".into(), "list lists at most 2.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "list": [{"agent": "x"}, {}]})),
+            Err(("list[1].agent".into(), "list[1].agent is required.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "list": [{"agent": "x", "key": "k"}]})),
+            Err((
+                "list[0].key".into(),
+                "list[0].key is not an argument here. It takes: agent.".into()
+            ))
+        );
+        let (field, message) = check(json!({"on": true, "extra": 1})).unwrap_err();
+        assert_eq!(field, "extra");
+        assert!(
+            message.contains("It takes:") && message.contains("usd"),
+            "{message}"
+        );
+        // A tool that takes no argument says so.
+        let none = json!({"type":"object","properties":{},"additionalProperties":false});
+        assert_eq!(
+            validate(&none, &json!({"x": 1}), "").unwrap_err().message,
+            "x is not an argument here: this takes none."
+        );
+    }
+
+    /// The tests' own calls and the shapes agents send pass the real schemas.
+    #[test]
+    fn the_calls_agents_make_pass_the_real_schemas() {
+        let schema = |name: &str| {
+            tools()
+                .into_iter()
+                .find(|(_, t)| t["name"] == name)
+                .map(|(_, t)| t["inputSchema"].clone())
+                .unwrap()
+        };
+        let decision = json!({"by": "operator", "via": "relayed-instruction", "action": "ceiling.set",
+            "target": "machine", "instruction": "raise it", "at": "2026-11-19T10:00:00Z", "source": "s"});
+        for (name, arguments) in [
+            ("switchboard_status", json!({})),
+            ("switchboard_ceiling_set", json!({"usd": 5})),
+            (
+                "switchboard_ceiling_set",
+                json!({"usd": null, "decision": decision}),
+            ),
+            (
+                "switchboard_chain_set",
+                json!({"executors": [{"agent": "codex", "key": "p/prod/K"}]}),
+            ),
+            (
+                "switchboard_sessions",
+                json!({"history": true, "limit": 5, "before": 1_800_000_000}),
+            ),
+            (
+                "switchboard_project_set",
+                json!({"account_id": "a", "path": "/x", "expires_in_hours": 8}),
+            ),
+            (
+                "switchboard_feed",
+                json!({"ready": 3, "lookahead_minutes": 45}),
+            ),
+        ] {
+            assert_eq!(
+                validate(&schema(name), &arguments, ""),
+                Ok(()),
+                "{name} {arguments}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tool_with_a_read_form_writes_only_with_the_fields_that_change() {
+        let w = |name: &str, v: Value| {
+            let write = tools()
+                .into_iter()
+                .find(|(_, t)| t["name"] == name)
+                .map(|(w, _)| w)
+                .unwrap();
+            writes(name, write, &args(v))
+        };
+        assert!(!w("switchboard_capacity", json!({})));
+        assert!(w("switchboard_capacity", json!({"cap": 4})));
+        assert!(w("switchboard_capacity", json!({"clear": true})));
+        assert!(!w("switchboard_duty", json!({})));
+        assert!(!w("switchboard_duty", json!({"dry_run": true})));
+        assert!(!w(
+            "switchboard_duty",
+            json!({"run": true, "dry_run": true})
+        ));
+        assert!(w("switchboard_duty", json!({"run": true})));
+        assert!(w("switchboard_duty", json!({"idle_minutes": 90})));
+        assert!(!w("switchboard_own_sign_in", json!({})));
+        assert!(w("switchboard_own_sign_in", json!({"on": false})));
+        assert!(!w("switchboard_app", json!({"action": "updates"})));
+        assert!(!w("switchboard_app", json!({"action": "login_item"})));
+        assert!(w(
+            "switchboard_app",
+            json!({"action": "login_item", "enabled": true})
+        ));
+        assert!(w("switchboard_app", json!({"action": "restart_to_update"})));
+        assert!(w("switchboard_app", json!({"action": "check_for_updates"})));
+        assert!(!w("switchboard_analytics", json!({})));
+        assert!(w("switchboard_analytics", json!({"enabled": false})));
+        assert!(!w("switchboard_balance", json!({})));
+        assert!(!w("switchboard_balance", json!({"add": []})));
+        assert!(w("switchboard_balance", json!({"remove": ["default"]})));
+        assert!(w("switchboard_balance", json!({"all_new": false})));
+        assert!(!w("switchboard_feed", json!({})));
+        assert!(w("switchboard_feed", json!({"ready": 2})));
+        assert!(!w("switchboard_anthropic_keys", json!({})));
+        assert!(w(
+            "switchboard_anthropic_keys",
+            json!({"name": "a", "model": "m"})
+        ));
+        assert!(w("switchboard_anthropic_keys", json!({"name": "a"})));
+        assert!(!w("switchboard_codex_route", json!({})));
+        assert!(w("switchboard_codex_route", json!({"enabled": true})));
+        assert!(!w("switchboard_project_sources", json!({"pool": "p"})));
+        assert!(w(
+            "switchboard_project_sources",
+            json!({"pool": "p", "add": ["github.com/o"]})
+        ));
+        assert!(!w("switchboard_machine_set", json!({"action": "keys"})));
+        assert!(!w("switchboard_machine_set", json!({"action": "adopt"})));
+        assert!(w(
+            "switchboard_machine_set",
+            json!({"action": "adopt", "apply": true})
+        ));
+        assert!(w(
+            "switchboard_machine_set",
+            json!({"action": "forget", "machine": "m"})
+        ));
+        assert!(!w("switchboard_login", json!({"action": "pending"})));
+        assert!(w("switchboard_login", json!({"action": "begin"})));
+        // A read tool and a tool with no read form keep their one flag.
+        assert!(!w("switchboard_launch_keys", json!({"agent": "hermes"})));
+        assert!(w("switchboard_switch", json!({})));
+        assert!(w("switchboard_shell_hook_set", json!({})));
+    }
+
+    #[test]
+    fn a_read_only_server_lists_reads_and_read_forms_as_reads() {
+        let server = Server::new(std::env::temp_dir(), true);
+        let listed = server.listed();
+        let names: Vec<&str> = listed.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        for name in READ_FORMS {
+            assert!(names.contains(&name), "{name}");
+        }
+        assert!(names.contains(&"switchboard_launch_keys"));
+        assert!(!names.contains(&"switchboard_switch"));
+        assert!(!names.contains(&"switchboard_kimi_remove"));
+        assert!(listed
+            .iter()
+            .all(|t| t["annotations"]["readOnlyHint"] == true));
+        let capacity = listed
+            .iter()
+            .find(|t| t["name"] == "switchboard_capacity")
+            .unwrap();
+        assert!(capacity["description"]
+            .as_str()
+            .unwrap()
+            .ends_with(READ_FORM_HERE));
+        // The full server lists every tool as before.
+        let full = Server::new(std::env::temp_dir(), false).listed();
+        assert_eq!(full.len(), tools().len());
+        let capacity = full
+            .iter()
+            .find(|t| t["name"] == "switchboard_capacity")
+            .unwrap();
+        assert_eq!(capacity["annotations"]["readOnlyHint"], false);
+    }
+
+    #[test]
+    fn a_refusal_answered_as_data_is_an_error_with_its_code() {
+        let remote =
+            json!({"state": "refused", "reason": "target_unreachable", "target": "studio"});
+        let answer = refused_answer(&remote).unwrap();
+        assert_eq!(answer["isError"], true);
+        assert_eq!(
+            answer["structuredContent"]["error"]["code"],
+            "target_unreachable"
+        );
+        assert_eq!(answer["structuredContent"]["target"], "studio");
+        assert_eq!(
+            answer["content"][0]["text"],
+            switchboard_runtime::dispatch::sentence("target_unreachable")
+        );
+        let capacity = json!({"state": "refused", "reason": "at_capacity", "message": "Full."});
+        let answer = refused_answer(&capacity).unwrap();
+        assert_eq!(answer["structuredContent"]["error"]["code"], "at_capacity");
+        assert_eq!(answer["content"][0]["text"], "Full.");
+        assert!(refused_answer(&json!({"state": "started"})).is_none());
+        assert!(refused_answer(&json!({"usage": {"state": "refused"}})).is_none());
+    }
+
+    #[test]
+    fn a_write_refused_on_a_read_only_server_says_so() {
+        let answer = refusal("read_only", None, &read_only_refusal("switchboard_switch"));
+        assert_eq!(answer["isError"], true);
+        assert_eq!(answer["structuredContent"]["error"]["code"], "read_only");
+        assert!(answer["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("read-only"));
+        assert!(read_only_refusal("switchboard_capacity").contains("without the fields"));
     }
 }
