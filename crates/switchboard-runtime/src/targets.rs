@@ -346,6 +346,26 @@ mod tests {
         );
     }
 
+    /// SB-475: a move to a machine reached before runs the program that move used there (a
+    /// Linux machine's `/usr/bin/switchboard`), never the macOS app's; one named wins.
+    #[test]
+    fn a_move_runs_the_program_the_machine_is_known_by() {
+        let root = tempfile::tempdir().unwrap();
+        let mut seat = crate::seats::of(1, "granted", "a", "linux-box", "default", None);
+        seat.program = Some("/usr/bin/switchboard".into());
+        crate::seats::append(root.path(), &seat).unwrap();
+        let (program, data_dir) = program_for(root.path(), "linux-box", None, None);
+        assert_eq!(program, "/usr/bin/switchboard");
+        assert_eq!(data_dir, None);
+        let (named, _) = program_for(root.path(), "linux-box", Some("/opt/sb".into()), None);
+        assert_eq!(named, "/opt/sb", "a program named wins");
+        let (never, _) = program_for(root.path(), "new-box", None, None);
+        assert_eq!(
+            never, REMOTE_DEFAULT,
+            "a machine never reached gets the macOS app's"
+        );
+    }
+
     /// SB-340: an alias and `user@host` of one ssh account are listed once.
     #[test]
     fn one_account_named_two_ways_is_one_machine() {

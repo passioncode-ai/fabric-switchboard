@@ -59,6 +59,8 @@ const PARITY: &[(&str, Over)] = &[
     ("own_sign_in", Tool("switchboard_own_sign_in")),
     ("recall_account", Tool("switchboard_account_recall")),
     ("machines", Tool("switchboard_machines")),
+    ("targets", Tool("switchboard_targets")),
+    ("remote_status", Tool("switchboard_remote")),
     ("attention", Tool("switchboard_attention")),
     ("given_accounts", Tool("switchboard_accounts")),
     ("events", Tool("switchboard_events")),

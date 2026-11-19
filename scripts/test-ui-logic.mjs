@@ -1842,9 +1842,14 @@ check(() => {
   const offer = logic.duplicateOffer(both);
   assert.equal(offer.pid, 84681); assert.equal(offer.label, 'Close the older copy'); assert.ok(offer.line.includes('2 h'), offer.line); assert.ok(!offer.disabled);
   const busy = logic.duplicateOffer(logic.attentionView({ items: [{ reason: 'session_duplicate', session_id: 's-3', close: null, action: { tool: 't', window: 'close_copy' } }] }).items[0]);
-  assert.ok(busy.disabled, 'both answering: nothing to press'); assert.equal(busy.pid, null);
+  // SB-472: both answering offers no button at all (never a disabled one) and says when it will.
+  assert.equal(busy.label, null, 'both answering: no button'); assert.equal(busy.pid, null);
+  assert.ok(busy.line.includes('finishes its turn'), busy.line); assert.ok(!busy.line.includes('\u2014'));
+  assert.equal(logic.duplicateOffer({ session_id: null, close: null }).label, null, 'no session: no button');
+  assert.ok(logic.duplicateOffer({ session_id: null, close: null }).line.includes('in its own window'), 'without a session the line says what the person can do');
+  assert.equal(logic.duplicateOffer({ session_id: null, close: { pid: 1, why: 'older', command_age: 5 } }).label, null, 'no session: no button even with an offer');
   assert.equal(logic.duplicateOffer(dup.items[0]).label, 'Close the quiet copy', 'an older owner sends no offer: the quiet copy as before');
-  assert.ok(!logic.duplicateOffer(dup.items[0]).disabled, 'no offer is not "both answering"');
+  assert.ok(!('disabled' in logic.duplicateOffer(dup.items[0])), 'the offer has no disabled state');
   assert.equal(logic.attentionView({ items: [{ reason: 'session_duplicate', session_id: 's', close: { pid: 'x', why: 'older' }, action: { tool: 't', window: 'close_copy' } }] }).items[0].close, null, 'a malformed offer is none');
   // SB-407: a stuck or gone board run carries its launch id and offers *Stop the run*.
   const gone = logic.attentionView({ items: [{ reason: 'session_gone', label: 'beta', launch_id: 'L-3', action: { tool: 'switchboard_dispatch_stop', window: 'dispatch_stop', command: 'switchboard dispatch stop --launch-id L-3' } }] }).items[0];
@@ -2063,5 +2068,26 @@ check(() => {
   assert.equal(logic.poolChoices([], groups).find((c) => c.pool === 'tokens').name, 'Ключи с оплатой за токены');
   assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys' }), 'Pay-per-token keys', 'a group the person named so stays as typed');
   i18n.setLocale('en');
+});
+// SB-473 to SB-476: a move to another machine is chosen, read and batched.
+check(() => {
+  const machines = [{ pool: 'machine_nicegram', name: 'nicegram@10.0.0.2', aliases: ['ng'], created_at: 50 }, { pool: 'machine_studio', name: 'studio', created_at: 10 }];
+  const targets = [{ machine: 'ng', known_by: ['moves'], last_at: 90 }, { machine: 'linux-box', known_by: ['moves'], last_at: 80, program: '/usr/bin/switchboard' }, { machine: 'gpu', known_by: ['dispatch'], last_at: 70 }];
+  const choices = logic.machineChoices(machines, targets);
+  assert.deepEqual(choices.map((c) => c.name), ['ng', 'linux-box', 'gpu', 'studio'], 'each machine once, newest first; an alias of a machine group is that group');
+  assert.equal(choices[0].detail, 'accounts live there'); assert.equal(choices[1].detail, 'accounts moved there before'); assert.equal(choices[2].detail, 'runs started there');
+  assert.deepEqual(logic.machineChoices(machines, targets, machines[0]).map((c) => c.name), ['linux-box', 'gpu', 'studio'], 'the machine the account is on is left out, by any of its names');
+  assert.deepEqual(logic.machineChoices([], []), [], 'nothing known: only the typed entry is left');
+  const status = { target: 'ng', groups: [{ pool: 'machine_mac', name: 'mac', organization: null, accounts: 2, folders: 0 }, { pool: 'zeta', name: 'Zeta', organization: 'PassionCode.ai', accounts: 1, folders: 2 }, { pool: 'default', name: null, organization: null, accounts: 3, folders: 0 }, { pool: 'apps', name: 'Apps', organization: null, accounts: 2, folders: 1 }] };
+  const read = logic.remoteGroupChoices(status, 'zeta');
+  assert.deepEqual(read.choices.map(([pool]) => pool), ['default', 'apps', 'zeta'], 'the default group first, machine groups there left out, the rest by name');
+  assert.equal(read.choices[0][1], 'Default group · 3 accounts'); assert.equal(read.choices[2][1], 'Zeta · PassionCode.ai · 1 account');
+  assert.equal(read.chosen, 'zeta', "the account's own group when that machine has it");
+  assert.equal(logic.remoteGroupChoices(status, 'nowhere').chosen, 'default'); assert.equal(logic.remoteGroupChoices({ target: 'x', groups: [] }, null).choices.length, 1);
+  const accounts = [{ id: 'a', kind: 'oauth', enabled: true, pool: 'default' }, { id: 'b', kind: 'api_key', enabled: true, pool: 'tokens' }, { id: 'c', kind: 'oauth', enabled: false, pool: 'default' }, { id: 'd', kind: 'oauth', enabled: false, pool: 'machine_studio' }, { id: 'e', kind: 'oauth', enabled: true, pool: 'apps' }];
+  const snap = { accounts, machines, elsewhere: { d: 1, e: 2 } };
+  assert.deepEqual(logic.movableAccounts(snap).map((a) => a.id), ['a', 'd'], 'a subscription that is on here, or one on another machine; never a key, one off or one marked elsewhere without a machine');
+  assert.deepEqual(logic.movableAccounts(snap, machines[1]).map((a) => a.id), ['a'], 'never one already on the machine it goes to');
+  for (const c of choices) assert.ok(!c.detail.includes('\u2014'));
 });
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

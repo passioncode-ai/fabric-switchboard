@@ -2,6 +2,37 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+
+## 2026-11-18: SB-452 a launch keeps its group's route, SB-453 a short rate limit of the key is waited out, on branch `tokens-spend`
+
+- **Asked.** Board thread a9844103 (Fabric Dashboards): a session on the pay-per-token group spent $53.98 by its own estimate while `spent_today_usd` read 0 and the statistics had no row for the key; its nine subagents met `429` and stood still.
+- **Cause.** Not the pricing: the key never served the session. Claude Code 2.1.327 reads a Git worktree's local settings from its main checkout and ranks local settings above the process environment, so in `_worktrees/sound-engine-audit` (group `tokens`) the main checkout's `.claude/settings.local.json` (`/claude/apps-soft` with its folder capability) replaced the launch's route. Evidence: live 2026-11-18 10:07 UTC, pid 22855 (launch 0c21ab66, home `runtimes/claude-tokens`) was the only proxy client in that folder and apps-soft/claude7/sound-engine grew 404 to 437 requests in 90 s while `tokens` stayed at none; `statistics.json` never held account 94821ba8; the binary's settings order `["userSettings","projectSettings","localSettings","flagSettings","policySettings"]` and its string "it resolves localSettings to the canonical repo root"; a synthetic repository with a worktree and a fake server reproduced it (`('main', ...)` x6) and showed `--settings` winning in print and interactive mode, before or after the prompt.
+- **Built.** `launch::ROUTE_FILE` / `route_arg` / `write_route`: each managed Claude launch writes `<home>/switchboard-route.json` (0600) and passes `--settings=<file>` last (before a caller's `--`), headless dispatch too; `duty::resume_script_for` passes it when the home has the file; `repoint_managed` rewrites it. Proxy: `LAUNCH_GROUP_HEADER`, `LAUNCH_GROUP_MISMATCH` (403 for a crossing into or out of the pay-per-token group), `FolderMap.pools` and the folder check, `Tally.mismatched`, `stats::folder_hint` reads `Primary working directory:`; `tokens_wait` (SB-453, DEC-0031). Owner: `proxy_group_mismatch` log event.
+- **Decisions.** A worktree is routed, not refused (coordinator). The launch-group header only narrows. DEC-0031 takes the next number free after open pull requests #821 (DEC-0027), #832 (DEC-0029), #836 (DEC-0030). A plain `claude` in such a worktree keeps the main checkout's group (Claude Code's rule), counted as a mismatch.
+- **Checks.** Studio: `cargo test -p switchboard-proxy` 80 passed; with the fix removed the three behaviour tests fail (77 passed, 3 failed); `cargo test -p switchboard-runtime --lib -- launch:: duty::` found the console test's expectation, updated; `./scripts/check.sh` on the PR's head (EXIT in the PR). Copylot (register ui/editorial, en-US): `1ff57716-7685-43cf-9942-59fd9519cefc`, `7dcf545d-1a2c-4677-b65c-c13ce39bc6d7`, `326b2477-4007-4b8e-9803-ec7def1e1634`, all pass 100.
+- **Not done.** The live sessions started before this release keep their old `launch.command` until relaunched. SB-455 (launch scripts without the login PATH) is separate.
+
+**Exact next task.** Review the `tokens-spend` pull request and merge once its gate reads EXIT 0 on the merged head (renumber DEC-0031 if a pull request took it first); after the release, relaunch the `tokens` sessions and read `switchboard statistics --days 1` for a `tokens` row and `switchboard ceiling` for a non-zero `spent_today_usd`.
+## 2026-11-18: SB-500 to SB-503, the session duty officer closed working sessions, on branch `duty-keeps-working-sessions`
+
+- **Asked.** Operator, session 4c635d5e: audit why the duty officer closes sessions that are working, and stop it.
+- **Found.** [Duty audit](reports/2026-11-18-duty-audit/README.md): 118 closes in three days; 3 closed while the transcript was being written (stale status file), 3 with no transcript found, 33 repeats of sessions the person had resumed; the Sound Engine orchestrator was closed with nothing running, and its own hosted launches were invisible to the check.
+- **Built.** `duty.rs`: `idle` also needs `transcript_quiet` (subagents included, unknown is not quiet) and `no_own_launches`; `closed_idle_before` keeps a session the person took up again. `session_watch.rs`: `running_children`, `children_now`. Help text, MCP description and its golden, CONTRACTS.
+- **Decisions.** Unknown counts as working everywhere (no transcript, records unread). A resumed session is kept for good rather than for a period: the person showed it is theirs.
+- **Interim.** `idle_minutes` 240 on the operator's Mac until the release is installed; set back to 60 after (the floor of 65 stays).
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Merge the `duty-keeps-working-sessions` PR after two clean review rounds; after the release that carries it is installed, `switchboard duty set --idle-minutes 60`; then SB-503.
+
+## 2026-11-19: SB-447 to SB-449, PR #831 review round 2 follow-up, on branch `launch-stale-2`
+
+- **Asked.** Round 2 of #831 (merged as `9e7026cb`): CLI.md on when statuses 3 and 4 are Switchboard's; `clear_stale` deleting a marker when the link back fails; only `Reservation::new` clears stale markers; `queued` never on the wire; Kimi in-place continue as `caller`; non-regular markers read alike everywhere; `btime` once.
+- **Built.** `launch.rs`: `ensure_idle` reads only (a stale marker is idle, never removed); `Reservation::new` clears through `clear_stale`, whose link back falls back to a rename (`clear_stale_with` for tests); `reservation_open` is `pending() == Held`; `Handed::for_continue`; Linux `BOOT` in a `OnceLock`. `lib.rs`: `#[serde(skip)] queued`; Kimi continue passes `Handed`. `kimi.rs`: `launch_continuation(.., handed)`. Docs: CLI.md, CONTRACTS, CHANGELOG, backlog.
+- **Decisions.** The read-only checks read a stale marker as idle, not busy: nothing will run its script, and a busy answer would make the fallback and the Kimi status see a session that never comes until someone launches again (the bug class SB-440 fixed). They no longer remove anything, which closes the race the review named.
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Review the `launch-stale-2` pull request and merge it once its gate reads EXIT 0 on the merged head; then SB-441, SB-444, SB-446 by priority.
+
 ## 2026-11-18: SB-420 Keychain writes keep values off the command line; credential output kept off screens and files, on branch `secret-argv`
 
 - **Asked.** Two findings of a leak audit (kept outside the repository) about Keychain writes and credential output; review round 1 of PR #826 (P1-A, P1-B, P1-C).
