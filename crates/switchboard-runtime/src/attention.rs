@@ -363,7 +363,12 @@ pub fn build(inputs: &Inputs) -> Value {
         }
         let failing = read.failing_checks();
         if !failing.is_empty() {
-            let mut listed = item("machine_health", MACHINE_HEALTH, read.as_of, "open_machines");
+            let mut listed = item(
+                "machine_health",
+                MACHINE_HEALTH,
+                read.as_of,
+                "open_machines",
+            );
             listed["checks"] = json!(failing);
             push("machine_health", machine.name.clone(), listed);
         }
@@ -376,8 +381,10 @@ pub fn build(inputs: &Inputs) -> Value {
             kinds.sort_unstable();
             kinds.dedup();
             listed["kinds"] = json!(kinds);
-            listed["session_ids"] =
-                json!(troubled.iter().filter_map(|s| s.session_id.clone()).collect::<Vec<_>>());
+            listed["session_ids"] = json!(troubled
+                .iter()
+                .filter_map(|s| s.session_id.clone())
+                .collect::<Vec<_>>());
             push("machine_sessions", machine.name.clone(), listed);
         }
     }

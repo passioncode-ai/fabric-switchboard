@@ -913,7 +913,13 @@ mod tests {
         assert_eq!(studio.accounts[1].usage_status.as_deref(), Some("rejected"));
         // SB-550: not due again within the minute: nothing is read.
         assert_eq!(
-            pass(root.path(), &s, 1000 + 30, &|_, _, _| panic!("read"), &no_lease),
+            pass(
+                root.path(),
+                &s,
+                1000 + 30,
+                &|_, _, _| panic!("read"),
+                &no_lease
+            ),
             (0, 0)
         );
         // A failure keeps the numbers with their time and says why.
@@ -1080,7 +1086,12 @@ mod tests {
         assert!(remote.status_unknown);
         assert_eq!(remote.call, "accounts");
         assert_eq!(remote.accounts.len(), 3);
-        assert!(!remote.sessions.as_ref().unwrap().to_string().contains("/x/y"));
+        assert!(!remote
+            .sessions
+            .as_ref()
+            .unwrap()
+            .to_string()
+            .contains("/x/y"));
         assert_eq!(calls.lock().unwrap().len(), 3);
         // Within the hour it is not asked the one call again.
         let root = tempfile::tempdir().unwrap();
@@ -1118,10 +1129,12 @@ mod tests {
         // A newer one answers everything in one call.
         let newer = |args: &[String], _: Option<&[u8]>| -> Result<String, String> {
             assert!(args[2].contains("'remote-status'"));
-            Ok(json!({"ok": true, "data": {"schema": STATUS_SCHEMA, "accounts": there(),
+            Ok(
+                json!({"ok": true, "data": {"schema": STATUS_SCHEMA, "accounts": there(),
                 "sessions": {"counts": {"running": 0}, "rows": []},
                 "health": {"schema": "agent-health/1", "state": "ok", "checks": []}}})
-            .to_string())
+                .to_string(),
+            )
         };
         let remote = read_remote("studio", &program, &newer, true).unwrap();
         assert_eq!((remote.call, remote.status_unknown), ("status", false));
@@ -1170,7 +1183,11 @@ mod tests {
             &|_, _, _| ok(there()),
             &extend,
         );
-        assert_eq!(extended.lock().unwrap().len(), 4, "a failure is tried again");
+        assert_eq!(
+            extended.lock().unwrap().len(),
+            4,
+            "a failure is tried again"
+        );
         // A machine that did not answer gets no extension call.
         let calls = extended.lock().unwrap().len();
         pass(

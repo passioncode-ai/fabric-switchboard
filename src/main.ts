@@ -550,7 +550,8 @@ function loadMachinesRead() {
   if (machinesReadLoading || !(snapshot?.machines?.length)) return;
   if (machinesRead && Date.now() - machinesReadAt < 60_000) return;
   machinesReadLoading = true;
-  void adapter.machinesList().then((v) => { machinesRead = v; machinesReadAt = Date.now(); }, () => { machinesReadAt = Date.now(); }).finally(() => { machinesReadLoading = false; render(); });
+  // SB-550: read every minute now, so the page is redrawn as the background redraws it: never under an open menu or dialog.
+  void adapter.machinesList().then((v) => { machinesRead = v; machinesReadAt = Date.now(); }, () => { machinesReadAt = Date.now(); }).finally(() => { machinesReadLoading = false; backgroundRender(); });
 }
 /**
  * SB-550: the usage cell of an account on another machine: the bar, share and age of its copy
