@@ -5225,6 +5225,14 @@ fn continue_default(
     }
 }
 /// SB-377: the provider of a saved account, if it is still saved.
+/// SB-560: the sentence a call back that kept nothing answers: why the sign-in brought was not
+/// this account's, else that the provider did not answer it here.
+fn recall_refused(identity: Result<(), &'static str>) -> Result<Value, String> {
+    match identity {
+        Err(reason) => Err(reason.into()),
+        Ok(()) => Err(account_send::NOT_RETURNED.into()),
+    }
+}
 /// SB-560 (M2-01): whether the sign-in stored for `id` now (brought back by a call back) is this
 /// account's, as the provider names it.
 async fn recall_identity(
@@ -7973,11 +7981,7 @@ async fn execute(
                     &[("result", oplog::Field::Code("refused"))],
                 );
             }
-            let refusal: Option<&'static str> = match identity {
-                Err(reason) => Some(reason),
-                Ok(()) if !answered => Some(account_send::NOT_RETURNED),
-                Ok(()) => None,
-            };
+            let refused = identity.is_err() || !answered;
             // SB-403: a delegated seat whose lease ran out there: nothing is there to give back
             // to. Its row there is removed, and the account stays here to be signed in again.
             if !answered && taken.lease_ended {
@@ -8019,7 +8023,7 @@ async fn execute(
                 );
                 return Err(account_send::LEASE_ENDED_SIGN_IN.into());
             }
-            if let Some(refusal) = refusal {
+            if refused {
                 account_send::recall_undo(
                     &store,
                     &id,
@@ -8035,7 +8039,7 @@ async fn execute(
                 if let Some(out) = out_before {
                     let _ = store.record_delegated_out(&id, out.clone());
                     if !on_machine {
-                        return Err(refusal.into());
+                        return recall_refused(identity);
                     }
                 }
                 // SB-355: it went back to that machine, so back to its group too.
@@ -8050,7 +8054,7 @@ async fn execute(
                     );
                     store.join_machine(&id, &at, monitor::now())
                 });
-                return Err(refusal.into());
+                return recall_refused(identity);
             }
             let pool = store
                 .snapshot()?
