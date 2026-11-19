@@ -74,6 +74,9 @@ pub struct Inputs<'a> {
     /// SB-420: Claude Code Keychain items Switchboard could not write, too large
     /// (`item_size::read`).
     pub too_large: &'a [crate::item_size::Entry],
+    /// SB-510: the watchdog's current findings (`watchdog::current`), the owner's own codes left
+    /// out when the owner builds the list.
+    pub watchdog: &'a [Value],
     /// SB-509: the sessions left on the proxy's old token (`token_rotation::sessions`), or none.
     pub rotated: Option<&'a Value>,
     pub now: i64,
@@ -94,8 +97,23 @@ pub const MACHINE_SESSIONS: &str =
 pub const DISPATCH_REFUSED: &str =
     "Board runs are waiting: this computer's session limit refused them, and none has started since.";
 
+/// SB-510: what the watchdog found, by its code.
+pub const WATCHDOG_OWNER_DOWN: &str =
+    "Switchboard stopped without finishing its work and has not started again. Open it.";
+pub const WATCHDOG_OWNER_NOT_ANSWERING: &str =
+    "Switchboard is running but did not answer for five seconds. Quit it and open it again.";
+pub const WATCHDOG_OWNER_STOPPED: &str =
+    "Switchboard is not running, so nothing switches accounts or watches sessions. Open it.";
+pub const WATCHDOG_ACT_UNFINISHED: &str =
+    "An act of the duty officer or a board run's stop was left half done more than 10 minutes ago.";
+pub const WATCHDOG_BOARD_RUN_GONE: &str =
+    "A board run's process has been gone for over 30 minutes with no end recorded.";
+pub const WATCHDOG_DUPLICATE_SESSION: &str =
+    "One session has run in two processes for over 15 minutes.";
+
 /// Reasons in the order they are listed.
-const ORDER: [&str; 18] = [
+const ORDER: [&str; 19] = [
+    "watchdog",
     "keychain_too_large",
     "token_rotated",
     "session_duplicate",
@@ -443,6 +461,52 @@ pub fn build(inputs: &Inputs) -> Value {
             }),
         );
     }
+    // SB-510: one item per finding of the watchdog, which watches the owner from outside it.
+    for finding in inputs.watchdog {
+        let Some(code) = finding["code"].as_str() else {
+            continue;
+        };
+        let (detail, action) = match code {
+            crate::watchdog::OWNER_DOWN => (
+                WATCHDOG_OWNER_DOWN,
+                json!({"tool": "switchboard_status", "window": "none"}),
+            ),
+            crate::watchdog::OWNER_NOT_ANSWERING => (
+                WATCHDOG_OWNER_NOT_ANSWERING,
+                json!({"tool": "switchboard_status", "window": "none"}),
+            ),
+            crate::watchdog::OWNER_STOPPED => (
+                WATCHDOG_OWNER_STOPPED,
+                json!({"tool": "switchboard_status", "window": "none"}),
+            ),
+            crate::watchdog::ACT_UNFINISHED => (
+                WATCHDOG_ACT_UNFINISHED,
+                json!({"tool": "switchboard_duty", "window": "open_sessions"}),
+            ),
+            crate::watchdog::BOARD_RUN_GONE => (
+                WATCHDOG_BOARD_RUN_GONE,
+                json!({"tool": "switchboard_sessions", "window": "open_sessions"}),
+            ),
+            crate::watchdog::DUPLICATE_SESSION => (
+                WATCHDOG_DUPLICATE_SESSION,
+                json!({"tool": "switchboard_sessions", "window": "open_sessions"}),
+            ),
+            _ => continue,
+        };
+        // Failures first (review round 2 of PR #852), then by code.
+        let rank = if finding["severity"] == "fail" { 0 } else { 1 };
+        push(
+            "watchdog",
+            format!("{rank}{code}"),
+            json!({
+                "account_id": null, "label": null, "provider": null, "pool": null,
+                "reason": "watchdog", "detail": detail, "code": code,
+                "since": finding["first_seen"], "count": finding["count"],
+                "severity": finding["severity"], "ids": finding["ids"],
+                "action": action,
+            }),
+        );
+    }
     items.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
     let items: Vec<Value> = items.into_iter().map(|(_, _, item)| item).collect();
     json!({"count": items.len(), "items": items})
@@ -502,6 +566,7 @@ mod tests {
             watch: &[],
             refusals: None,
             too_large: &[],
+            watchdog: &[],
             rotated: None,
             now: 10_000,
         })
@@ -525,6 +590,7 @@ mod tests {
             watch: &watch,
             refusals: None,
             too_large: &[],
+            watchdog: &[],
             rotated: None,
             now: 10_000,
         });
@@ -577,6 +643,7 @@ mod tests {
             watch: &watch,
             refusals: None,
             too_large: &[],
+            watchdog: &[],
             rotated: Some(&rotated),
             now: 10_000,
         });
@@ -621,6 +688,7 @@ mod tests {
             watch: &[json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]})],
             refusals: None,
             too_large: &too_large,
+            watchdog: &[],
             rotated: None,
             now: 10_000,
         });
@@ -634,6 +702,58 @@ mod tests {
         assert_eq!(item["during"], "renewal");
         assert_eq!(item["since"], 9_000);
         assert_eq!(item["action"]["window"], "none");
+    }
+    #[test]
+    fn the_watchdogs_findings_come_first_one_item_per_code() {
+        // SB-510: the owner that stopped, and an act left half done, as the watchdog wrote them.
+        let snapshot = Snapshot::default();
+        let watchdog = [
+            json!({"code": crate::watchdog::OWNER_DOWN, "severity": "fail", "count": 1,
+                "ids": [], "first_seen": 8_000}),
+            json!({"code": crate::watchdog::ACT_UNFINISHED, "severity": "warn", "count": 2,
+                "ids": ["S1", "S2"], "first_seen": 7_000}),
+            json!({"code": "something_new", "count": 1}),
+        ];
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &crate::remote_usage::State::default(),
+            watch: &[json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]})],
+            refusals: None,
+            too_large: &[],
+            watchdog: &watchdog,
+            rotated: None,
+            now: 10_000,
+        });
+        assert_eq!(
+            reasons(&answer),
+            ["watchdog", "watchdog", "session_duplicate"],
+            "a code this version does not know is left out"
+        );
+        let owner = &answer["items"][0];
+        assert_eq!(owner["code"], "owner_down", "a failure comes first");
+        assert_eq!(owner["action"]["window"], "none");
+        let act = &answer["items"][1];
+        assert_eq!(
+            (
+                act["code"].clone(),
+                act["detail"].clone(),
+                act["since"].clone()
+            ),
+            (
+                json!("act_unfinished"),
+                json!(WATCHDOG_ACT_UNFINISHED),
+                json!(7_000)
+            )
+        );
+        assert_eq!(act["count"], 2);
+        assert_eq!(
+            act["action"],
+            json!({"tool": "switchboard_duty", "window": "open_sessions"})
+        );
     }
     #[test]
     fn dispatches_refused_at_the_session_limit_are_one_item_with_their_count() {
@@ -651,6 +771,7 @@ mod tests {
             watch: &[json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]})],
             refusals: Some(&refused),
             too_large: &[],
+            watchdog: &[],
             rotated: None,
             now: 10_000,
         });
@@ -824,6 +945,7 @@ mod tests {
             watch: &[],
             refusals: None,
             too_large: &[],
+            watchdog: &[],
             rotated: None,
             now: 10_000,
         });
@@ -921,6 +1043,7 @@ mod tests {
             refusals: None,
             too_large: &[],
             rotated: None,
+            watchdog: &[],
             now: 10_000,
         });
         assert_eq!(
@@ -1050,6 +1173,12 @@ mod tests {
             SESSION_CONTINUABLE,
             TOKEN_ROTATED,
             DISPATCH_REFUSED,
+            WATCHDOG_OWNER_DOWN,
+            WATCHDOG_OWNER_NOT_ANSWERING,
+            WATCHDOG_OWNER_STOPPED,
+            WATCHDOG_ACT_UNFINISHED,
+            WATCHDOG_BOARD_RUN_GONE,
+            WATCHDOG_DUPLICATE_SESSION,
         ] {
             assert!(
                 !sentence.contains('\u{2014}') && !sentence.contains(" - "),

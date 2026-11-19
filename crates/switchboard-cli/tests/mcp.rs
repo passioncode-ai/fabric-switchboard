@@ -197,6 +197,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_usage_mode",
             "switchboard_boot_resume",
             "switchboard_duty",
+            "switchboard_watchdog",
             "switchboard_attention",
             "switchboard_bugs",
             "switchboard_health",
@@ -488,6 +489,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
     for name in [
         "switchboard_capacity",
         "switchboard_duty",
+        "switchboard_watchdog",
         "switchboard_own_sign_in",
         "switchboard_boot_resume",
         "switchboard_app",
@@ -515,6 +517,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         ("switchboard_capacity", json!({"cap": 4})),
         ("switchboard_duty", json!({"on": false})),
         ("switchboard_duty", json!({"run": true})),
+        ("switchboard_watchdog", json!({"on": false})),
         (
             "switchboard_anthropic_keys",
             json!({"name": "team-a", "model": "claude-sonnet-5-5"}),

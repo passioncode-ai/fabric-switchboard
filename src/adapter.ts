@@ -203,6 +203,7 @@ const safeErrors = new Set([
   "A session host runs on macOS and Linux for now.",
   "Switchboard has no record of that session. Refresh the list, then retry.",
   "That session is still running in a process. Open its window, or close it there first.",
+  "The running sessions could not be read, so it is not known whether that session still runs. Try again in a moment.",
   "That session's folder is gone, so it cannot be continued there.",
   "That session's history is not on this computer any more, so it cannot be continued as the same session.",
   "Claude Code was not found on this computer.",
@@ -288,6 +289,8 @@ const safeErrors = new Set([
   "The other machine removed the seat's sign-in 30 days after its lease ran out. The sign-in kept here did not answer; sign in to this account again.",
   "Switchboard does not read or change your own Claude Code or Codex sign-in on this computer (own sign-in is off). Turn it on with switchboard own-sign-in on to use it here.",
   "The own sign-in setting could not be saved. Check Switchboard's data folder, then retry.",
+  // The watchdog's switch (SB-510).
+  "The watchdog setting could not be saved. Check Switchboard's data folder, then retry.",
   // Safe moves and call backs between machines (SB-312).
   "The ordinary Claude Code or Codex here is signed in to this account. Sign it in to another account first.",
   "This sign-in is also saved in another group here. Remove or move that copy first, so only one machine renews it.",
