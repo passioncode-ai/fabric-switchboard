@@ -1870,6 +1870,15 @@ check(() => {
   assert.equal(logic.dispatchStopLineText({ reason: 'deadline', folder: '/w/app' }, 'app'), 'Stopped a board run in app: it reached its deadline.');
   assert.equal(logic.dispatchStopLineText({ reason: 'person', folder: '/w/app' }, 'app'), 'Stopped a board run in app at your request.');
   assert.equal(logic.dutyOutcomeText('already_ended'), 'it had already ended');
+  // SB-509: a gone session with its history offers Continue; sessions on the proxy's old token offer a restart wave.
+  const resume = logic.attentionView({ items: [{ reason: 'session_continuable', label: 'gamma', session_id: 's-2', launch_id: 'L-2', action: { tool: 'switchboard_session_continue', window: 'continue_session', command: 'switchboard sessions continue s-2' } }] }).items[0];
+  assert.equal(resume.reason, 'session_continuable'); assert.equal(resume.session_id, 's-2');
+  assert.equal(logic.attentionActionLabel(resume.action.window), 'Continue');
+  const rotated = logic.attentionView({ items: [{ reason: 'token_rotated', since: 9000, count: 2, action: { tool: 'switchboard_sessions_restart_plan', window: 'restart_wave' } }] }).items[0];
+  assert.equal(rotated.reason, 'token_rotated'); assert.equal(rotated.count, 2);
+  assert.equal(logic.attentionActionLabel(rotated.action.window), 'Restart sessions\u2026');
+  for (const reason of ['session_continuable', 'token_rotated']) assert.ok(!logic.attentionReasonText(reason).includes('\u2014'), reason);
+  assert.equal(logic.dispatchExtendLineText('app'), 'Gave a board run in app ten more minutes: it still writes its log.');
   // SB-412, SB-417: the refused dispatches that still wait, one item that opens the session limit.
   const refused = logic.attentionView({ items: [{ reason: 'dispatch_refused', count: 3, freed: false, since: 9900, action: { tool: 'switchboard_capacity', window: 'open_capacity' } }] }).items[0];
   assert.equal(refused.count, 3); assert.equal(refused.freed, false);
