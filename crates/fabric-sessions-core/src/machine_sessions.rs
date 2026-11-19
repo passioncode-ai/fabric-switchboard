@@ -256,8 +256,9 @@ fn modified(path: &Path) -> Option<i64> {
         .map(|d| d.as_secs() as i64)
 }
 
-/// When `pid` started, Unix seconds, read for that one process (macOS `proc_pidinfo`, Linux
-/// `/proc/<pid>`'s time, as the process table's walk reads them); None when unknown.
+/// When `pid` started, Unix seconds, read for that one process (macOS `proc_pidinfo`; Linux
+/// `/proc/<pid>/stat`'s `starttime` after the boot time, [`linux_started`]), as the process
+/// table's walk reads them; None when unknown, which keeps a session file.
 #[cfg(target_os = "macos")]
 fn process_started(pid: u32) -> Option<i64> {
     let pid = i32::try_from(pid).ok()?;
@@ -281,10 +282,38 @@ fn process_started(pid: u32) -> Option<i64> {
 }
 #[cfg(target_os = "linux")]
 fn process_started(pid: u32) -> Option<i64> {
-    use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(format!("/proc/{pid}"))
+    linux_started(pid)
+}
+
+/// `starttime` (field 22: clock ticks after the boot) of a `/proc/<pid>/stat` line. The command
+/// name, in parentheses, may hold spaces and parentheses itself, so fields are counted after its
+/// last `)`. Pure.
+pub fn stat_start_ticks(stat: &str) -> Option<u64> {
+    let rest = &stat[stat.rfind(')')? + 1..];
+    // After the name, field 3 (`state`) is the first; field 22 is the 20th.
+    rest.split_whitespace().nth(19)?.parse().ok()
+}
+
+/// SB-450 (review round 5 of fabric-switchboard #836, the reader of its SB-445): a Linux
+/// process's start in Unix seconds, `btime` of `/proc/stat` plus `starttime` over the clock-tick
+/// rate. The modification time of `/proc/<pid>` is when its procfs entry was made (its first
+/// look, or again under memory pressure), never the start. None when any read fails.
+#[cfg(target_os = "linux")]
+fn linux_started(pid: u32) -> Option<i64> {
+    let ticks = stat_start_ticks(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
+    // The boot time does not change while this process runs; read it once.
+    static BOOT: std::sync::OnceLock<Option<i64>> = std::sync::OnceLock::new();
+    let boot = (*BOOT.get_or_init(|| {
+        std::fs::read_to_string("/proc/stat")
+            .ok()?
+            .lines()
+            .find_map(|line| line.strip_prefix("btime ")?.trim().parse().ok())
+    }))?;
+    // SAFETY: sysconf only reads a configuration value.
+    let hz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) })
         .ok()
-        .map(|m| m.mtime())
+        .filter(|hz| *hz > 0)?;
+    Some(boot + i64::try_from(ticks / hz).ok()?)
 }
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn process_started(_pid: u32) -> Option<i64> {
@@ -657,7 +686,8 @@ fn os_agent_processes() -> Result<Vec<Proc>, &'static str> {
             ppid,
             agent,
             folder,
-            started_at: Some(meta.mtime()),
+            // SB-450 (review round 5 of #836): the process's start, never `/proc/<pid>`'s time.
+            started_at: linux_started(pid),
         });
     }
     Ok(found)
@@ -671,6 +701,20 @@ fn os_agent_processes() -> Result<Vec<Proc>, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_start_is_read_after_the_last_parenthesis_of_the_command_name() {
+        // Review round 5 of fabric-switchboard #836: a name with spaces and parentheses.
+        let stat = "4242 (my (odd) name) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 \
+                    987654 1000 50 18446744073709551615";
+        assert_eq!(stat_start_ticks(stat), Some(987_654));
+        assert_eq!(
+            stat_start_ticks("4242 (claude) S 1 2"),
+            None,
+            "too few fields"
+        );
+        assert_eq!(stat_start_ticks("no parenthesis"), None);
+    }
 
     #[test]
     fn a_session_file_older_than_its_process_is_not_its_session() {

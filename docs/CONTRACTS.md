@@ -3911,7 +3911,11 @@ the window's `boot_resume` command (Settings → Sessions after a restart, SCN-1
   `sessions/<pid>.json` last written more than 60 s before its process started is not that
   process's session (`fabric_sessions_core::machine_sessions::written_before_start`, applied to
   the live session pairs and to `session_files`, which the duty officer, the session pool and the
-  launch records read): after a restart a reused pid never reads as an old session.
+  launch records read): after a restart a reused pid never reads as an old session. A process's
+  start is `pbi_start_tvsec` on macOS and, on Linux, `btime` of `/proc/stat` plus field 22 of
+  `/proc/<pid>/stat` over the clock-tick rate (`machine_sessions::stat_start_ticks`, the reader of
+  SB-445), never the modification time of `/proc/<pid>`, which is when its procfs entry was made;
+  a start that cannot be read keeps the file.
   Boot time: `sysctl kern.boottime` (macOS), `btime` of `/proc/stat` (Linux), read once a process.
 - **The pass.** Once per owner process, the first watch pass that read the process table decides
   (more than `MAX_AFTER_BOOT_SECONDS`, 6 hours, after the boot it continues nothing and journals
