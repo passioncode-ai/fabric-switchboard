@@ -7960,7 +7960,8 @@ async fn execute(
             // Codex one by the account its tokens name, whose usage answer above the provider gave
             // for that account.
             let identity = if answered && !kept_here && !taken.lease_ended {
-                recall_identity(&store, &id, refresh_state).await
+                // Boxed: `execute`'s own future stays the size it was (a test thread has 2 MiB).
+                Box::pin(recall_identity(&store, &id, refresh_state)).await
             } else {
                 Ok(())
             };
