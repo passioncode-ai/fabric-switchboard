@@ -1483,6 +1483,11 @@ async fn confirm_candidates(
         if policy.target == "claude_cli" && runtime.refresh.swap_switching() {
             continue;
         }
+        // One candidate a provider: the minute's spacing would refuse a second, and working it
+        // out reads credentials for nothing.
+        if wanted.iter().any(|(p, _)| *p == policy.provider) {
+            continue;
+        }
         let current = if policy.target == "managed" {
             snapshot
                 .routes
