@@ -196,8 +196,9 @@ fn resuming_at(path: &Path) -> Option<i64> {
 /// next check finishes by resuming it); or a running restart wave holds it.
 pub fn being_continued(root: &Path, session: &str, now: i64) -> bool {
     if crate::launches::valid_id(session)
+        // A stamp later than `now` (written while the caller's pass ran) counts as just now.
         && resuming_at(&root.join(RESUMING_DIR).join(session))
-            .is_some_and(|at| (0..JUST_STARTED_SECONDS).contains(&(now - at)))
+            .is_some_and(|at| now - at < JUST_STARTED_SECONDS)
     {
         return true;
     }
@@ -220,7 +221,7 @@ pub fn being_continued(root: &Path, session: &str, now: i64) -> bool {
                 && r["ended"].is_null()
                 && r["launched_at"]
                     .as_i64()
-                    .is_some_and(|at| (0..JUST_STARTED_SECONDS).contains(&(now - at)))
+                    .is_some_and(|at| now - at < JUST_STARTED_SECONDS)
         })
 }
 
@@ -430,6 +431,10 @@ mod tests {
         assert!(!being_continued(root.path(), session, 1000));
         mark_resuming(root.path(), session, 1000);
         assert!(being_continued(root.path(), session, 1000 + 30));
+        assert!(
+            being_continued(root.path(), session, 1000 - 5),
+            "a mark written after the caller read its clock counts as just now"
+        );
         assert!(
             !being_continued(root.path(), session, 1000 + JUST_STARTED_SECONDS),
             "a window that never brought the session up is not waited for"

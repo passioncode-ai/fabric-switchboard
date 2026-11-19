@@ -1001,7 +1001,7 @@ fn open_restart(lines: &[Value], session: &str, now: i64) -> bool {
         o["action"] == "restart"
             && o["at"]
                 .as_i64()
-                .is_some_and(|at| (0..INTERRUPTED_WINDOW).contains(&(now - at)))
+                .is_some_and(|at| now - at < INTERRUPTED_WINDOW)
     })
 }
 

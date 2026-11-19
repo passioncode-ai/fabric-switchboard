@@ -151,15 +151,28 @@ fn write_ledger(root: &Path, ledger: &Ledger) {
     }
 }
 
-/// The live launched sessions of a scan: each row with a launch whose pid holds a session.
+/// The live launched sessions of a scan: for each launch, the session its own process holds,
+/// its earliest-started Claude Code process (the rule of `launches::reconcile`, SB-451), never
+/// a nested `claude -p` the scan joins to the same launch.
 pub fn seen_of(rows: &[Value], pairs: &[(String, u32)]) -> Vec<Seen> {
     let session_of: HashMap<u32, &str> = pairs.iter().map(|(s, p)| (*p, s.as_str())).collect();
-    let mut seen: Vec<Seen> = rows
-        .iter()
-        .filter(|r| r["agent"] == "claude-code")
-        .filter_map(|r| {
-            let launch_id = r["launch_id"].as_str()?;
-            let pid = u32::try_from(r["pid"].as_u64()?).ok()?;
+    let mut own: HashMap<&str, (i64, u32)> = HashMap::new();
+    for r in rows.iter().filter(|r| r["agent"] == "claude-code") {
+        let (Some(launch_id), Some(pid)) = (
+            r["launch_id"].as_str(),
+            r["pid"].as_u64().and_then(|p| u32::try_from(p).ok()),
+        ) else {
+            continue;
+        };
+        let started = r["started_at"].as_i64().unwrap_or(i64::MAX);
+        let entry = own.entry(launch_id).or_insert((started, pid));
+        if (started, pid) < *entry {
+            *entry = (started, pid);
+        }
+    }
+    let mut seen: Vec<Seen> = own
+        .into_iter()
+        .filter_map(|(launch_id, (_, pid))| {
             Some(Seen {
                 session: session_of.get(&pid)?.to_string(),
                 launch_id: launch_id.to_owned(),
@@ -296,6 +309,13 @@ pub fn candidates(
         let Some(r) = records.get(&seen.launch_id) else {
             continue;
         };
+        // Only the launch's own session (SB-451), never one a nested run held under it.
+        if r["provider_session_id"]
+            .as_str()
+            .is_some_and(|s| s != seen.session)
+        {
+            continue;
+        }
         let claude = r["provider"].as_str().is_none_or(|p| p == "claude");
         let before = r["launched_at"].as_i64().is_some_and(|t| t < boot);
         if !claude || !before || !r["ended"].is_null() || !r["continued_as"].is_null() {
@@ -523,7 +543,8 @@ impl Machine for Real<'_> {
 
 static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static BOOT: std::sync::OnceLock<Option<i64>> = std::sync::OnceLock::new();
-fn boot() -> Option<i64> {
+/// This boot's time, read once a process.
+pub(crate) fn boot() -> Option<i64> {
     *BOOT.get_or_init(boot_time)
 }
 
@@ -699,8 +720,10 @@ mod tests {
             json!({"dispatch": {"request": "r"}, "ended": {"kind": "exited"}}),
         );
         launch(root, &id(10), "i", before, json!({"provider": "codex"}));
-        let ids: Vec<String> = (1..=10).map(id).collect();
-        let pairs: Vec<(&str, &str)> = ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
+        // j: a nested run's session seen under launch 11, whose own session is another.
+        launch(root, &id(11), "own", before, json!({}));
+        let ids: Vec<String> = (1..=11).map(id).collect();
+        let pairs: Vec<(&str, &str)> = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]
             .iter()
             .zip(ids.iter().filter(|i| **i != id(8)))
             .map(|(s, i)| (*s, i.as_str()))
@@ -717,6 +740,7 @@ mod tests {
             ("g", BOOT - 600),
             ("h", BOOT - 600),
             ("i", BOOT - 600),
+            ("j", BOOT - 600),
         ] {
             fake.written.insert(s.into(), at);
         }
@@ -871,12 +895,19 @@ mod tests {
     fn the_ledger_is_written_only_when_its_sessions_or_its_boot_change() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
+        // Review round 2 of #836: a nested `claude -p` (pid 13, started later) joined to L1 by the
+        // scan is not L1's session.
         let rows = vec![
-            json!({"pid": 10, "agent": "claude-code", "launch_id": "L1"}),
+            json!({"pid": 13, "agent": "claude-code", "launch_id": "L1", "started_at": 500}),
+            json!({"pid": 10, "agent": "claude-code", "launch_id": "L1", "started_at": 100}),
             json!({"pid": 11, "agent": "claude-code", "launch_id": null}),
             json!({"pid": 12, "agent": "codex", "launch_id": "L3"}),
         ];
-        let pairs = vec![("s1".to_owned(), 10), ("s2".to_owned(), 11)];
+        let pairs = vec![
+            ("s1".to_owned(), 10),
+            ("s2".to_owned(), 11),
+            ("s3".to_owned(), 13),
+        ];
         let seen = seen_of(&rows, &pairs);
         assert_eq!(
             seen,

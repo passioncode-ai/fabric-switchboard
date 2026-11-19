@@ -230,6 +230,19 @@ pub fn live_hosts(root: &Path) -> Vec<(String, u32)> {
             if !crate::launches::valid_id(&id) {
                 return None;
             }
+            // SB-450: a descriptor written before this boot names a host the restart ended,
+            // whatever process holds its pid now.
+            if let (Some(boot), Ok(written)) = (
+                crate::boot_resume::boot(),
+                e.metadata().and_then(|m| m.modified()),
+            ) {
+                let written = written
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs() as i64);
+                if written < boot {
+                    return None;
+                }
+            }
             let bytes =
                 switchboard_core::private_fs::read_private(&e.path(), MAX_DESCRIPTOR).ok()?;
             let pid = serde_json::from_slice::<Value>(&bytes).ok()?["pid"].as_i64()?;

@@ -263,9 +263,10 @@ const DELETES: [&str; 2] = ["switchboard_kimi_remove", "switchboard_openrouter_r
 /// SB-517: the write tools that also have a read form. Called without the fields that change
 /// something they only read, so a read-only server lists them and answers that form
 /// ([`writes`] decides per call); the full server lists them as before.
-pub(crate) const READ_FORMS: [&str; 12] = [
+pub(crate) const READ_FORMS: [&str; 13] = [
     "switchboard_capacity",
     "switchboard_own_sign_in",
+    "switchboard_boot_resume",
     "switchboard_duty",
     "switchboard_app",
     "switchboard_analytics",
@@ -300,7 +301,7 @@ pub(crate) fn writes(name: &str, write: bool, args: &Map<String, Value>) -> bool
                 // A check acts unless it is a dry run.
                 || (flag("run") && !flag("dry_run"))
         }
-        "switchboard_own_sign_in" => given("on"),
+        "switchboard_own_sign_in" | "switchboard_boot_resume" => given("on"),
         "switchboard_app" => given("enabled") || !matches!(action, Some("updates" | "login_item")),
         "switchboard_analytics" | "switchboard_codex_route" => given("enabled"),
         "switchboard_balance" => {
@@ -3126,6 +3127,8 @@ mod checks {
         assert!(w("switchboard_duty", json!({"idle_minutes": 90})));
         assert!(!w("switchboard_own_sign_in", json!({})));
         assert!(w("switchboard_own_sign_in", json!({"on": false})));
+        assert!(!w("switchboard_boot_resume", json!({})));
+        assert!(w("switchboard_boot_resume", json!({"on": false})));
         assert!(!w("switchboard_app", json!({"action": "updates"})));
         assert!(!w("switchboard_app", json!({"action": "login_item"})));
         assert!(w(
