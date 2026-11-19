@@ -10,7 +10,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 - Who holds the access this Switchboard issued is one answer now (SB-573, DEC-0036): `switchboard access grants` and MCP `switchboard_access_grants` answer `access-grants/1` (fabric-agent-contract DEC-0187), so Fabric Dashboards can show it on an agent's Access tab. It lists the seats moved, handed over or delegated to another machine, called-back ones as revoked, and the accounts given to an agent, each with its holder (a machine by an opaque reference, an agent by its service key, never a name or e-mail), the account it opens and when it was issued. Giving an account to an agent or taking it back is now kept in `assignments.jsonl`, so a grant taken back stays listed with `--include-revoked`.
 
-- The app's threads get the 16 MiB stack the command line has run on since 0.6.61 (SB-558): the threads of its async runtime on every system, and its main thread on Windows, where it was 1 MiB. The Windows test steps give each test thread the same. The nightly checks of 0.7.123 failed on Windows on Arm when one test overflowed its 2 MiB thread.
+## 0.7.124
+
+- 0.7.124 carries 0.7.123's changes, which were tagged but never published: one test overflowed its 2 MiB thread on Windows on Arm, so the nightly checks failed and the release stopped. The Windows test steps now give each test thread 16 MiB.
+- The app's async runtime threads, on every system, and its main thread on Windows (1 MiB before) get the 16 MiB stack the command line has run on since 0.6.61 (SB-558). The app runs its account owner on these threads, as the command line does.
 
 ## 0.7.123
 
