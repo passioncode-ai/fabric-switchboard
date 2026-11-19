@@ -511,7 +511,9 @@ mod tests {
         // A candidate is worked out only while one could be checked.
         let spaced = UsageBudget::limited();
         assert!(spaced.may_confirm(Provider::Claude, 40_000));
-        assert!(spaced.take(Provider::Claude, Caller::Confirm, 40_000).is_ok());
+        assert!(spaced
+            .take(Provider::Claude, Caller::Confirm, 40_000)
+            .is_ok());
         assert!(!spaced.may_confirm(Provider::Claude, 40_030));
         assert!(spaced.may_confirm(Provider::Claude, 40_000 + CONFIRM_SPACING_SECONDS));
         spaced.refused(Provider::Claude, 40_100, None);
