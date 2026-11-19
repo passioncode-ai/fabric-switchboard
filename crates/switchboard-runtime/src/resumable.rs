@@ -24,6 +24,29 @@ pub const UNKNOWN: &str =
     "Switchboard has no record of that session. Refresh the list, then retry.";
 pub const NO_FOLDER: &str = "That session's folder is gone, so it cannot be continued there.";
 pub const NO_CLAUDE: &str = "Claude Code was not found on this computer.";
+/// Review round 3 of PR #852: without the process table no one can tell the session is not still
+/// running, so nothing is started beside it.
+pub const UNREAD: &str = "The running sessions could not be read, so it is not known whether that session still runs. Try again in a moment.";
+
+/// Whether `session` may be continued as far as the process table says: refused while a process
+/// holds it (`LIVE`) and when the table could not be read (`UNREAD`). Pure, for tests.
+pub fn not_running(
+    live: Option<&std::collections::HashSet<String>>,
+    session: &str,
+) -> Result<(), &'static str> {
+    match live {
+        None => Err(UNREAD),
+        Some(live) if live.contains(session) => Err(LIVE),
+        Some(_) => Ok(()),
+    }
+}
+
+/// The sessions a live Claude Code process holds now, or `None` when the table was not read.
+#[cfg(unix)]
+fn live_now(root: &Path) -> Option<std::collections::HashSet<String>> {
+    let (scan, pairs) = crate::machine_sessions::scan_and_pairs(root);
+    crate::session_watch::table_read(&scan).then(|| pairs.into_iter().map(|(s, _, _)| s).collect())
+}
 pub const NOT_STARTED: &str = "The Terminal window to continue the session could not be opened.";
 /// The prompt a session continued by a person goes on with.
 pub const CONTINUE_PROMPT: &str =
@@ -99,27 +122,64 @@ pub fn transcript(config: &Path, cwd: &str, session: &str) -> PathBuf {
         .join(format!("{session}.jsonl"))
 }
 
-/// Where a session can be resumed from: its config folder and working folder, from the newest
-/// end recorded here, else a launch record naming it (its home), else a limit stop (the person's
-/// own Claude folder).
+/// Where a session can be resumed from: its config folder and working folder, from the newest by
+/// time of the end recorded here (`at`), a launch record naming it (its home; its last turn, else
+/// its launch) and the ledger of live sessions (SB-508: a session the person started in a terminal
+/// or an editor, seen live in the last week; `last_seen`), so a session resumed elsewhere since its
+/// end is found where it ran last; else a limit stop (the person's own Claude folder).
 pub fn locate(root: &Path, session: &str, now: i64) -> Option<(PathBuf, String)> {
+    let mut found: Vec<(i64, PathBuf, String)> = Vec::new();
     if let Some(v) = recent(root, now - WINDOW_SECONDS)
         .into_iter()
         .find(|v| v["session"] == session)
     {
         // A session host's line names the launch only: its record says the rest.
         if let (Some(config), Some(cwd)) = (v["config"].as_str(), v["cwd"].as_str()) {
-            return Some((PathBuf::from(config), cwd.to_owned()));
+            let at = v["at"].as_i64().unwrap_or(0);
+            found.push((at, PathBuf::from(config), cwd.to_owned()));
         }
     }
     for r in crate::launches::recent_records(root, now - WINDOW_SECONDS) {
-        if r["provider_session_id"] == session {
-            let config = match r["home_dir"].as_str() {
-                Some(home) => root.join(home),
-                None => crate::person::claude_dir()?,
-            };
-            return Some((config, r["working_directory"].as_str()?.to_owned()));
+        if r["provider_session_id"] != session {
+            continue;
         }
+        // A record that names its config folder (its home, or a resume's own) ranks by its time;
+        // one that names none is a guess (the person's Claude folder) and ranks below every
+        // source that names one (review round 2 of PR #852).
+        let (config, named) = match (r["home_dir"].as_str(), r["config_dir"].as_str()) {
+            (Some(home), _) => (Some(root.join(home)), true),
+            (None, Some(config)) => (Some(PathBuf::from(config)), true),
+            (None, None) => (crate::person::claude_dir(), false),
+        };
+        if let (Some(config), Some(cwd)) = (config, r["working_directory"].as_str()) {
+            let at = r["last_turn_at"]
+                .as_i64()
+                .or(r["launched_at"].as_i64())
+                .unwrap_or(0);
+            found.push((if named { at } else { i64::MIN }, config, cwd.to_owned()));
+        }
+    }
+    // Review round 3 of PR #852: what the ledger may resume here (own sign-in off keeps only
+    // Switchboard's own homes).
+    if let Some(entry) = crate::live_ledger::find(root, session, now) {
+        found.push((
+            entry
+                .ended_at
+                .unwrap_or(entry.last_seen)
+                .max(entry.last_seen),
+            PathBuf::from(&entry.config),
+            entry.cwd,
+        ));
+    }
+    // The newest wins; on a tie the order above (an end, a launch, the ledger).
+    let mut best: Option<(i64, PathBuf, String)> = None;
+    for candidate in found {
+        if best.as_ref().is_none_or(|b| candidate.0 > b.0) {
+            best = Some(candidate);
+        }
+    }
+    if let Some((_, config, cwd)) = best {
+        return Some((config, cwd));
     }
     let stops = crate::recovery::read(root).ok()?;
     let stop = stops.iter().find(|s| s.session == session)?;
@@ -237,9 +297,7 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
     if !crate::launches::valid_id(session) {
         return Err(UNKNOWN.into());
     }
-    if crate::machine_sessions::live_sessions(root).contains_key(session) {
-        return Err(LIVE.into());
-    }
+    not_running(live_now(root).as_ref(), session)?;
     // SB-450: one continuation at a time in this process, and none of a session a host runs or a
     // launch began to continue a moment ago (its process may not hold the session yet): the
     // owner's continuation after a restart and a person's, or another agent's, never both start.
@@ -281,6 +339,9 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
                 "in_place": true, "hosted": true, "launched_at": now,
                 "provider_session_id": session,
                 "home_dir": config.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/")),
+                // SB-508 (review round 2): the config folder itself, so `locate` never guesses it
+                // for a config outside the data folder.
+                "config_dir": config,
             });
             crate::launches::record_resume(root, id, record, &how.by)?;
         }
@@ -354,6 +415,104 @@ mod tests {
             ) & 0o777,
             0o600
         );
+    }
+
+    #[test]
+    fn a_session_nobody_closed_or_launched_is_found_in_the_live_ledger() {
+        // SB-508: started by the person in a terminal, seen live by the watch, never closed by
+        // Switchboard: after a reboot `locate` still knows its config and working folders.
+        let root = tempfile::tempdir().unwrap();
+        let session = "33333333-3333-4333-8333-333333333333";
+        assert!(locate(root.path(), session, 5000).is_none());
+        let ledger = crate::live_ledger::merge(
+            &crate::live_ledger::Ledger::default(),
+            &[crate::live_ledger::Observed {
+                session: session.into(),
+                config: PathBuf::from("/h/.claude-work"),
+                cwd: "/w/mine".into(),
+                pid: 42,
+                kind: "interactive".into(),
+            }],
+            |_| "terminal".to_owned(),
+            4000,
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join(crate::live_ledger::FILE),
+            serde_json::to_vec(&ledger).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            locate(root.path(), session, 5000),
+            Some((PathBuf::from("/h/.claude-work"), "/w/mine".to_owned()))
+        );
+        // An end Switchboard recorded later wins over the ledger; an earlier one does not.
+        record(
+            root.path(),
+            json!({"session": session, "config": "/h/.claude", "cwd": "/w/old", "reason": "idle", "at": 3500}),
+        );
+        assert_eq!(
+            locate(root.path(), session, 5000),
+            Some((PathBuf::from("/h/.claude-work"), "/w/mine".to_owned())),
+            "seen live after that end: it ran there last"
+        );
+        record(
+            root.path(),
+            json!({"session": session, "config": "/h/.claude", "cwd": "/w/other", "reason": "idle", "at": 4500}),
+        );
+        assert_eq!(
+            locate(root.path(), session, 5000),
+            Some((PathBuf::from("/h/.claude"), "/w/other".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_launch_record_that_names_no_config_never_beats_a_source_that_does() {
+        // Review round 2 of PR #852: a resume's record outside the data folder named no config
+        // before; its guess (the person's Claude folder) must not win over the real one.
+        let root = tempfile::tempdir().unwrap();
+        let session = "44444444-4444-4444-8444-444444444444";
+        record(
+            root.path(),
+            json!({"session": session, "config": "/h/.claude-work", "cwd": "/w/a", "reason": "idle", "at": 100}),
+        );
+        let guess = crate::launches::new_id();
+        crate::launches::record_resume(
+            root.path(),
+            &guess,
+            json!({"provider": "claude", "provider_session_id": session, "working_directory": "/w/b",
+                "launched_at": 200, "home_dir": null}),
+            &crate::launches::LaunchedBy::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            locate(root.path(), session, 300),
+            Some((PathBuf::from("/h/.claude-work"), "/w/a".to_owned())),
+            "the end line names its config; the record only guesses"
+        );
+        // A newer record that names its config folder wins by its time.
+        let named = crate::launches::new_id();
+        crate::launches::record_resume(
+            root.path(),
+            &named,
+            json!({"provider": "claude", "provider_session_id": session, "working_directory": "/w/c",
+                "launched_at": 250, "home_dir": null, "config_dir": "/h/.claude-other"}),
+            &crate::launches::LaunchedBy::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            locate(root.path(), session, 300),
+            Some((PathBuf::from("/h/.claude-other"), "/w/c".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_session_is_never_continued_beside_a_process_nobody_could_see() {
+        // Review round 3 of PR #852: an unread process table is not an empty one.
+        let live: std::collections::HashSet<String> = ["S1".to_owned()].into();
+        assert_eq!(not_running(None, "S2"), Err(UNREAD));
+        assert_eq!(not_running(Some(&live), "S1"), Err(LIVE));
+        assert_eq!(not_running(Some(&live), "S2"), Ok(()));
     }
 
     #[test]

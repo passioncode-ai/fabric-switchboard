@@ -33,6 +33,16 @@
 
 **Exact next task.** Review PR #861 (`sb-550-remote-minute`) and merge once its gate reads EXIT 0 on the merged head (renumber DEC-0033 if an open pull request took it); after the release, read `switchboard machines list` on the operator's Mac and check each machine's `read.call` is `status` and the Accounts rows of the machine groups show one number.
 
+## 2026-11-19: SB-508 a ledger of live sessions, SB-510 a watchdog apart from the owner, on branch `sb-watchdog-510` (PR #852)
+
+- **Asked.** Coordinator, from plan 10 §B (`origin/sb-plan-10`): continue a session nobody closed or launched after a reboot or a crash (SB-508); a watchdog outside the owner that reports the owner stopping, acts left half done, gone board runs and duplicates (SB-510). Lead's correction: the watchdog reports only through `watchdog.json`, Needs attention and `agent-health/1`, never a messenger.
+- **Built.** `live_ledger.rs` (`live-sessions.json`, fed by the session watch; `resumable::locate` reads it before a limit stop); `watchdog.rs` (`watchdog --once`, `watchdog.json`, `current` for readers), `control::probe` (identity only, 5 s), `watchdog_job.rs` (macOS LaunchAgent `ai.passioncode.fabric-switchboard.watchdog`, Linux systemd user timer), `Runtime::enable_watchdog` from the installed app only, `Operation::Watchdog`, CLI `watchdog [on|off]`/`--once`, MCP `switchboard_watchdog`, attention reason `watchdog`, health check `watchdog`, uninstall. Contract: [CONTRACTS → Live sessions and the watchdog](CONTRACTS.md#live-sessions-and-the-watchdog-sb-508-sb-510-plan-10-b).
+- **Merged #836 (main 549db2ac).** The watchdog and the ledger read the boot through `boot_resume::boot` (the copy in `watchdog.rs` is gone); the session watch keeps `live_ledger::observe` and `boot_resume::tick` on one scan; the ledger inherits #836's session-file filter through `machine_sessions::session_files`; a session a launch record or this boot's boot-resume journal names is never listed as "Ended outside Switchboard" (`boot_resume::named_this_boot`), and a close on purpose hides only the life it ended.
+- **Decisions.** Only dispatched gone runs count (others are history, as in Needs attention). The owner's watch findings are read only while the owner answers. An owner record not clean whose process runs reads as `starting` for 2 minutes. The ledger's `last_seen` is refreshed hourly to keep the idle budget. Windows has no job: SB-543.
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Review PR #852 and merge it once its gate reads EXIT 0 on the merged head; after the release is installed on the operator's Mac, check `launchctl print gui/$(id -u)/ai.passioncode.fabric-switchboard.watchdog` and `switchboard watchdog`; then SB-543 (Windows scheduled task).
+
 ## 2026-11-19: release 0.7.121 and plan section 10 (launch, fleet and lifecycle), waves W10.0 to W10.2 landed
 
 - **Objective.** The operator's order of 2026-11-19: audit attribution, lifecycle and watchers, full access by default, MCP, automatic switching against the provider's load; design the Launch flow (folder, agent, model, billing, key reuse or minting, harness), remote session management and the organization's subscriptions board; build it in waves and release.

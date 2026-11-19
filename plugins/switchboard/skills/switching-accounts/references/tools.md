@@ -12,9 +12,9 @@ group's id is its `pool` (`default` is the default group). **Automatic switching
 names and fields call rotation. Say group and automatic switching to the person.
 
 `switchboard mcp --read-only` lists the 39 tools that only read (every tool under
-[Read tools](#read-tools)) and, since SB-517, the 13 write tools that also have a read form:
+[Read tools](#read-tools)) and, since SB-517, the 14 write tools that also have a read form:
 `switchboard_capacity`, `switchboard_own_sign_in`, `switchboard_boot_resume` (without `on`),
-`switchboard_duty` (a dry run included),
+`switchboard_duty` (a dry run included), `switchboard_watchdog` (without `on` or `run`),
 `switchboard_app` (`updates` and `login_item` without `enabled`), `switchboard_analytics`,
 `switchboard_balance`, `switchboard_feed`, `switchboard_anthropic_keys`,
 `switchboard_codex_route`, `switchboard_project_sources`, `switchboard_machine_set` (`keys`, and
@@ -22,7 +22,7 @@ names and fields call rotation. Say group and automatic switching to the person.
 as reads and answer only that form: a call with a field that changes something, or any other
 write tool, is refused with `isError: true` and `structuredContent.error.code` `read_only`, never
 as an unknown tool. A session Switchboard launches in isolated mode gets that set. The server
-lists 96 tools; each has a section below.
+lists 97 tools; each has a section below.
 
 Since SB-517 every call is checked against its tool's `inputSchema` before it runs (types,
 `required`, `enum`, `minimum` and `maximum`, `minLength` and `maxLength`, list items and size,
@@ -129,6 +129,7 @@ What needs a person, one item per account or question:
 | `session_stuck` | a board run quiet for 30 minutes, its log included | `switchboard_dispatch_stop` with the item's `launch_id` (`action.command` is the CLI act) |
 | `session_gone` | a board run whose process ended with no end recorded | `switchboard_dispatch_stop` with the item's `launch_id` and `if_gone` (records the end, never signals a live run) |
 | `dispatch_refused` | board runs refused at this computer's session limit that still wait, however long ago (`count`, `since`, `last_at`, `newest_request`, `freed`) | `switchboard_capacity` (its `refused_waiting`) |
+| `watchdog` | what the watchdog found from outside Switchboard, by `code`: `owner_down`, `owner_not_answering`, `owner_stopped` (listed only when Switchboard does not answer), `act_unfinished`, `board_run_gone`, `duplicate_session`; with `count`, `ids`, `since` (first seen) and `severity` | `switchboard_watchdog`, then the tool `action.tool` names |
 
 A view: every account listed stays in its group with its selection, and nothing moves; once
 fixed it leaves the list on the next background pass. Read-only, also on a read-only server.
@@ -244,7 +245,9 @@ while usage counts are off). Checks: `owner`, `sign_in`, `accounts`, `sessions_s
 `sessions_duplicate`, `sessions_gone`, `machines` (SB-550: another machine that stopped answering,
 a failing health check there or sessions there that need a person warn), `crashes` (a crash in the
 last day fails, in the week warns),
-`errors_today` (50 or more warn). `fix.tool` names the tool that repairs it. Counts and kinds
+`errors_today` (50 or more warn), `watchdog` (what the watchdog found: `fail` when Switchboard is
+down or silent; absent where no watchdog job runs, `unknown` only when its installed job's report
+is older than 15 minutes). `fix.tool` names the tool that repairs it. Counts and kinds
 only: no account, folder, session id or text.
 ### `switchboard_bugs`: no arguments
 
@@ -939,6 +942,21 @@ arguments it reads `{settings, check_seconds, watched, left_to_dashboards, waiti
 running_commands, due, recent, supported}`; `on`, `stuck_minutes` and `idle_minutes` change it
 (only when the operator asks; `waiting_minutes` and `max_age_hours` are kept for older settings
 and unused), `run: true` checks now and `dry_run: true` lists what a check would do.
+
+### `switchboard_watchdog`: `on?`, `run?`
+
+The watchdog (SB-510): a system job apart from Switchboard, put in place by the installed app (a
+LaunchAgent `ai.passioncode.fabric-switchboard.watchdog` on macOS, the systemd user timer
+`fabric-switchboard-watchdog.timer` on Linux; none on Windows yet), runs `switchboard watchdog
+--once` every five minutes. It checks that Switchboard answers on its control port within five
+seconds, that no act of the duty officer or stop of a board run was left half done for 10
+minutes, that no board run has been gone for 30 and no session has run in two processes for 15.
+It only reports: `watchdog.json`, `switchboard_attention` (reason `watchdog`) and
+`switchboard_health` (check `watchdog`); it never acts and sends nothing. Without arguments it
+reads `{on, job, interval_seconds, report, current}` (`job`: `installed`, `absent`, `unsupported`
+or `unknown`; `report.findings[{code, severity, count, ids, first_seen}]`; `current`: no older than
+15 minutes). `on` changes it, only when the operator asks (`off` also takes the job out;
+`job_change` says what happened), and `run: true` checks once now.
 
 ### `switchboard_balance`: `add?`, `remove?`, `all_new?`, `backup_add?`, `backup_remove?`
 

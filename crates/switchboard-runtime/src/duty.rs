@@ -712,7 +712,7 @@ fn restarts(lines: &[Value], session: &str, now: i64) -> usize {
 /// SB-505: whether `line` is the outcome of `intent`: the same session, act and process, whatever
 /// its stamp (before 0.7.121 the two stamps could differ by the check's duration). A person's
 /// close of a copy, or another check's act on the session, settles nothing.
-fn settles(line: &Value, intent: &Value) -> bool {
+pub(crate) fn settles(line: &Value, intent: &Value) -> bool {
     line.get("outcome").is_some()
         && line["session"] == intent["session"]
         && line["action"] == intent["action"]

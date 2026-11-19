@@ -46,6 +46,7 @@ pub mod launch;
 pub mod launch_keys;
 pub mod launches;
 mod limits;
+pub mod live_ledger;
 pub mod login_path;
 pub mod machine_proof;
 pub mod machine_sessions;
@@ -91,6 +92,8 @@ mod usage_gate;
 pub mod vault_choice;
 pub mod vesta;
 pub mod walks;
+pub mod watchdog;
+pub mod watchdog_job;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -206,6 +209,15 @@ pub enum Operation {
     OwnSignIn {
         #[serde(default)]
         on: Option<bool>,
+    },
+    /// SB-510: the watchdog: `on` sets the switch (and puts in or takes out the system job where
+    /// this owner installed it), `run` runs one check now; neither reads the switch, the job and
+    /// the last report.
+    Watchdog {
+        #[serde(default)]
+        on: Option<bool>,
+        #[serde(default)]
+        run: bool,
     },
     /// A field left out keeps its saved value. Both present serializes as before, so an owner
     /// of an earlier version still understands the full form.
@@ -1436,6 +1448,9 @@ pub struct Runtime {
     /// SB-183: the person's home for the terminal hook's start files; set only by the installed
     /// app (`enable_shell_hook`), so a test, `serve` or a development build never writes one.
     shell_hook: Mutex<Option<shell::install::Host>>,
+    /// SB-510: where the watchdog's system job lives; set only by the installed app
+    /// (`enable_watchdog`), so a test, `serve` or a development build never installs one.
+    watchdog_job: Mutex<Option<watchdog_job::Host>>,
     /// Whether a group bound to an organization existed at the last look, for the hook's
     /// default (written when the first appears, taken out when the last leaves).
     shell_present: Mutex<Option<bool>>,
@@ -1632,6 +1647,7 @@ impl Runtime {
             balancing: Mutex::new(BalanceWatch::default()),
             usage_gate,
             shell_hook: Mutex::new(None),
+            watchdog_job: Mutex::new(None),
             shell_present: Mutex::new(None),
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
@@ -1741,6 +1757,8 @@ impl Runtime {
                 // W3 part 2: two small files of its own.
                 | Operation::Bugs
                 | Operation::Health
+                // SB-510: its own two small files, the control port and the system job.
+                | Operation::Watchdog { .. }
                 // SB-364: the snapshot and the launch records, each its own small file.
                 | Operation::GivenAccounts
                 // SB-359: Keychain reads of Claude Code's items; the store is only read.
@@ -2966,6 +2984,41 @@ impl Runtime {
             },
             || shell::install::Host::process(shell::install::hook_cli()),
         );
+    }
+    /// SB-510: the installed app's owner of the app's own data folder puts the watchdog's system
+    /// job in place (or takes it out while the person turned the watchdog off). The app calls it
+    /// only from an installed build; `serve`, a development build and a test never do.
+    pub fn enable_watchdog(self: &Arc<Self>) {
+        self.enable_watchdog_when(
+            || {
+                std::env::current_exe()
+                    .and_then(|exe| exe.canonicalize())
+                    .is_ok_and(|exe| {
+                        shell::install::installed_app(&exe, dirs::home_dir().as_deref())
+                    })
+            },
+            || watchdog_job::Host::process(shell::install::hook_cli()),
+        );
+    }
+    /// `enable_watchdog` with the installed check and the job's host given: the data folder is
+    /// checked first, then `installed`, and only then is `host` asked for.
+    pub(crate) fn enable_watchdog_when(
+        &self,
+        installed: impl FnOnce() -> bool,
+        host: impl FnOnce() -> Option<watchdog_job::Host>,
+    ) {
+        if !shell::install::is_default_root(&self.root) || !installed() {
+            return;
+        }
+        let Some(host) = host() else {
+            return;
+        };
+        let on = !watchdog::is_off(&self.root);
+        let outcome = blocking::run(|| watchdog_job::apply(&host, on));
+        oplog::event("watchdog_job", &[("outcome", oplog::Field::Code(outcome))]);
+        if let Ok(mut slot) = self.watchdog_job.lock() {
+            *slot = Some(host);
+        }
     }
     /// `enable_shell_hook` with the installed check and the person's home given: the data
     /// folder is checked first, then `installed`, and only then is `host` asked for.
@@ -5540,6 +5593,7 @@ fn attention_report(
     root: &Path,
     store: &Store,
     refresh_state: &refresh::RefreshState,
+    owner_running: bool,
 ) -> Result<Value, String> {
     let snapshot = store.snapshot()?;
     let sign_in = refresh_state.sign_in_known(store);
@@ -5566,6 +5620,8 @@ fn attention_report(
         too_large: &item_size::read(root),
         // SB-509: read only while the proxy's token changed and sessions may be left on the old.
         rotated: token_rotation::sessions(root, &snapshot).as_ref(),
+        // SB-510: the watchdog's current findings; the owner's own codes only offline.
+        watchdog: &watchdog::current(root, now, owner_running).unwrap_or_default(),
         now,
     }))
 }
@@ -5744,20 +5800,35 @@ async fn execute(
             Ok(blocking::run(move || bugs::list(&root, monitor::now())))
         }
         Operation::Health => {
-            let attention = attention_report(root, &store, refresh_state)?;
+            let attention = attention_report(root, &store, refresh_state, runtime.is_some())?;
             let bugs = {
                 let root = root.to_owned();
                 blocking::run(move || bugs::list(&root, monitor::now()))
             };
+            let watchdog = {
+                let host = runtime.and_then(|r| r.watchdog_job.lock().ok().and_then(|h| h.clone()));
+                let root = root.to_owned();
+                let running = runtime.is_some();
+                blocking::run(move || {
+                    let host = host.or_else(|| {
+                        shell::install::is_default_root(&root)
+                            .then(|| watchdog_job::Host::process(None))
+                            .flatten()
+                    });
+                    let installed = host.is_some_and(|h| watchdog_job::state(&h) == "installed");
+                    watchdog::watched(&root, monitor::now(), running, installed)
+                })
+            };
             Ok(health::report(&health::Inputs {
                 attention: &attention,
                 bugs: &bugs,
+                watchdog: &watchdog,
                 owner_running: runtime.is_some(),
                 version: env!("CARGO_PKG_VERSION"),
                 now: monitor::now(),
             }))
         }
-        Operation::Attention => attention_report(root, &store, refresh_state),
+        Operation::Attention => attention_report(root, &store, refresh_state, runtime.is_some()),
         Operation::MonitorStatus => Ok(json!({
             "running": runtime.is_some(), "interval_seconds": monitor::INTERVAL_SECONDS, "idle_interval_seconds": switchboard_core::CHECK_IDLE_SECONDS,
             "decisions": runtime.and_then(|r| r.monitor_decisions.lock().ok().map(|v| v.clone())).unwrap_or_default(),
@@ -7265,9 +7336,28 @@ async fn execute(
                         .into_iter()
                         .map(|(id, _)| id),
                 );
-                let resumable =
-                    resumable::recent(&root, session_watch::now() - resumable::WINDOW_SECONDS);
                 let now = session_watch::now();
+                let mut resumable = resumable::recent(&root, now - resumable::WINDOW_SECONDS);
+                // SB-508: a session the person started that ended outside Switchboard in the
+                // last day, from the ledger; only when the process table was read, so a live
+                // session is never listed as ended (review round 3 of PR #852). One Switchboard
+                // closed on purpose keeps its own line. The newest line of a session wins.
+                if session_watch::table_read(&tree) {
+                    let since = now - session_watch::WINDOW_SECONDS;
+                    let closed =
+                        session_watch::closed_on_purpose(&resumable, &duty::journal(&root), since);
+                    // A session a Switchboard launch or boot resume names has its own line and
+                    // its own continuation (SB-509, SB-450).
+                    let mut launched: HashSet<String> = tree["launches"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|l| l["session_id"].as_str().map(str::to_owned))
+                        .collect();
+                    launched.extend(boot_resume::named_this_boot(&root));
+                    resumable.extend(live_ledger::ended_rows(&root, now, &closed, &launched));
+                    resumable.sort_by_key(|r| std::cmp::Reverse(r["at"].as_i64().unwrap_or(0)));
+                }
                 let monitors: HashMap<String, Value> = tree["live"]
                     .as_array()
                     .into_iter()
@@ -7588,6 +7678,43 @@ async fn execute(
             launch::clean_account(root, &id)?;
             store.remove_delegated(&id, &sender_key)?;
             Ok(json!({"removed": true}))
+        }
+        Operation::Watchdog { on, run } => {
+            let host = runtime.and_then(|r| r.watchdog_job.lock().ok().and_then(|h| h.clone()));
+            let mut job = Value::Null;
+            if let Some(on) = on {
+                watchdog::set(root, on)?;
+                let outcome = match &host {
+                    Some(host) => {
+                        let host = host.clone();
+                        blocking::run(move || watchdog_job::apply(&host, on))
+                    }
+                    // No installed owner here: off still takes out the job the app's own data
+                    // folder installed; on leaves it to the app's next start.
+                    None if !on && shell::install::is_default_root(root) => blocking::run(|| {
+                        watchdog_job::Host::process(None)
+                            .map_or("absent", |h| watchdog_job::apply(&h, false))
+                    }),
+                    None => "not_installed_here",
+                };
+                oplog::event("watchdog_job", &[("outcome", oplog::Field::Code(outcome))]);
+                job = json!(outcome);
+            }
+            let mut value = json!({});
+            if run {
+                value["run"] = watchdog::once(root, monitor::now()).await;
+            }
+            let host = host.or_else(|| {
+                shell::install::is_default_root(root)
+                    .then(|| watchdog_job::Host::process(None))
+                    .flatten()
+            });
+            let mut answer = watchdog::status(root, host.as_ref(), monitor::now());
+            answer["job_change"] = job;
+            if run {
+                answer["run"] = value["run"].take();
+            }
+            Ok(answer)
         }
         Operation::OwnSignIn { on } => {
             let value = match on {
@@ -11127,6 +11254,74 @@ mod owner_tests {
         assert!(!shell::install::record_path(root.path()).exists());
         assert!(runtime.shell_hook_notice().is_none());
         drop(work);
+    }
+
+    /// SB-510: an owner over a data folder that is not the app's own never installs the
+    /// watchdog's job, whatever counts as installed; the switch and a run go through the
+    /// operation, and a run answers with the report it wrote.
+    #[tokio::test]
+    async fn the_watchdog_job_is_never_installed_from_another_data_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let asked = std::sync::atomic::AtomicBool::new(false);
+        runtime.enable_watchdog_when(
+            || true,
+            || {
+                asked.store(true, std::sync::atomic::Ordering::SeqCst);
+                None
+            },
+        );
+        assert!(!asked.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(runtime.watchdog_job.lock().unwrap().is_none());
+        let status = runtime
+            .execute(Operation::Watchdog {
+                on: None,
+                run: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (status["on"].clone(), status["job"].clone()),
+            (json!(true), json!("unknown"))
+        );
+        let off = runtime
+            .execute(Operation::Watchdog {
+                on: Some(false),
+                run: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(off["on"], false);
+        assert_eq!(off["job_change"], "not_installed_here");
+        runtime
+            .execute(Operation::Watchdog {
+                on: Some(true),
+                run: false,
+            })
+            .await
+            .unwrap();
+        // A run beside an owner that has just started: no finding about the owner yet.
+        let run = bugs::Run {
+            pid: std::process::id(),
+            started_at: monitor::now(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            clean: false,
+        };
+        std::fs::write(
+            root.path().join(bugs::RUN_FILE),
+            serde_json::to_vec(&run).unwrap(),
+        )
+        .unwrap();
+        let ran = runtime
+            .execute(Operation::Watchdog {
+                on: None,
+                run: true,
+            })
+            .await
+            .unwrap();
+        assert_eq!(ran["run"]["checked"], true);
+        assert!(ran["report"]["checked_at"].is_i64());
+        assert_eq!(ran["current"], true);
     }
 
     /// SB-183 (node A-3): the data-folder guard holds on its own. Even when the app counts as

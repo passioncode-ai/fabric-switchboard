@@ -38,6 +38,11 @@ pub struct Run {
 /// The data folder of the owner that wrote this process's run file, for the hard exit.
 static ROOT: OnceLock<PathBuf> = OnceLock::new();
 
+/// SB-510: the owner's last run as `owner-run.json` records it, for the watchdog.
+pub fn last_run(root: &Path) -> Option<Run> {
+    read_run(root)
+}
+
 fn read_run(root: &Path) -> Option<Run> {
     std::fs::read(root.join(RUN_FILE))
         .ok()
@@ -51,12 +56,12 @@ fn write_run(root: &Path, run: &Run) {
 }
 
 #[cfg(unix)]
-fn alive(pid: u32) -> bool {
+pub(crate) fn alive(pid: u32) -> bool {
     // SAFETY: signal 0 only asks whether the process exists.
     pid != 0 && unsafe { libc::kill(pid as libc::pid_t, 0) } == 0
 }
 #[cfg(not(unix))]
-fn alive(_: u32) -> bool {
+pub(crate) fn alive(_: u32) -> bool {
     false
 }
 

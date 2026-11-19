@@ -458,6 +458,14 @@ fn this_boot(lines: &[Value], boot: i64) -> (HashSet<String>, Vec<Value>) {
     (named, open)
 }
 
+/// The sessions this boot's journal names (continued, tried or settled), for the Sessions page:
+/// a session boot resume took up is not also listed as ended outside Switchboard (SB-508).
+pub fn named_this_boot(root: &Path) -> HashSet<String> {
+    boot()
+        .map(|b| this_boot(&journal(root), b).0)
+        .unwrap_or_default()
+}
+
 /// One pass after a boot: settles intents a quit cut, then continues what the rule finds.
 /// Answers what it did. Never acts on a ledger of this boot.
 pub fn run(root: &Path, boot: i64, now: i64, machine: &dyn Machine) -> Value {
