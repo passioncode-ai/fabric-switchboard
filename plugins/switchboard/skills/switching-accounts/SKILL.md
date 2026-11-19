@@ -43,7 +43,7 @@ the launch injected it with the session and data folder set explicitly.
 
 | Tool | Writes | Use it to |
 |---|---|---|
-| `switchboard_status` | no | start every task: runtime, this session, routes, active rules, automatic switching |
+| `switchboard_status` | no | start every task: runtime (with `runtime.owner`: whether an owner answers, its pid, version and how it runs), this session, routes, active rules, automatic switching |
 | `switchboard_accounts` | no | list accounts (no credentials), optional `provider` |
 | `switchboard_usage` | no | remaining quota per window; `refresh` asks the provider |
 | `switchboard_switch` | yes | choose the account for the next request |
@@ -135,6 +135,10 @@ Call `switchboard_status` before anything else and read:
 
 - `runtime.online` false: the desktop app and `switchboard serve` are both stopped, so
   managed sessions cannot route and automatic switching is paused. Reads come from local metadata.
+- `runtime.owner`: `state` `answers`, `not_answering` (its process runs; `reason` says why,
+  `starting` included), `gone` or `absent`, with `pid`, `version`, `kind` (`app` or `serve`) and
+  `supervisor` (`launchd`, `systemd` or null). It is read without starting an owner: never start
+  one because of it while `state` is `answers` or `not_answering`.
 - `session.mode`: `managed` (with `provider` and `pool`: switching reaches this session),
   `isolated` (pinned to one `account_id`: nothing here changes it), or `native` (the
   ordinary CLI login; `provider` may be null).

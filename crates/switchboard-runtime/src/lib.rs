@@ -58,6 +58,7 @@ pub mod observatory_keys;
 pub mod onboarding;
 pub mod oplog;
 pub mod own_sign_in;
+pub mod owner_status;
 pub mod person;
 pub mod person_errors;
 pub mod projects;
@@ -5677,9 +5678,11 @@ async fn execute(
         }
         // PRD-12: `owner_version` names the owner build that answered (the client's may differ;
         // null offline, where no owner answered) and `online` says whether an owner runs,
-        // beside the display string `live_mode`.
+        // beside the display string `live_mode`. SB-576: the owner's pid, the supervisor that
+        // starts it again (`launchd`, `systemd`, none) and when it started; `switchboard status`
+        // and MCP add the `owner` block (`owner_status`).
         Operation::Status => Ok(
-            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "owner_kind": runtime.map(|r| if r.app_doors().is_some() { "app" } else { "serve" }), "owner_copy": runtime.and_then(|_| copies::this_copy()).map(|c| c.to_string_lossy().into_owned()), "owner_updates_copy": runtime.map(|r| r.app_doors().is_some() || serve_update::updates_copy(root)), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok(), "keychain_too_large": item_size::status(root)}),
+            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "owner_kind": runtime.map(|r| if r.app_doors().is_some() { "app" } else { "serve" }), "owner_pid": runtime.map(|_| std::process::id()), "owner_supervisor": runtime.and_then(|_| serve_update::supervisor_now()), "owner_started_at": runtime.and_then(|_| bugs::last_run(root)).filter(|r| r.pid == std::process::id()).map(|r| r.started_at), "owner_copy": runtime.and_then(|_| copies::this_copy()).map(|c| c.to_string_lossy().into_owned()), "owner_updates_copy": runtime.map(|r| r.app_doors().is_some() || serve_update::updates_copy(root)), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok(), "keychain_too_large": item_size::status(root)}),
         ),
         Operation::CurrentAccounts => match runtime {
             Some(runtime) => runtime.current_accounts(),
@@ -7541,8 +7544,26 @@ async fn execute(
         })),
         Operation::Targets { probe } => {
             let root = root.to_owned();
+            // SB-577: the machine groups here, to find each target's one-minute read.
+            let groups = store.snapshot()?.machines;
             blocking::run(move || -> Result<Value, String> {
                 let mut machines = targets::collapse(targets::known(&root), &targets::ssh_identity);
+                let reads = remote_usage::read(&root);
+                let now = monitor::now();
+                for t in &mut machines {
+                    let mut names: Vec<String> =
+                        vec![t["machine"].as_str().unwrap_or_default().to_owned()];
+                    names.extend(
+                        t["aliases"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|a| a.as_str().map(str::to_owned)),
+                    );
+                    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+                    let machine = remote_usage::machine_named(&groups, &names);
+                    t["accounts_by_group"] = remote_usage::accounts_by_group(&reads, machine, now);
+                }
                 if probe {
                     for t in &mut machines {
                         let machine = t["machine"].as_str().unwrap_or_default().to_owned();

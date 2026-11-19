@@ -626,6 +626,9 @@ async fn managed_session_reads_usage_and_switches_only_inside_its_pool() {
     );
     let (_, status) = agent.tool("switchboard_status", json!({}));
     assert_eq!(status["runtime"]["online"], true);
+    // SB-576: the owner this test runs answers and names its process.
+    assert_eq!(status["runtime"]["owner"]["state"], "answers", "{status}");
+    assert_eq!(status["runtime"]["owner"]["pid"], std::process::id());
     assert_eq!(
         status["session"],
         json!({"mode":"managed","provider":"claude","pool":"work"})

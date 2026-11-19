@@ -90,9 +90,55 @@ pub fn status(target: &str, program: &Program<'_>, run: &Run<'_>) -> Result<Valu
         "target": target,
         "accounts": accounts,
         "groups": groups,
+        // SB-577: from this same read, how many accounts that can start a session serve each
+        // group there, per provider, in the shape `targets` gives from the one-minute reads.
+        "accounts_by_group": {"state": "known", "reason": null, "as_of": crate::monitor::now(),
+            "groups": live_groups(&there)},
         "organizations": organizations,
         "passioncode": {"connected": there.organizations["passioncode"]["connected"]},
     }))
+}
+
+/// SB-577: the groups of a live read (the default group, then each group there) with their
+/// usable accounts per provider: on, not used on another machine, not given to an agent.
+fn live_groups(there: &There) -> Vec<Value> {
+    use crate::remote_usage::{usable_groups, Group, Member};
+    let ids = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .map(|l| {
+                l.iter()
+                    .filter_map(|x| x.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut groups = vec![Group {
+        pool: crate::balancing::DEFAULT_POOL.to_owned(),
+        shared: Vec::new(),
+        off: false,
+    }];
+    groups.extend(there.groups.iter().filter_map(|g| {
+        Some(Group {
+            pool: g["pool"].as_str()?.to_owned(),
+            shared: ids(&g["shared_accounts"]),
+            off: g["off"] == true,
+        })
+    }));
+    let members: Vec<Member> = there
+        .accounts
+        .iter()
+        .filter_map(|a| {
+            Some(Member {
+                id: a["id"].as_str()?.to_owned(),
+                provider: a["provider"].as_str()?.to_owned(),
+                home: a["pool"].as_str()?.to_owned(),
+                usable: a["enabled"] == true
+                    && a["elsewhere"] != true
+                    && a["assigned_to"].is_null(),
+            })
+        })
+        .collect();
+    usable_groups(&groups, &members)
 }
 
 /// One thing the check found. `kind`:
@@ -396,6 +442,14 @@ mod tests {
         assert_eq!(answer["groups"][0]["folders"], 1);
         assert_eq!(answer["organizations"][0]["name"], "Acme");
         assert_eq!(answer["passioncode"]["connected"], false);
+        // SB-577: from the same read, the default group holds the usable Claude account and the
+        // group there holds none.
+        let by_group = &answer["accounts_by_group"];
+        assert_eq!(by_group["state"], "known");
+        assert_eq!(by_group["groups"][0]["pool"], "default");
+        assert_eq!(by_group["groups"][0]["usable"]["claude"], 1);
+        assert_eq!(by_group["groups"][1]["pool"], "agents");
+        assert_eq!(by_group["groups"][1]["usable"]["claude"], 0);
         assert_eq!(
             status("-oProxyCommand=x", &DEFAULT_APP, &fake(json!([]))).unwrap_err(),
             TARGET_INVALID
