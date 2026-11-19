@@ -526,6 +526,7 @@ pub fn resume_script_for(
             for line in text.lines().filter(|l| l.starts_with("export ")) {
                 if !line.starts_with("export SWITCHBOARD_LAUNCH_ID=")
                     && !line.starts_with("export CLAUDE_CONFIG_DIR=")
+                    && !line.starts_with("export PATH=")
                 {
                     out.push_str(line);
                     out.push('\n');
@@ -537,13 +538,10 @@ pub fn resume_script_for(
             quote(&config.to_string_lossy())
         ));
     }
-    // A Terminal window runs the script without the person's login shell: the PATH a run started
-    // by the owner gets, so the session's hooks find `node` (operator 2026-11-15: every hook failed
-    // with "node: command not found").
-    out.push_str(&format!(
-        "export PATH={}\n",
-        quote(&crate::launch::headless_path(program).to_string_lossy())
-    ));
+    // A Terminal window runs the script with the PATH it was started with; the program's folder
+    // goes first and the person's login PATH fills what that PATH lacks (SB-455), so the session's
+    // hooks find `node` (operator 2026-11-15: every hook failed with "node: command not found").
+    out.push_str(&crate::launch::path_export(program));
     out.push_str(&format!(
         "cd {} || exit 1\n{}",
         quote(cwd),
@@ -1760,7 +1758,7 @@ mod tests {
         assert!(quiet.contains("'/bin/claude' --resume 's-1'\nstatus=$?"));
         // The person's tools are found (hooks run `node`), and an end by a signal closes the
         // window (status 0 for the window settings), not `exec`.
-        assert!(quiet.contains("export PATH='/bin:"));
+        assert!(quiet.contains("export PATH='/bin'\"${PATH:+:$PATH}\"':"));
         assert!(quiet.contains("/opt/homebrew/bin"));
         assert!(!quiet.contains("exec "));
         assert!(quiet.trim_end().ends_with("exit \"$status\""));

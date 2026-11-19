@@ -7,7 +7,7 @@
 //! `~/Library/LaunchAgents/ai.passioncode.fabric-switchboard.watchdog.plist` (`StartInterval`
 //! 300), Switchboard's first own launchd label; on Linux the systemd user units
 //! `~/.config/systemd/user/fabric-switchboard-watchdog.{service,timer}`. Windows has no job yet
-//! (SB-531). `switchboard watchdog off` and `switchboard uninstall` take it out; the app's next
+//! (SB-543). `switchboard watchdog off` and `switchboard uninstall` take it out; the app's next
 //! start writes it again only while the setting is on.
 use std::path::{Path, PathBuf};
 
@@ -212,7 +212,7 @@ pub fn state(host: &Host) -> &'static str {
 }
 
 /// Puts the job in place and loaded: `installed`, `unchanged` (its files already hold this and it
-/// is loaded), `failed`, `unsupported` (Windows, SB-531) or `no_program` (no CLI to run).
+/// is loaded), `failed`, `unsupported` (Windows, SB-543) or `no_program` (no CLI to run).
 pub fn install(host: &Host) -> &'static str {
     if host.os == Os::Other {
         return "unsupported";

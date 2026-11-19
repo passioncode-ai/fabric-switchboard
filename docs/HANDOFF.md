@@ -7,10 +7,10 @@
 
 - **Asked.** Coordinator, from plan 10 §B (`origin/sb-plan-10`): continue a session nobody closed or launched after a reboot or a crash (SB-508); a watchdog outside the owner that reports the owner stopping, acts left half done, gone board runs and duplicates (SB-510). Lead's correction: the watchdog reports only through `watchdog.json`, Needs attention and `agent-health/1`, never a messenger.
 - **Built.** `live_ledger.rs` (`live-sessions.json`, fed by the session watch; `resumable::locate` reads it before a limit stop); `watchdog.rs` (`watchdog --once`, `watchdog.json`, `current` for readers), `control::probe` (identity only, 5 s), `watchdog_job.rs` (macOS LaunchAgent `ai.passioncode.fabric-switchboard.watchdog`, Linux systemd user timer), `Runtime::enable_watchdog` from the installed app only, `Operation::Watchdog`, CLI `watchdog [on|off]`/`--once`, MCP `switchboard_watchdog`, attention reason `watchdog`, health check `watchdog`, uninstall. Contract: [CONTRACTS → Live sessions and the watchdog](CONTRACTS.md#live-sessions-and-the-watchdog-sb-508-sb-510-plan-10-b).
-- **Decisions.** Only dispatched gone runs count (others are history, as in Needs attention). The owner's watch findings are read only while the owner answers. An owner record not clean whose process runs reads as `starting` for 2 minutes. The ledger's `last_seen` is refreshed hourly to keep the idle budget. Windows has no job: SB-531.
+- **Decisions.** Only dispatched gone runs count (others are history, as in Needs attention). The owner's watch findings are read only while the owner answers. An owner record not clean whose process runs reads as `starting` for 2 minutes. The ledger's `last_seen` is refreshed hourly to keep the idle budget. Windows has no job: SB-543.
 - **Checks.** See the PR (Studio gate, EXIT line).
 
-**Exact next task.** Review PR #852 and merge it once its gate reads EXIT 0 on the merged head; after the release is installed on the operator's Mac, check `launchctl print gui/$(id -u)/ai.passioncode.fabric-switchboard.watchdog` and `switchboard watchdog`; then SB-531 (Windows scheduled task).
+**Exact next task.** Review PR #852 and merge it once its gate reads EXIT 0 on the merged head; after the release is installed on the operator's Mac, check `launchctl print gui/$(id -u)/ai.passioncode.fabric-switchboard.watchdog` and `switchboard watchdog`; then SB-543 (Windows scheduled task).
 
 ## 2026-11-18: SB-452 a launch keeps its group's route, SB-453 a short rate limit of the key is waited out, on branch `tokens-spend`
 

@@ -1104,6 +1104,7 @@ mod tests {
                 launch_id: None,
                 limit: None,
                 before: None,
+                launch_ids: None,
             },
             Operation::MonitorStatus,
         ] {
@@ -1131,6 +1132,7 @@ mod tests {
                 launch_id: None,
                 limit: None,
                 before: None,
+                launch_ids: None,
             })
             .await
             .unwrap();
