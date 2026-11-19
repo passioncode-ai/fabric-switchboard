@@ -28,8 +28,10 @@ Since SB-517 every call is checked against its tool's `inputSchema` before it ru
 and no argument the schema does not name). A fault is a result with `isError: true` whose
 `structuredContent.error` is `{code: "invalid_arguments", field, message}`, the field as a path
 (`executors[0].agent`, `decision.by`), and nothing ran. A `decision` takes the operator's words
-as `by`, `instruction`, `at` and `source`, and nothing else. An operation that refuses as data (`{state: "refused", reason}`) reaches
-an agent as `isError: true` with `structuredContent.error.code` set to its `reason`.
+as `by`, `instruction`, `at` and `source`, and nothing else. A tool that would answer a refusal as data (`{state: "refused", reason}`,
+as `switchboard dispatch` does on the CLI) answers an agent `isError: true` with
+`structuredContent.error.code` set to its `reason`; no tool answers that shape yet, so this guards
+the dispatch tools to come.
 
 ## Contents
 
@@ -499,8 +501,9 @@ Agents page, or `switchboard agents enable|disable|default`).
 used_percent, resets_at}]`, asked of Kimi at this call) and `error` when Kimi refused the login,
 did not answer, or the login waits for Kimi to renew it (launching the account once does).
 `current` is the ordinary `kimi` (`~/.kimi-code`) the same way, shown and never switched. No
-token is returned or handed to any agent; signing in, launching and removing accounts are the
-operator's (the app, or `switchboard kimi login|launch|remove`).
+token is returned or handed to any agent; signing in and launching accounts are the operator's
+(the app, or `switchboard kimi login|launch`). Removing one, when the operator asks, is
+`switchboard_kimi_remove`.
 
 ### `switchboard_project_suggestions`: no arguments
 
@@ -1029,8 +1032,9 @@ its own key inside Hermes, which this server never sets.
 
 Only when the operator asks. `model` is an OpenRouter id (`vendor/model`, for example
 `moonshotai/kimi-k2` or `anthropic/claude-sonnet-4.5`); agents launched on the operator's key
-start on it; with `pool`, the model of that group's own key. Refuses a malformed id. Saving or removing the key itself is the operator's own
-step (the app, or `switchboard agents openrouter set|remove`), never this server.
+start on it; with `pool`, the model of that group's own key. Refuses a malformed id. Saving the key itself is the operator's own
+step (the app, or `switchboard agents openrouter set`), never this server; removing it, when the
+operator asks, is `switchboard_openrouter_remove`.
 
 ## Refusals
 

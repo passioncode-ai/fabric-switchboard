@@ -213,7 +213,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_observatory_key_add","title":"Add a key from Observatory","description":"Saves a key Project Observatory holds in Switchboard by its slot (project/env/NAME), so an agent starts on it at once. The value goes from Observatory's vault to Switchboard's through a pipe; it never appears in an argument, a file, a log or this answer. An Anthropic key becomes an account in the pay-per-token group (to: account, the default), counted against that group's daily ceiling; to: agent or both also saves it as a named key Hermes runs on directly (no ceiling counts that). An OpenRouter key becomes this computer's OpenRouter key, or a group's with pool. An OpenAI key is refused for now. A name or key already saved is kept unless replace is true. The answer lists what was saved and the next steps.","inputSchema":{"type":"object","properties":{"slot":{"type":"string","description":"project/env/NAME, as switchboard_observatory_keys lists it."},"to":{"type":"string","enum":["account","agent","both"],"description":"For an Anthropic key; default account."},"as":{"type":"string","description":"The account's name, or the named key's name; default from the project."},"pool":{"type":"string","description":"For an OpenRouter key: the group id whose folders run on it."},"model":{"type":"string","description":"The named key's default model."},"replace":{"type":"boolean","description":"Replace a named key or an OpenRouter key already saved there."}},"required":["slot"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_launch_keys","title":"Keys an agent can start on","description":"Every key an agent can start on here, by name and never a value: the OpenRouter key a launch in the folder spends, marked default (its group's own, else this computer's), the other OpenRouter keys with the group whose folders use them (why_not), then the Anthropic keys for an agent that takes one (Hermes), and for Claude Code and Hermes the pay-per-token group's Claude API keys as kind group (pool, group, account_id, selected; usable once the group is on, has a daily ceiling, holds the folder and has the key selected, else why_not). Every key carries metered: whether a ceiling counts it (an Anthropic key's direct launch does not). none_usable says no key is saved to start on. No MCP tool launches an agent yet: launch from the window, or with switchboard agents launch on the default OpenRouter key, or with --anthropic and a key's name.","inputSchema":{"type":"object","properties":{"agent":{"type":"string","description":"The agent's catalog id, such as hermes."},"folder":{"type":"string","description":"The absolute folder it would start in; without it, this computer's key counts as the default."}},"required":["agent"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_agents","title":"Coding agents on this computer","description":"The coding agents Switchboard knows: which are installed here, which the operator enabled for taking over work (fallback chains and switchboard continue; account switching is separate), the machine's default agent (null is Auto: switchboard continue without an account hands work to it, and Fabric starts with it unless a project sets its own), the command Switchboard runs for each, and the recommended OpenRouter models. Changing these is the operator's (the Agents page or switchboard agents enable|disable|default).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_kimi_accounts","title":"Kimi Code accounts","description":"The operator's Kimi Code subscription accounts saved in Switchboard: label, region, membership tier and each plan window's used percent and reset (5-hour, 7-day, monthly), asked of Kimi; plus the ordinary kimi CLI's sign-in. Never a token. Signing in, launching and removing are the operator's (the app or switchboard kimi).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_kimi_accounts","title":"Kimi Code accounts","description":"The operator's Kimi Code subscription accounts saved in Switchboard: label, region, membership tier and each plan window's used percent and reset (5-hour, 7-day, monthly), asked of Kimi; plus the ordinary kimi CLI's sign-in. Never a token. Signing in and launching are the operator's (the app or switchboard kimi); remove one with switchboard_kimi_remove when the operator asks.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_kimi_login","title":"Sign in a Kimi Code account","description":"Start the official Kimi Code sign-in for a new account (action begin: label, region; the person finishes it in the browser), follow it (status, finish once the person signed in, cancel), or sign an existing account in again (again: id). The person signs in; this never takes a password or a token. Only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["begin","status","finish","cancel","again"]},"id":{"type":"string","minLength":1},"label":{"type":"string","maxLength":80},"region":{"type":"string","enum":["mainland-cn","global"],"description":"mainland-cn (kimi.com, the default) or global (kimi.ai)."}},"required":["action"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_kimi_rename","title":"Rename a Kimi Code account","description":"Rename a saved Kimi Code account. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","minLength":1,"description":"The account id from switchboard_kimi_accounts."},"label":{"type":"string","minLength":1,"maxLength":80}},"required":["id","label"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_kimi_remove","title":"Remove a Kimi Code account","description":"Forget a saved Kimi Code account and delete its home here, as the window's Remove does; this cannot be undone (sign the account in again to bring it back). Refused while a kimi session runs in it. removed is false when no such account was saved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":200,"description":"The account id from switchboard_kimi_accounts."}},"required":["id"],"additionalProperties":false}})),
@@ -470,8 +470,16 @@ pub(crate) fn validate(schema: &Value, value: &Value, field: &str) -> Result<(),
                 }
             }
             let properties = schema.get("properties").and_then(Value::as_object);
+            let required = |key: &str| {
+                schema["required"]
+                    .as_array()
+                    .is_some_and(|r| r.iter().any(|k| k == key))
+            };
             for (key, v) in map {
                 match properties.and_then(|p| p.get(key)) {
+                    // Review round 1: null for an optional argument is absent, as the handlers
+                    // and `writes` read it (`feed`, `ceiling_set` without decision).
+                    Some(_) if v.is_null() && !required(key) => {}
                     Some(property) => validate(property, v, &child(key))?,
                     None if schema.get("additionalProperties") == Some(&Value::Bool(false)) => {
                         let known: Vec<&str> = properties
@@ -2966,6 +2974,19 @@ mod checks {
         let check = |v: Value| validate(&schema, &v, "").map_err(|i| (i.field, i.message));
         assert_eq!(check(json!({"on": true})), Ok(()));
         assert_eq!(check(json!({"on": true, "usd": null, "n": 720})), Ok(()));
+        // Null for an optional argument is absent; for a required one it is checked.
+        assert_eq!(
+            check(json!({"on": true, "n": null, "kind": null, "list": null})),
+            Ok(())
+        );
+        assert_eq!(
+            check(json!({"on": null})),
+            Err(("on".into(), "on must be true or false.".into()))
+        );
+        assert_eq!(
+            check(json!({"on": true, "extra": null})).unwrap_err().field,
+            "extra"
+        );
         assert_eq!(
             check(json!({})),
             Err(("on".into(), "on is required.".into()))
