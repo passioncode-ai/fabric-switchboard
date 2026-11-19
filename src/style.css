@@ -280,7 +280,9 @@ a.address { color: var(--link); text-decoration: underline; text-underline-offse
 .row-sub:empty { display: none; }
 .selected-badge { color: var(--accent-text); border-color: var(--accent-text); background: var(--accent-weak); }
 .danger-badge { color: var(--danger); border-color: var(--danger); background: var(--danger-weak); }
-.row-usage { display: grid; gap: 2px; min-width: 0; padding: 2px 0; border: 0; background: transparent; color: inherit; text-align: left; font-size: var(--t-chip); line-height: 1.35; }
+/* SB-550: the cell grows with its lines and starts at its top: a button centres its content, so a
+   line taller than the box it measured was drawn over the bar. */
+.row-usage { display: grid; gap: 2px; align-content: start; align-self: center; height: auto; min-width: 0; padding: 2px 0; border: 0; background: transparent; color: inherit; text-align: left; font-size: var(--t-chip); line-height: 1.35; }
 button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; text-underline-offset: 3px; }
 /* Compact quota cell: line one is meter + share + age, line two the one time that matters. */
 .usage-line { display: grid; grid-template-columns: minmax(32px, 1fr) 4.5ch 7.5ch; align-items: center; gap: var(--space-2); color: var(--muted); white-space: nowrap; min-width: 0; }
@@ -294,6 +296,8 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .usage-age.is-warn { color: var(--warn); }
 .usage-line .usage-unknown { font-size: var(--t-chip); }
 .usage-sub { color: var(--muted); min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* SB-550: the line under a remote account's bar names the machine and wraps below it whole. */
+.usage-sub.usage-remote { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; white-space: normal; }
 .usage-countdown { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .usage-sub.is-blocked, .usage-sub.is-blocked .usage-countdown { color: var(--danger); }
 .usage-sub.is-failed, .usage-sub.is-sign_in { color: var(--danger); }

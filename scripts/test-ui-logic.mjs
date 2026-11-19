@@ -1000,7 +1000,7 @@ check(() => {
   // SB-227: the minute's background pass reads the PassionCode.ai status again while Organizations
   // is on screen (a local file read), so a mark a background read made shows without reopening it.
   assert.deepEqual(logic.backgroundReads('orgs'), ['onboarding', 'passioncode']);
-  assert.deepEqual(logic.backgroundReads('accounts'), ['onboarding']);
+  assert.deepEqual(logic.backgroundReads('accounts'), ['onboarding', 'machines']);
   assert.deepEqual(logic.backgroundReads('activity'), ['sessions']);
   assert.deepEqual(logic.backgroundReads('agents'), ['ceilings']);
   assert.deepEqual(logic.backgroundReads('tokens'), ['ceilings']);
@@ -2035,8 +2035,8 @@ check(() => {
   assert.ok(logic.tokensSpendLine(null, true).text.startsWith('On, but refusing every request'));
   assert.equal(logic.ceilingQuestion({ value: 5, kind: 'project', scope: 'Pay-per-token keys', tokens: true }).text, 'The daily ceiling of Pay-per-token keys, $5.00, is reached.');
   // Groups reads the ceilings again only while the pay-per-token group shows its spending.
-  assert.deepEqual(logic.backgroundReads('projects'), []);
-  assert.deepEqual(logic.backgroundReads('projects', true), ['ceilings']);
+  assert.deepEqual(logic.backgroundReads('projects'), ['machines']);
+  assert.deepEqual(logic.backgroundReads('projects', true), ['ceilings', 'machines']);
   // A move the pay-per-token rule refuses is locked: a key goes only there, nothing else goes there, its keys stay.
   const groups = [{ pool: 'apps', name: 'Apps' }, { pool: 'tokens', name: 'Pay-per-token keys', tokens: true }];
   const pick = (targets) => Object.fromEntries(targets.map((x) => [x.pool, x.blocked]));
@@ -2099,5 +2099,63 @@ check(() => {
   assert.deepEqual(logic.movableAccounts(snap).map((a) => a.id), ['a', 'd'], 'a subscription that is on here, or one on another machine; never a key, one off or one marked elsewhere without a machine');
   assert.deepEqual(logic.movableAccounts(snap, machines[1]).map((a) => a.id), ['a'], 'never one already on the machine it goes to');
   for (const c of choices) assert.ok(!c.detail.includes('\u2014'));
+});
+// SB-550 (DEC-0033): an account on another machine shows its copy there: bar, share and age from
+// the last read, the read's age under it; this computer's own older check only while there is no
+// read, and said so. The machine card says what the last read found; Needs attention takes the
+// machine reasons.
+check(() => {
+  i18nForShell.setLocale('en');
+  const now = 100_000;
+  const read = (over) => ({ used_percent: 42, observed_at: now - 300, usage_status: 'ok', enabled: true, as_of: now - 120, tried_at: now - 120, reason: null, ...over });
+  const own = { used: 17, observedAt: now - 8 * 86400 };
+  const shared = logic.remoteUsageView(read({}), own, 'studio', now);
+  assert.deepEqual([shared.percent, shared.at, shared.tone, shared.ownCheck], [42, now - 300, 'available', false], "the copy there, never this computer's old check");
+  assert.equal(shared.line, 'On studio, read 2 min ago');
+  assert.equal(logic.remoteUsageView(read({ as_of: now - 20 }), own, 'studio', now).line, 'On studio, read just now');
+  assert.equal(logic.remoteUsageView(read({ observed_at: undefined }), null, 'studio', now).at, now - 120, 'without its own time, the read time');
+  assert.equal(logic.remoteUsageView(read({ used_percent: 85 }), null, 'studio', now).tone, 'low');
+  assert.equal(logic.remoteUsageView(read({ used_percent: 100 }), null, 'studio', now).tone, 'blocked');
+  const rejected = logic.remoteUsageView(read({ usage_status: 'rejected' }), null, 'studio', now);
+  assert.deepEqual([rejected.tone, rejected.line], ['failed', 'Needs a sign-in on studio']);
+  const silent = logic.remoteUsageView(read({ reason: 'unreachable', as_of: now - 3 * 3600 }), own, 'studio', now);
+  assert.deepEqual([silent.percent, silent.tone, silent.line], [42, 'stale', 'Not read: studio did not answer, last read 3 h ago']);
+  // Review of PR #861 (P2-4): once that machine answered, its read speaks alone, with or without a
+  // figure: this computer's own 17% from 8 days ago never comes back.
+  const signIn = logic.remoteUsageView(read({ used_percent: null, usage_status: 'rejected' }), own, 'studio', now);
+  assert.deepEqual([signIn.percent, signIn.tone, signIn.ownCheck, signIn.line], [null, 'failed', false, 'Needs a sign-in on studio']);
+  const unmeasured = logic.remoteUsageView(read({ used_percent: null }), own, 'studio', now);
+  assert.deepEqual([unmeasured.percent, unmeasured.at, unmeasured.tone, unmeasured.ownCheck, unmeasured.line], [null, null, 'unknown', false, 'studio has no usage figure for it yet']);
+  const noCopy = logic.remoteUsageView(read({ used_percent: null, usage_status: null, enabled: null, listed: false }), own, 'studio', now);
+  assert.deepEqual([noCopy.percent, noCopy.ownCheck, noCopy.line], [null, false, 'Not in the account list of studio at its last read']);
+  const offThere = logic.remoteUsageView(read({ used_percent: null, enabled: false }), own, 'studio', now);
+  assert.deepEqual([offThere.percent, offThere.ownCheck, offThere.line], [null, false, 'Turned off on studio']);
+  const neverAnswered = logic.remoteUsageView(read({ used_percent: null, as_of: null, reason: 'unreachable' }), own, 'studio', now);
+  assert.deepEqual([neverAnswered.percent, neverAnswered.ownCheck, neverAnswered.line], [17, true, "This computer's last check · Not read yet: studio did not answer"]);
+  const before = logic.remoteUsageView(null, own, 'studio', now);
+  assert.deepEqual([before.percent, before.tone, before.ownCheck], [17, 'stale', true]);
+  assert.equal(before.line, "This computer's last check · Not read on studio yet");
+  const nothing = logic.remoteUsageView(null, null, 'studio', now);
+  assert.deepEqual([nothing.percent, nothing.tone, nothing.line], [null, 'unknown', 'Not read on studio yet']);
+  // The machine card's line.
+  const machineRead = (over) => ({ as_of: now - 30, tried_at: now - 30, reason: null, failures: 0, call: 'status', sessions: { counts: { needs_you: 1, running: 3, waiting: 0, ended: 9 }, troubled: [] }, health: { state: 'ok', failing: [] }, ...over });
+  assert.equal(logic.machineReadLine(machineRead({}), now), 'Sessions: 3 running, 0 waiting, 1 need you. No failing health check there. Read just now.');
+  assert.equal(logic.machineReadLine(machineRead({ health: { state: 'fail', failing: ['crashes', 'owner'] } }), now), 'Sessions: 3 running, 0 waiting, 1 need you. Needs a look there: it crashed in the last day, its Switchboard is not running. Read just now.');
+  assert.equal(logic.machineReadLine(machineRead({ call: 'accounts', sessions: null, health: null, as_of: now - 600 }), now), 'Its Switchboard is older and does not report its sessions. Update it there. Read 10 min ago.');
+  assert.equal(logic.machineReadLine(machineRead({ failures: 3, reason: 'unreachable', as_of: now - 7200 }), now), 'Not answering: three reads in a row failed. Last answer 2 h ago.');
+  assert.equal(logic.machineReadLine(machineRead({ failures: 3, as_of: null }), now), 'Not answering: three reads in a row failed.');
+  assert.equal(logic.machineReadLine(null, now), '');
+  assert.equal(logic.healthCheckText('something_new'), 'something_new', 'an unknown check by its id');
+  // Needs attention keeps the machine items and words them.
+  const items = logic.attentionView({ items: ['machine_unreachable', 'machine_health', 'machine_sessions'].map((reason, i) => ({ account_id: null, label: 'studio', provider: null, pool: null, reason, since: 9000, count: i, action: { tool: 'switchboard_machines', window: reason === 'machine_sessions' ? 'open_sessions' : 'open_machines' } })) }).items;
+  assert.deepEqual(items.map((i) => i.reason), ['machine_unreachable', 'machine_health', 'machine_sessions']);
+  assert.equal(items[0].label, 'studio');
+  for (const item of items) { const line = logic.attentionReasonText(item.reason); assert.ok(line && !line.includes('\u2014') && !line.includes('studio'), item.reason); }
+  for (const v of [shared, silent, before, nothing, signIn, unmeasured, noCopy, offThere, neverAnswered]) assert.ok(!v.line.includes('\u2014'));
+  assert.equal(logic.attentionReasonText('machine_sessions'), 'Sessions on this machine need a look: a second copy, or a board run that has gone quiet.');
+  i18nForShell.setLocale('ru');
+  assert.equal(logic.remoteUsageView(read({}), own, 'studio', now).line, 'На машине studio, прочитано 2 мин назад');
+  assert.equal(logic.attentionReasonText('machine_unreachable'), 'Switchboard на этой машине не ответил на три чтения подряд. Проверьте, что машина включена и доступна по ssh.');
+  i18nForShell.setLocale('en');
 });
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

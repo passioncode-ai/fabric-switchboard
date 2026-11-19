@@ -2,7 +2,7 @@
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { BalanceStatus, FeedEntry, FeedStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView, Placement } from './types';
 import type { SessionGroup, SessionRow, MachineReadStatus } from './types';
-import type { Machine, MachineCopy, RemoteRead, Target, RemoteStatus, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
+import type { Machine, MachineCopy, MachineRead, RemoteRead, Target, RemoteStatus, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, UpdateOwner, DebNotice, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
 
@@ -430,12 +430,13 @@ export function groupSeatsEndedText(_snapshot: OrgSnapshot, group: { name: strin
  * the session list on Activity (SB-104), the ceilings on Agents and API keys (C-7, local
  * `spend.json`), and the PassionCode.ai status on Organizations (SB-227: a local file read, so a
  * mark a background read made shows without reopening the page). */
-export type BackgroundRead = 'onboarding' | 'sessions' | 'ceilings' | 'passioncode' | 'session_rows';
+export type BackgroundRead = 'onboarding' | 'sessions' | 'ceilings' | 'passioncode' | 'session_rows' | 'machines';
 export function backgroundReads(page: string, tokensGroup = false): BackgroundRead[] {
   // SB-401: Groups reads the ceilings again while the pay-per-token group shows its spending.
-  if (page === 'projects') return tokensGroup ? ['ceilings'] : [];
+  // SB-550: Accounts and Groups read the other machines' last read (a file) every minute.
+  if (page === 'projects') return tokensGroup ? ['ceilings', 'machines'] : ['machines'];
   if (page === 'orgs') return ['onboarding', 'passioncode'];
-  if (page === 'accounts') return ['onboarding'];
+  if (page === 'accounts') return ['onboarding', 'machines'];
   if (page === 'activity') return ['sessions'];
   if (page === 'sessions') return ['session_rows'];
   if (page === 'agents' || page === 'tokens') return ['ceilings'];
@@ -527,7 +528,7 @@ export function accountMatches(account: Pick<Account, 'id' | 'label' | 'external
   return words.every((word) => text.includes(word));
 }
 
-const ATTENTION_REASONS: AttentionReason[] = ['keychain_too_large', 'token_rotated', 'session_duplicate', 'session_stuck', 'session_gone', 'session_continuable', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question'];
+const ATTENTION_REASONS: AttentionReason[] = ['keychain_too_large', 'token_rotated', 'session_duplicate', 'session_stuck', 'session_gone', 'session_continuable', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'machine_unreachable', 'machine_health', 'machine_sessions', 'key_outside_tokens', 'ceiling_question'];
 const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'continue_session', 'restart_wave', 'open_capacity', 'move_tokens', 'none'];
 /**
  * WF-3 (SB-365): the answer of the `attention` command, kept to the fields the window knows. An
@@ -649,6 +650,9 @@ export function attentionReasonText(reason: AttentionReason): string {
     case 'usage_failing': return t('Its usage check has failed for over an hour.');
     case 'move_unknown': return t('A move to another machine did not report how it ended. Check it under Other machines.');
     case 'refused_there': return t('The provider refused its copy on the other machine: it needs a sign-in there.');
+    case 'machine_unreachable': return t("This machine's Switchboard has not answered three reads in a row. Check that the machine is on and reachable over ssh.");
+    case 'machine_health': return t("This machine's Switchboard reports a failing health check. Open Other machines to see which.");
+    case 'machine_sessions': return t('Sessions on this machine need a look: a second copy, or a board run that has gone quiet.');
     case 'key_outside_tokens': return t('This Claude API key is outside the pay-per-token group, so no daily ceiling holds it. Move it there.');
     case 'ceiling_question': return t('A spending ceiling was reached and waits for your answer.');
   }
@@ -2272,6 +2276,53 @@ export function remoteUsageLine(there: RemoteRead | null | undefined, machine: s
     return age < 60 ? t('Used {percent}% on {machine}, just now', { percent: Math.round(there.used_percent), machine }) : t('Used {percent}% on {machine}, {age} ago', { percent: Math.round(there.used_percent), machine, age: shortAge(age) });
   }
   return t('Not read on {machine} yet', { machine });
+}
+/**
+ * SB-550: what the usage cell of an account on another machine shows. Its bar, share and age come
+ * from the last read of its copy there (the age is that machine's own check, else the read); this
+ * computer's own older observation is shown only while there is no read there, and says so. The
+ * line under the bar names the machine and how fresh the read is, or why there is none.
+ */
+export interface RemoteUsageView { percent: number | null; at: number | null; tone: 'available' | 'low' | 'blocked' | 'failed' | 'stale' | 'unknown'; line: string; ownCheck: boolean }
+export function remoteUsageView(there: RemoteRead | null | undefined, own: { used: number | null; observedAt: number } | null, machine: string, nowSeconds: number): RemoteUsageView {
+  // Review of PR #861 (P2-4): once that machine answered a read, the row speaks from it alone,
+  // with or without a figure: this computer's own older check is never its state.
+  if (there && there.as_of !== null) {
+    const percent = typeof there.used_percent === 'number' ? there.used_percent : null;
+    const at = percent !== null ? there.observed_at ?? there.as_of : null;
+    const tone = there.usage_status === 'rejected' ? 'failed' : there.reason ? 'stale' : percent === null ? 'unknown' : percent >= 100 ? 'blocked' : percent >= LOW_AT_PERCENT ? 'low' : 'available';
+    if (there.reason || there.usage_status === 'rejected' || there.enabled === false) return { percent, at, tone, line: remoteUsageLine(there, machine, nowSeconds), ownCheck: false };
+    if (there.listed === false) return { percent: null, at: null, tone: 'unknown', line: t('Not in the account list of {machine} at its last read', { machine }), ownCheck: false };
+    if (percent === null) return { percent: null, at: null, tone: 'unknown', line: t('{machine} has no usage figure for it yet', { machine }), ownCheck: false };
+    const read = nowSeconds - there.as_of;
+    return { percent, at, tone, line: read < 60 ? t('On {machine}, read just now', { machine }) : t('On {machine}, read {age} ago', { machine, age: shortAge(read) }), ownCheck: false };
+  }
+  const line = remoteUsageLine(there, machine, nowSeconds);
+  if (own && own.used !== null) return { percent: own.used, at: own.observedAt, tone: 'stale', line: t("This computer's last check · {line}", { line }), ownCheck: true };
+  return { percent: null, at: null, tone: 'unknown', line, ownCheck: false };
+}
+/** SB-550: a failing health check of another machine, in words; an unknown one by its id. */
+export function healthCheckText(id: string): string {
+  switch (id) {
+    case 'owner': return t('its Switchboard is not running');
+    case 'crashes': return t('it crashed in the last day');
+    default: return id;
+  }
+}
+/** SB-550: what the last read of a machine says of its sessions and its own health, for its card; empty before a read. */
+export function machineReadLine(read: MachineRead | null | undefined, nowSeconds: number): string {
+  if (!read) return '';
+  if (read.failures >= 3) return read.as_of !== null ? t('Not answering: three reads in a row failed. Last answer {age} ago.', { age: shortAge(nowSeconds - read.as_of) }) : t('Not answering: three reads in a row failed.');
+  if (read.as_of === null) return '';
+  const parts: string[] = [];
+  const counts = read.sessions?.counts;
+  if (counts) parts.push(t('Sessions: {running} running, {waiting} waiting, {needs} need you.', { running: counts.running ?? 0, waiting: counts.waiting ?? 0, needs: counts.needs_you ?? 0 }));
+  else if (read.call === 'accounts') parts.push(t('Its Switchboard is older and does not report its sessions. Update it there.'));
+  if (read.health?.failing.length) parts.push(t('Needs a look there: {checks}.', { checks: read.health.failing.map(healthCheckText).join(', ') }));
+  else if (read.health) parts.push(t('No failing health check there.'));
+  const age = nowSeconds - read.as_of;
+  parts.push(age < 60 ? t('Read just now.') : t('Read {age} ago.', { age: shortAge(age) }));
+  return parts.join(' ');
 }
 /** SB-355: what a live read found for one machine; empty before a read. */
 export function machineLiveLine(live: { reachable: boolean } | undefined): string {

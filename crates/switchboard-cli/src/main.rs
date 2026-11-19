@@ -218,6 +218,12 @@ enum Command {
     /// warn, fail or unknown), a count and the tool that fixes it. Counts and kinds only, for a
     /// watcher that turns them into incidents. Reads only.
     Health,
+    /// What another machine reads of this Switchboard every minute over ssh, in one answer: the
+    /// accounts (label, provider, on or off, used share and its check), the sessions as ids and
+    /// codes (never a folder, a label or text a session wrote) and the health report. Through a
+    /// restricted entry (`ssh-serve`), only the delegated seats and that group's sessions, with no
+    /// health. Reads only.
+    RemoteStatus,
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
     /// The other machines this Switchboard knows, from accounts moved there and runs started
@@ -2407,6 +2413,24 @@ async fn serve_ssh(
     use ssh_serve::Request;
     match request {
         Request::Prove { nonce } => call(root, Operation::MachineProve { nonce }).await,
+        // SB-550: the one-minute read, scoped to the seats this key delegated and the sessions of
+        // the group its line names; this computer's own health is not shared.
+        Request::RemoteStatus => {
+            use switchboard_runtime::remote_usage;
+            let snapshot = call(root, Operation::Snapshot).await?;
+            let seats = ssh_serve::accounts_view(&snapshot, sender_key, pool);
+            let sessions = call(root, Operation::SessionRows)
+                .await
+                .ok()
+                .map(|rows| remote_usage::sessions_digest(&rows, Some(pool)));
+            Ok(json!({
+                "schema": remote_usage::STATUS_SCHEMA,
+                "version": env!("CARGO_PKG_VERSION"),
+                "accounts": remote_usage::accounts_answer(&seats["accounts"]),
+                "sessions": sessions,
+                "health": null,
+            }))
+        }
         Request::AccountsList => Ok(ssh_serve::accounts_view(
             &call(root, Operation::Snapshot).await?,
             sender_key,
@@ -2519,6 +2543,25 @@ async fn serve_ssh(
         }
     }
 }
+/// SB-550: what another machine reads of this Switchboard every minute (`remote-status`): the
+/// accounts, the sessions as ids and codes (`remote_usage::sessions_digest`) and the health report.
+/// A part that could not be read is null; the accounts are required.
+async fn remote_status(root: &std::path::Path) -> Result<Value, String> {
+    use switchboard_runtime::remote_usage;
+    let snapshot = call(root, Operation::Snapshot).await?;
+    let sessions = call(root, Operation::SessionRows)
+        .await
+        .ok()
+        .map(|rows| remote_usage::sessions_digest(&rows, None));
+    let health = call(root, Operation::Health).await.ok();
+    Ok(json!({
+        "schema": remote_usage::STATUS_SCHEMA,
+        "version": env!("CARGO_PKG_VERSION"),
+        "accounts": remote_usage::accounts_answer(&snapshot["accounts"]),
+        "sessions": sessions,
+        "health": health,
+    }))
+}
 #[cfg(not(unix))]
 async fn serve_ssh(
     _: &std::path::Path,
@@ -2568,6 +2611,11 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     } = &cli.command
     {
         return serve_ssh(&root, sender_key, pool, from.as_deref()).await;
+    }
+    // SB-550: another machine's one-minute read, composed of the three answers an older owner
+    // already gives, so a newer command works beside an owner that is not restarted yet.
+    if matches!(cli.command, Command::RemoteStatus) {
+        return remote_status(&root).await;
     }
     // SB-380: a session read, ended or attached on another machine runs that machine's
     // Switchboard over ssh; nothing is asked of this machine's owner.
@@ -3023,6 +3071,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::BootResume { command } => Operation::BootResume {
             on: command.as_ref().map(|c| matches!(c, BootResumeCmd::On)),
         },
+        // Answered before the owner is asked (`remote_status`); here only to keep this match whole.
+        Command::RemoteStatus => return remote_status(&root).await,
         Command::Duty { command } => {
             fn duty(
                 on: Option<bool>,
@@ -6803,6 +6853,10 @@ mod mcp_parity {
         ("attention", Tool("switchboard_attention")),
         ("bugs", Tool("switchboard_bugs")),
         ("health", Tool("switchboard_health")),
+        (
+            "remote-status",
+            Not("SB-550: another machine's one-minute read of this Switchboard over ssh; switchboard_machines shows what this computer read of its machines"),
+        ),
         ("capacity set", Tool("switchboard_capacity")),
         ("capacity clear", Tool("switchboard_capacity")),
         ("boot-resume on", Tool("switchboard_boot_resume")),

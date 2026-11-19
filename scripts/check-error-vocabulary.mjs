@@ -53,6 +53,9 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // SB-550 (review of PR #861): a background read's failure, kept only as the code `refused` in
+  // remote-usage.json (`remote_usage::reason_of`); no renderer request returns it.
+  "The other machine's Switchboard refused the read.": 'SB-550: background read only, kept as a reason code',
   // SB-403 (DEC-0025): answered only to another machine through `switchboard ssh-serve` or to the
   // CLI and MCP (a lease without --delegate); the window never sends these calls.
   "This computer holds no seat with that id that the calling machine delegated.": 'SB-403: ssh-serve only, answered to the delegating machine',
