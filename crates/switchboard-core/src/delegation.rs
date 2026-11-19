@@ -43,6 +43,8 @@ pub const NOT_DELEGATED_BY_YOU: &str =
     "This computer holds no seat with that id that the calling machine delegated.";
 pub const LEASE_ENDED: &str = "This seat's lease ran out, so it is switched off here. The machine that delegated it extends its lease to use it again, or calls it back.";
 pub const SIGN_IN_REMOVED: &str = "This seat's sign-in was removed from this computer 30 days after its lease ran out. The machine that delegated it signs in to the account again and delegates it again.";
+/// SB-560 (M3-03): a seat the sender called back stays off until it is removed or given back.
+pub const SURRENDERED: &str = "This seat was called back by the machine that delegated it, so it stays off here until that machine removes it or gives it back.";
 pub const GROUP_HOLDS_GUEST: &str = "This group holds a seat another machine delegated to this computer. Ask that machine to call the seat back before deleting the group.";
 pub const LEASE_INVALID: &str = "Give the lease in whole hours, from 1 to 720.";
 pub const KEY_INVALID: &str = "That is not a machine's key. Give the key switchboard settings signer printed on the machine that delegates.";
@@ -74,6 +76,14 @@ pub struct Delegation {
     /// When its credential was removed, `KEEP_AFTER_LEASE_SECONDS` after it ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub purged_at: Option<i64>,
+    /// SB-560 (M3-03): when the sender called it back here; switched off until the sender
+    /// removes it or gives it back (`--undo`), and nothing here turns it on in between.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surrendered_at: Option<i64>,
+    /// SB-560: whether it was on when it was called back, so a call back the sender gives up
+    /// restores exactly that (a seat the person had switched off stays off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled_before: Option<bool>,
 }
 
 /// SB-403 (P2-5): on the machine that delegated a seat, what it needs to extend and call it back:
@@ -192,6 +202,9 @@ pub(crate) fn stays(old: &Snapshot, new: &Snapshot) -> Result<(), String> {
         }
         if d.ended_at.is_some() && (account.enabled || new.routes.values().any(|v| v == id)) {
             return Err(LEASE_ENDED.into());
+        }
+        if d.surrendered_at.is_some() && (account.enabled || new.routes.values().any(|v| v == id)) {
+            return Err(SURRENDERED.into());
         }
         match old.delegated.get(id) {
             Some(o) => {
@@ -317,6 +330,8 @@ impl crate::Store {
             lease_until: time + i64::from(lease_hours) * 3600,
             ended_at: None,
             purged_at: None,
+            surrendered_at: None,
+            enabled_before: None,
         };
         self.save_delegated(label, provider, pool, credential, delegation)
     }
@@ -334,6 +349,8 @@ impl crate::Store {
             return Err(SIGN_IN_REMOVED.into());
         }
         let revived = d.ended_at.is_some();
+        // SB-560: a seat the sender called back stays off; only its own give-back turns it on.
+        let surrendered = d.surrendered_at.is_some();
         let until = time + i64::from(hours) * 3600;
         let mut candidate = state.clone();
         if let Some(d) = candidate.delegated.get_mut(id) {
@@ -341,7 +358,11 @@ impl crate::Store {
             d.ended_at = None;
         }
         if revived {
-            if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
+            if let Some(a) = candidate
+                .accounts
+                .iter_mut()
+                .find(|a| a.id == id && !surrendered)
+            {
                 a.enabled = true;
             }
             crate::append_event(&mut candidate, "delegation", Some(id), "restored");
@@ -412,10 +433,10 @@ impl crate::Store {
         sender_key: &str,
         undo: bool,
     ) -> Result<Option<crate::Credential>, String> {
-        let (purged, ended) = {
+        let (purged, ended, before) = {
             let state = self.lock()?;
             let d = owned(&state, id, sender_key)?;
-            (d.purged(), d.ended_at.is_some())
+            (d.purged(), d.ended_at.is_some(), d.enabled_before)
         };
         if purged {
             return Ok(None);
@@ -428,7 +449,21 @@ impl crate::Store {
                 .iter_mut()
                 .find(|a| a.id == id)
                 .ok_or(NOT_DELEGATED_BY_YOU)?;
-            a.enabled = undo && !ended;
+            // SB-560 (M3-03): a call back marks the seat, so nothing here turns it on before the
+            // sender removes it or gives it back; giving it back restores how it was (a seat the
+            // person had switched off stays off). A second call back keeps the first's state.
+            let was = a.enabled;
+            // An undo with no call back recorded (its answer never left here) changes nothing.
+            a.enabled = undo && !ended && before.unwrap_or(was);
+            if let Some(d) = candidate.delegated.get_mut(id) {
+                if undo {
+                    d.surrendered_at = None;
+                    d.enabled_before = None;
+                } else {
+                    d.enabled_before = d.enabled_before.or(Some(was));
+                    d.surrendered_at = d.surrendered_at.or(Some(now()));
+                }
+            }
             if !undo {
                 candidate.routes.retain(|_, v| v != id);
             }
@@ -693,6 +728,53 @@ mod tests {
         assert!(s.accounts.is_empty() && s.delegated.is_empty());
     }
 
+    /// SB-560 (M3-03): a seat the sender called back stays off until it is removed or given
+    /// back; giving it back restores how it was, so a seat switched off here stays off.
+    #[test]
+    fn a_called_back_seat_stays_off_and_a_give_back_restores_how_it_was() {
+        let (_r, _f, store) = store_with_group();
+        let a = store
+            .add_delegated(
+                "seat".into(),
+                Provider::Claude,
+                pool(&store),
+                oauth("1"),
+                KEY,
+                None,
+                48,
+            )
+            .unwrap();
+        store.surrender_delegated(&a.id, KEY, false).unwrap();
+        let d = store.snapshot().unwrap().delegated[&a.id].clone();
+        assert!(d.surrendered_at.is_some());
+        assert_eq!(d.enabled_before, Some(true));
+        assert_eq!(
+            store.update_fields(&a.id, None, Some(true)).unwrap_err(),
+            SURRENDERED,
+            "nothing here turns it on while it is called back"
+        );
+        store.extend_lease(&a.id, KEY, 48).unwrap();
+        assert!(
+            !store.snapshot().unwrap().accounts[0].enabled,
+            "a lease does not either"
+        );
+        // A second call back keeps the state the first one saw.
+        store.surrender_delegated(&a.id, KEY, false).unwrap();
+        store.surrender_delegated(&a.id, KEY, true).unwrap();
+        let s = store.snapshot().unwrap();
+        assert!(s.accounts[0].enabled, "given back as it was: on");
+        assert!(s.delegated[&a.id].surrendered_at.is_none());
+
+        // Switched off here before the call back: given back, it stays off.
+        store.update_fields(&a.id, None, Some(false)).unwrap();
+        store.surrender_delegated(&a.id, KEY, false).unwrap();
+        store.surrender_delegated(&a.id, KEY, true).unwrap();
+        assert!(!store.snapshot().unwrap().accounts[0].enabled);
+        // An undo with no call back recorded changes nothing.
+        store.surrender_delegated(&a.id, KEY, true).unwrap();
+        assert!(!store.snapshot().unwrap().accounts[0].enabled);
+    }
+
     #[test]
     fn past_its_lease_a_seat_is_switched_off_kept_and_removed_30_days_later() {
         let (_r, _f, store) = store_with_group();
@@ -852,6 +934,8 @@ mod tests {
                 lease_until: now() + 10,
                 ended_at: None,
                 purged_at: None,
+                surrendered_at: None,
+                enabled_before: None,
             },
         );
         assert_eq!(

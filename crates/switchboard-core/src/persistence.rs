@@ -48,7 +48,15 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // Version 16 only while an account another machine delegated is here, or a journal entry
     // of one (SB-403, DEC-0025): a 0.7.112 or older reader refuses the unknown field rather
     // than treat a guest's sign-in as its own (send it on, give it to an agent, remove it).
-    if !snapshot.delegated.is_empty()
+    // Version 17 only while a delegated seat carries a call back (SB-560): a 0.7.123 or older
+    // reader refuses the unknown field rather than turn on a seat its sender called back.
+    if snapshot
+        .delegated
+        .values()
+        .any(|d| d.surrendered_at.is_some() || d.enabled_before.is_some())
+    {
+        17
+    } else if !snapshot.delegated.is_empty()
         || !snapshot.delegated_out.is_empty()
         || snapshot.events.iter().any(|e| e.action == "delegation")
     {
@@ -177,7 +185,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=16) {
+            if !matches!(disk.schema_version, 1..=17) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -259,7 +267,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=16) {
+        if !matches!(disk.schema_version, 1..=17) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;

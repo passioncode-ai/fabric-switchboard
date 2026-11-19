@@ -60,6 +60,9 @@ pub const ADD_FAILED: &str =
 /// left by an earlier move. Named, because the person can fix it there.
 pub const ALREADY_THERE: &str = "The other machine already holds this sign-in in that group. Remove its old copy there, then move it again.";
 /// SB-315: clearing the mark of an account whose sign-in a move took to another machine.
+/// SB-560 (M3-04): `force` over the moved-away guard from the CLI or MCP needs the operator's own
+/// words; the window's own button needs none.
+pub const FORCE_NEEDS_WORD: &str = "Using here an account another machine holds is the operator's call. Pass the operator's own words (--operator-said with --said-at and --said-in, or decision in MCP), or do it in the window.";
 pub const MOVED_AWAY: &str = "This account's sign-in was moved to another machine. Call it back to use it here, so only one machine renews it.";
 pub const NOT_VERIFIED: &str = "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.";
 pub const IN_USE_HERE: &str = "The ordinary Claude Code or Codex here is signed in to this account. Sign it in to another account first.";
@@ -92,6 +95,22 @@ pub const NO_REMOTE_ID: &str =
     "Name the account's id on the other machine; no recorded move names it.";
 pub const SURRENDER_FAILED: &str =
     "The other machine did not give the sign-in back. Nothing changed; check ssh and its Switchboard.";
+/// SB-560 (M2-01): the sign-in a call back brought is another account's.
+pub const RECALL_NOT_THIS_ACCOUNT: &str = "The other machine gave back a sign-in of another account, so it was not kept. The account stays on that machine; sign in to it again here if that machine cannot be trusted.";
+/// SB-560 (M2-01): the provider did not say whose sign-in came back.
+pub const RECALL_IDENTITY_UNKNOWN: &str = "The provider did not say whose sign-in came back, so it was not kept. The account stays on that machine; call it back again later.";
+/// SB-560 (M2-01): a sign-in a call back brought is kept only when the provider names its account
+/// (`returned`) and, when this account's own is known (`expected`), it is that one.
+pub fn recalled_identity(
+    expected: Option<&str>,
+    returned: Option<&str>,
+) -> Result<(), &'static str> {
+    match (expected, returned) {
+        (_, None) => Err(RECALL_IDENTITY_UNKNOWN),
+        (Some(expected), Some(returned)) if expected != returned => Err(RECALL_NOT_THIS_ACCOUNT),
+        _ => Ok(()),
+    }
+}
 pub const NOT_RETURNED: &str = "The sign-in came back but the provider did not answer it here. It went back to the other machine.";
 pub const SURRENDER_TO_TERMINAL: &str =
     "This prints a sign-in. Only the machine that calls the account back runs it, over ssh.";
@@ -1200,6 +1219,23 @@ mod tests {
             }
             Ok(r#"{"ok":true,"data":null}"#.into())
         }
+    }
+
+    /// SB-560 (M2-01): a call back keeps a sign-in only when the provider names its account and,
+    /// when this account's own is known, it is that one.
+    #[test]
+    fn a_recalled_sign_in_is_kept_only_for_the_same_account() {
+        assert_eq!(recalled_identity(Some("acct-1"), Some("acct-1")), Ok(()));
+        assert_eq!(recalled_identity(None, Some("acct-1")), Ok(()));
+        assert_eq!(
+            recalled_identity(Some("acct-1"), Some("acct-2")),
+            Err(RECALL_NOT_THIS_ACCOUNT)
+        );
+        assert_eq!(
+            recalled_identity(Some("acct-1"), None),
+            Err(RECALL_IDENTITY_UNKNOWN)
+        );
+        assert_eq!(recalled_identity(None, None), Err(RECALL_IDENTITY_UNKNOWN));
     }
 
     #[test]

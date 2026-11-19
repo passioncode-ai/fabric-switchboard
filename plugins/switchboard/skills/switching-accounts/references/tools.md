@@ -647,7 +647,7 @@ out for good. `folder` as `switchboard_project_suggestions` lists it.
 The repository owners (`github.com/example`) whose new repositories join the group by
 themselves. Without `add` or `remove`, reads them; changing them only when the operator asks.
 
-### `switchboard_account_update`: `account_id`, `label?`, `enabled?`, `elsewhere?`, `location?`, `assigned_to?`, `force?`
+### `switchboard_account_update`: `account_id`, `label?`, `enabled?`, `elsewhere?`, `location?`, `assigned_to?`, `force?`, `decision?`
 
 Only when the operator asks. Renames, enables or disables an account; `elsewhere: true`
 disables it here because another machine uses it; `location` says where it works (a machine and
@@ -657,6 +657,12 @@ most 120 characters): unlike `elsewhere` it stays enabled, its sign-in is renewe
 observed, but nothing selects it, switches to it or launches on it by itself; giving it clears
 `elsewhere`; an empty value takes it back. At least one field ("Name a label, enabled, elsewhere,
 location or assigned_to to change.").
+
+An account whose sign-in a move took to another machine (a `seats.jsonl` grant, or this computer's
+record of a seat delegated there) is called back with `switchboard_account_recall`, not used or
+given here again; `force: true` passes that guard only with `decision`, the operator's own words
+(SB-560), recorded as a loosening; without them the call is refused ("Using here an account another
+machine holds is the operator's call. …").
 
 ### `switchboard_account_remove`: `account_id`
 
