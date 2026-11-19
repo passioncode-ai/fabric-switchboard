@@ -91,9 +91,10 @@ jobs:
         env:
           TAURI_CONFIG: '{"bundle":{"resources":null}}'
           # SB-558: libtest runs each test on a thread of RUST_MIN_STACK bytes (2 MiB by default);
-          # the owner's debug-build futures outgrew it on Windows (nightly 44533106888,
+          # the owner's debug-build futures outgrew it on Windows on Arm (nightly 44533106888,
           # `an_account_moves_between_projects_and_back_to_default` overflowed its stack). The
-          # CLI and the app run on 16 MiB stacks; the tests get the same.
+          # CLI's and the app's runtime threads have 16 MiB; the tests get the same. SB-362 (smaller
+          # owner futures) stays open: macOS and Linux still test at 2 MiB.
           RUST_MIN_STACK: "16777216"
         run: |
           npm run build

@@ -8,7 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-- The app and the test suite no longer run out of stack on Windows (SB-558): the app's main thread there gets the 16 MiB stack the command line already runs on, and the tests' threads get the same, after the nightly checks of 0.7.123 failed on Windows with a stack overflow.
+- The app's threads get the 16 MiB stack the command line has run on since 0.6.61 (SB-558): the threads of its async runtime on every system, and its main thread on Windows, where it was 1 MiB. The Windows test steps give each test thread the same. The nightly checks of 0.7.123 failed on Windows on Arm when one test overflowed its 2 MiB thread.
+
 ## 0.7.123
 
 - Usage checks are smarter and gentler (SB-518): a response's rate-limit headers count as a check, so Switchboard asks the usage endpoint about an account with traffic only about once every 30 minutes; each provider gets 2 checks a minute; a refused check pauses the whole provider for at least 15 minutes; a switch checks its candidate first. Choose `switchboard usage-mode smart`, `timer` or `on-demand` (MCP `switchboard_usage_mode`, whose form without `mode` a read-only server answers too).
