@@ -241,6 +241,8 @@ def run(tag, public_key_b64, *, get=fetch, attempts=20, wait=30.0, sleep=time.sl
         if not errors:
             break
         say(f'attempt {attempt}/{attempts}: {errors[0]}')
+        if document is not None and document.get('version') == version:
+            break  # this release's own feed, malformed: waiting does not change it
         if attempt < attempts:
             sleep(wait)
     if errors:

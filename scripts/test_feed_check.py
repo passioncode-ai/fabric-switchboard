@@ -146,6 +146,13 @@ class Feed(unittest.TestCase):
         self.assertTrue(any('linux-aarch64' in e for e in errors))
         self.assertTrue(any('darwin-universal' in e for e in errors))
 
+    def test_a_malformed_feed_of_this_release_is_not_waited_out(self):
+        document = feed()
+        del document['platforms']['windows-aarch64']
+        errors, _, slept = self.run_check([document])
+        self.assertTrue(errors and 'windows-aarch64' in errors[0])
+        self.assertEqual(slept, [])
+
     def test_a_package_that_does_not_verify_fails_the_check(self):
         errors, _, _ = self.run_check([feed()], package=PACKAGE + b'tampered')
         self.assertTrue(errors and 'does not match' in errors[0])
