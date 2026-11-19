@@ -3180,6 +3180,37 @@ mod tests {
         assert_eq!(health.status, "failed");
         assert!(health.next_check_at > now());
     }
+    /// SB-518: a hold that began before the request went out stops `probe` there: nothing is
+    /// sent, no health is written, and the refusal is the internal one `check_as` answers as the
+    /// provider's wait, so no verdict is lifted for it.
+    #[tokio::test]
+    async fn a_hold_set_before_the_request_stops_the_probe_without_sending() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let raw = json!({"claudeAiOauth":{"accessToken":"synthetic-held","expiresAt":(now()+3600)*1000}}).to_string();
+        let account = store
+            .add(
+                "Held".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                Credential::parse(Provider::Claude, AuthKind::OAuth, &raw).unwrap(),
+            )
+            .unwrap();
+        let gate = UsageGate::budgeted();
+        gate.budget.refused(Provider::Claude, now(), None);
+        let mut rejected = None;
+        assert_eq!(
+            probe(store.clone(), &account.id, &gate, &mut rejected)
+                .await
+                .unwrap_err(),
+            UNSENT
+        );
+        assert!(rejected.is_none());
+        assert!(store.snapshot().unwrap().accounts[0].usage_health.is_none());
+    }
     /// Lifecycle LC-08's check: one idle hour of passes on a fake clock — fifteen saved Claude
     /// accounts, native rotation on, a signed-in Claude Code, backups on, nothing changing —
     /// counted against the idle budget: no sign-in read after the first, no credential read

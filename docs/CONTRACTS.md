@@ -309,8 +309,8 @@ Account list order is display-only; it never selects/activates. Within provider/
   (`Store::endpoint_seen`, memory only): `next_check_at = max(existing, min(observed + 180,
   endpoint + 1800))`, near the limit `observed + HEADER_FRESH_SECONDS` (60) instead of 180. A
   partial header, a header before the endpoint's first answer, one for a new credential
-  generation (its usage health cleared, which forgets the endpoint's time) until the endpoint
-  answered it and one past the ceiling keep
+  generation (its figure or usage health cleared, which forgets the endpoint's time, a failed
+  first check included) until the endpoint answered it and one past the ceiling keep
   `max(existing, observed)` as before
   (`a_complete_header_observation_postpones_the_next_check_up_to_the_ceiling`). The merged usage
   keeps the oldest age of the windows it holds, as before

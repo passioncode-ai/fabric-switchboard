@@ -2813,10 +2813,11 @@ impl Store {
                 .iter()
                 .all(|name| usage.windows.iter().any(|w| w.name == *name));
         let observed = usage.observed_at;
-        // An endpoint answer always leaves usage health behind, so none means a new credential
-        // generation (or a cleared record): what the endpoint said of the one before is no anchor,
-        // and the header times go with it, until the endpoint answers this one.
-        if a.usage_health.is_none() {
+        // An endpoint answer always leaves a figure and usage health behind, and a new credential
+        // generation clears both; a failed check writes health but never a figure. So either one
+        // missing means no answer of this generation yet: what the endpoint said of the one
+        // before is no anchor, and the header times go with it, until the endpoint answers.
+        if a.usage.is_none() || a.usage_health.is_none() {
             if let Ok(mut seen) = self.endpoint_seen.lock() {
                 seen.remove(id);
             }

@@ -2455,8 +2455,8 @@ fn a_complete_header_observation_postpones_the_next_check_up_to_the_ceiling() {
         .observe(&id, header_usage(15., fresh + 10, &both))
         .unwrap();
     assert_eq!(next_check(&store, &id), fresh + 10 + CHECK_ACTIVE_SECONDS);
-    // A new credential generation is checked at once: its first header postpones nothing,
-    // though the endpoint answered the previous one within the ceiling.
+    // A new credential generation is never postponed by its headers, though the endpoint
+    // answered the previous one within the ceiling.
     let renewed = store
         .upsert(
             "org-routed".into(),
@@ -2469,15 +2469,20 @@ fn a_complete_header_observation_postpones_the_next_check_up_to_the_ceiling() {
         .unwrap()
         .id;
     assert_eq!(renewed, id);
+    // Its first check failed: the failure's schedule stands, no header of it is postponed by
+    // the previous generation's endpoint answer.
+    store
+        .usage_health(&id, "failed", fresh + 15, fresh + 15 + CHECK_ACTIVE_SECONDS)
+        .unwrap();
     store
         .observe(&id, header_usage(16., fresh + 20, &both))
         .unwrap();
-    assert_eq!(next_check(&store, &id), fresh + 20);
+    assert_eq!(next_check(&store, &id), fresh + 15 + CHECK_ACTIVE_SECONDS);
     // Nor its second, until the endpoint answered the new generation.
     store
         .observe(&id, header_usage(16., fresh + 25, &both))
         .unwrap();
-    assert_eq!(next_check(&store, &id), fresh + 25);
+    assert_eq!(next_check(&store, &id), fresh + 15 + CHECK_ACTIVE_SECONDS);
     store.observe(&id, endpoint_usage(16., fresh + 30)).unwrap();
     store
         .observe(&id, header_usage(16., fresh + 40, &both))
