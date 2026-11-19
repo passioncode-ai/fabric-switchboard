@@ -341,8 +341,10 @@ fn script_with(
     working_directory: &Path,
 ) -> String {
     let mut result = format!("#!{SCRIPT_SHELL}\nset +x\nunset {}\n", CONFLICTS.join(" "));
-    // SB-455: Terminal, a session host, `--in-place` and `--headless` run this script without the
-    // person's login shell; the session and its hooks get the login PATH (`node` from Homebrew).
+    // SB-455: Terminal, a session host, `--in-place` and `launch --headless` run this script with
+    // the PATH of whatever started it (launchd's short one for the app and `serve`, a terminal's
+    // own for `--in-place`). That PATH stays first (a person's nvm, pyenv or mise shims win); the
+    // login PATH fills only what it lacks, so a hook finds `node` from Homebrew.
     result.push_str(&path_export(program));
     for (key, value) in env {
         result.push_str(&format!("export {key}={}\n", quote(value)));
@@ -3758,21 +3760,46 @@ pub const DISPATCH_FAILED: &str =
     "The dispatched session did not start: its program could not be run.";
 pub const DISPATCH_WOULD_NOT_STOP: &str =
     "The dispatched session did not stop. End its process by hand, then stop it again.";
-/// SB-247, SB-455: the PATH every session Switchboard starts gets (a launch script's `export
-/// PATH`, a resume script's, a dispatched run's environment): the program's own folder first (a
-/// `#!/usr/bin/env node` launcher finds its `node` beside it), then the person's login PATH (asked
-/// of their login shell once, `login_path`), then the owner's, then the per-user and Homebrew
-/// folders a launchd PATH lacks.
+/// SB-247, SB-455: the PATH of a dispatched run (`spawn_headless`), which inherits none: the
+/// program's own folder first (a `#!/usr/bin/env node` launcher finds its `node` beside it), then
+/// the person's login PATH (`login_path::login_dirs`, asked by the process that builds the run),
+/// then this process's, then the per-user and Homebrew folders a launchd PATH lacks.
 pub(crate) fn headless_path(program: &Path) -> std::ffi::OsString {
     session_path(program, crate::login_path::login_dirs().as_deref())
 }
-/// SB-455: a session script's `PATH` line: `headless_path`, then the `PATH` the script was started
-/// with (a terminal's own, for `--in-place`), so a folder only the caller had is not lost.
+/// SB-455: a session script's `PATH` line (a launch script, a resume script): the program's own
+/// folder, then the `PATH` the script was started with, then the rest of `headless_path` for the
+/// folders that `PATH` lacks. The inherited `PATH` stays ahead of the login one, so a terminal's
+/// version-manager shims are not shadowed by `/usr/bin`.
 pub(crate) fn path_export(program: &Path) -> String {
-    format!(
-        "export PATH={}\"${{PATH:+:$PATH}}\"\n",
-        fabric_sessions_core::cli::quoted(&headless_path(program).to_string_lossy())
-    )
+    path_export_with(program, crate::login_path::login_dirs().as_deref())
+}
+/// `path_export` with the login folders given.
+pub(crate) fn path_export_with(program: &Path, login: Option<&[PathBuf]>) -> String {
+    use fabric_sessions_core::cli::quoted;
+    let first = program.parent().filter(|d| !d.as_os_str().is_empty());
+    let rest: Vec<PathBuf> = std::env::split_paths(&session_path(program, login))
+        .filter(|d| Some(d.as_path()) != first)
+        .collect();
+    let rest = std::env::join_paths(rest).unwrap_or_default();
+    let rest = rest.to_string_lossy();
+    let mut line = String::from("export PATH=");
+    match first {
+        Some(first) => {
+            line.push_str(&quoted(&first.to_string_lossy()));
+            line.push_str("\"${PATH:+:$PATH}\"");
+            if !rest.is_empty() {
+                line.push_str(&quoted(&format!(":{rest}")));
+            }
+        }
+        None if rest.is_empty() => line.push_str("\"${PATH:-}\""),
+        None => {
+            line.push_str("\"${PATH:+$PATH:}\"");
+            line.push_str(&quoted(&rest));
+        }
+    }
+    line.push('\n');
+    line
 }
 /// `headless_path` with the login folders given.
 pub(crate) fn session_path(program: &Path, login: Option<&[PathBuf]>) -> std::ffi::OsString {
@@ -7919,7 +7946,8 @@ mod tests {
         assert_eq!(names, CONFLICTS);
         assert!(text.find("unset ").unwrap() < text.find("export ").unwrap_or(usize::MAX));
     }
-    /// SB-455: a launch script exports the login PATH, first after the program's own folder.
+    /// SB-455: a launch script exports the program's folder, then the PATH it was started with,
+    /// then the login PATH for what that PATH lacks.
     #[cfg(unix)]
     #[test]
     fn a_launch_script_exports_the_login_path() {
@@ -7938,15 +7966,18 @@ mod tests {
             .lines()
             .find(|l| l.starts_with("export PATH="))
             .unwrap();
-        let value = line.split('\'').nth(1).unwrap();
-        let dirs: Vec<PathBuf> = std::env::split_paths(value).collect();
-        assert_eq!(dirs[0], PathBuf::from("/opt/agent/bin"));
-        assert_eq!(dirs[1], brew);
-        assert!(dirs.contains(&PathBuf::from("/opt/homebrew/bin")));
+        let prefix = format!(
+            "export PATH='/opt/agent/bin'\"${{PATH:+:$PATH}}\"':{}:/usr/bin:",
+            brew.display()
+        );
+        assert!(line.starts_with(&prefix), "{line}");
+        assert!(line.contains("/opt/homebrew/bin"));
+        // The program's folder is not repeated after the inherited PATH.
+        assert_eq!(line.matches("/opt/agent/bin").count(), 1);
         // Exported after the scrub and before the session's own variables and its program.
         assert!(text.find("unset ").unwrap() < text.find("export PATH=").unwrap());
         assert!(text.find("export PATH=").unwrap() < text.find("exec ").unwrap());
-        // The resume script of the duty officer and Continue carries the same folders.
+        // The resume script of the duty officer and Continue carries the same line.
         let resume = crate::login_path::with_login(vec![brew.clone()], || {
             crate::duty::resume_script_for(
                 Path::new("/tmp/config"),
@@ -7957,7 +7988,50 @@ mod tests {
                 None,
             )
         });
-        assert!(resume.contains(&format!("export PATH='/opt/agent/bin:{}:", brew.display())));
+        assert!(resume.contains(&format!(
+            "export PATH='/opt/agent/bin'\"${{PATH:+:$PATH}}\"':{}:",
+            brew.display()
+        )));
+    }
+    /// SB-455 (review round 1): the PATH a script was started with stays ahead of the login PATH,
+    /// so a terminal's shim folder wins over `/usr/bin`; with an empty PATH the session still gets
+    /// the program's folder and the login folders, and never an empty entry.
+    #[cfg(unix)]
+    #[test]
+    fn the_inherited_path_stays_ahead_of_the_login_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let shims = base.join("shims");
+        let brew = base.join("brew");
+        fs::create_dir_all(&shims).unwrap();
+        fs::create_dir_all(&brew).unwrap();
+        let line = path_export_with(
+            Path::new("/opt/agent/bin/claude"),
+            Some(&[brew.clone(), "/usr/bin".into()]),
+        );
+        let probe = format!("{line}printf '%s' \"$PATH\"");
+        let run = |path: String| {
+            let output = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(&probe)
+                .env_clear()
+                .env("PATH", path)
+                .output()
+                .unwrap();
+            String::from_utf8(output.stdout).unwrap()
+        };
+        let got = run(format!("{}:/usr/bin:/bin", shims.display()));
+        let dirs: Vec<PathBuf> = std::env::split_paths(&got).collect();
+        assert_eq!(dirs[0], PathBuf::from("/opt/agent/bin"));
+        assert_eq!(dirs[1], shims);
+        let at = |d: &Path| dirs.iter().position(|x| x == d).unwrap();
+        assert!(at(&shims) < at(&brew));
+        let got = run(String::new());
+        assert!(
+            got.starts_with(&format!("/opt/agent/bin:{}:", brew.display())),
+            "{got}"
+        );
+        assert!(!got.contains("::") && !got.ends_with(':'), "{got}");
     }
     /// SB-455: a hook the session runs through `/bin/sh` (as Claude Code runs its hooks) finds a
     /// tool that only the login PATH names, although the script starts with a launchd PATH.
@@ -7969,7 +8043,7 @@ mod tests {
         let brew = base.join("homebrew/bin");
         fs::create_dir_all(&brew).unwrap();
         private_write(
-            &brew.join("node"),
+            &brew.join("sb455-node"),
             b"#!/bin/sh\necho synthetic-node\n",
             true,
         )
@@ -7981,7 +8055,7 @@ mod tests {
         private_write(
             &agent,
             format!(
-                "#!/bin/sh\n/bin/sh -c 'node' > {} 2>&1\n",
+                "#!/bin/sh\n/bin/sh -c 'sb455-node' > {} 2>&1\n",
                 quote(&report.to_string_lossy())
             )
             .as_bytes(),

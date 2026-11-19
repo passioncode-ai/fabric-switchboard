@@ -1055,44 +1055,55 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
   Switchboard's server from its private `config.toml`, so the `-c` entries add to it. The session
   script unsets only the provider variables in `CONFLICTS`, so the caller's own environment
   (`FABRIC_DASHBOARDS_CONTEXT`, `FABRIC_DASHBOARDS_TASK`) reaches the agent. Its `PATH` is the
-  session PATH (SB-455, below) followed by the caller's own. Test
+  program's folder, the caller's own `PATH`, then the session PATH's other folders (SB-455, below). Test
   `a_dashboards_console_launch_reaches_the_agent_as_sent` runs the generated script with a
   recording agent and compares the exact argv and environment.
 
 ## The login PATH of sessions (SB-455, 2026-11-18)
 
-Code: `login_path::{login_dirs, warm, resolve, merge}`, `launch::{headless_path, path_export}`.
+Code: `login_path::{login_dirs, warm, resolve, merge, COMMAND}`, `launch::{headless_path, path_export}`.
 The desktop app and `serve` start from launchd with a short `PATH`, and a session inherited it:
 on 2026-11-18 a Terminal launch's `claude` ran with `PATH=~/.cargo/bin:/usr/bin:/bin` and every
 Claude Code hook that runs `node` failed with `node: command not found`.
 
-- The owner of the real data folder asks the person's login shell once at start, off the start
-  path (`login_path::warm`, a thread of its own): `$SHELL` when it names an absolute executable,
-  else the account's shell from the password database, run as `<shell> -l -c '/usr/bin/printenv
-  PATH'` with stdin closed, stderr discarded, in a process group of its own. `printenv` reads the
-  exported value, so zsh, bash and fish answer alike. The last non-empty line of its output is the
-  answer (a profile may print before it), kept only when every entry is an absolute folder. Past 3
-  seconds (`login_path::TIMEOUT`) the group is killed and reaped; a shell that exits while a child
-  of its profile still holds the pipe has that group killed too. The answer is kept for the
-  process's life. The owner logs `login_path` with `source` (`shell` or `fallback`), `dirs` (a
-  count) and `millis`; never a folder. A process that is not the owner (an offline `launch`)
-  asks on its first session, with the same bound.
+- The login shell is asked by the process that builds a session, the first time it needs the
+  answer (`login_path::login_dirs`): the owner, or an offline `launch` on its first session. The
+  owner of the real data folder asks once at start, off the start path (`login_path::warm`, a
+  thread of its own), so its first session does not wait. The shell is `$SHELL` when it names an
+  absolute executable, else the account's shell from the password database, run as
+  `<shell> -l -c <COMMAND>` with `COMMAND` = `/bin/sh -c 'printf "__SB_PATH__=%s\n" "$PATH"'`,
+  stdin closed, stderr discarded, in a process group of its own. `/bin/sh` prints the exported
+  value after a marker, so zsh, bash and fish answer alike and no `/usr/bin/printenv` is needed.
+  The answer is the last line that starts with the marker (a profile's greeting before it and
+  `.zlogout` output after it are ignored); its relative and empty entries are dropped, and it is
+  kept when one absolute folder is left and the shell exited with success. Past 3 seconds
+  (`login_path::TIMEOUT`) the group is killed while the shell is unreaped, then the shell is
+  reaped; no group is signalled after that. A child of the profile that keeps the pipe open after
+  the shell exits delays the answer by at most half a second (the reader thread is left to end with
+  the pipe). An answer is kept for the process's life; a failure is asked once more after 60
+  seconds (`login_path::RETRY_AFTER`), then kept. The owner logs `login_path` with `source`
+  (`shell` or `fallback`), `dirs` (a count) and `millis`; never a folder.
 - The session PATH (`launch::headless_path`) is, each folder once in its first place: the
   program's own folder, the login PATH, the generating process's `PATH`, `~/.local/bin`,
   `/opt/homebrew/bin`, `/usr/local/bin`. Without a login answer it is the same list without it.
-- Every launch script (`launch::script_with`: Terminal, `--in-place`, `--headless`, `--hosted`
-  through the session host, continuations, Kimi's two-step script) carries, right after its
-  `unset` line, `export PATH='<session PATH>'"${PATH:+:$PATH}"` (`launch::path_export`): the
-  session PATH first, then the `PATH` the script was started with, so nothing the caller had is
-  lost. The resume script (`duty::resume_script_for`) carries the same line. A dispatched run
-  (`spawn_headless`) gets the session PATH in its environment.
+  A dispatched run (`spawn_headless`), which inherits no `PATH`, gets it in its environment.
+- Every launch script (`launch::script_with`: Terminal, `--in-place`, `launch --headless`,
+  `--hosted` through the session host, continuations, Kimi's two-step script) carries, right after
+  its `unset` line, `export PATH='<program folder>'"${PATH:+:$PATH}"':<the rest of the session
+  PATH>'` (`launch::path_export`): the `PATH` the script was started with stays ahead of the login
+  PATH (review round 1 of PR #838: a terminal's nvm, pyenv or mise shims are not shadowed by
+  `/usr/bin`), and the login PATH fills only the folders it lacks. The resume script
+  (`duty::resume_script_for`) carries the same line.
 - No value but folder names enters a script. Windows is unchanged: a PowerShell script keeps the
   user `PATH` Windows gives it, and no login shell is asked.
-- Tests `login_path::tests::*` (a fake shell: asked with `-l -c`, its last line taken, a hang
-  killed at the deadline, a failure or a non-PATH answer gives nothing, the merge order),
+- Tests `login_path::tests::*` (a fake shell that runs the marker command: asked with `-l -c`, only
+  the marker line read, a hang killed at the deadline, a child holding the pipe does not hold the
+  answer, relative entries dropped, a failure or a non-PATH answer gives nothing, the merge order),
+  `login_path::cache_tests::a_failed_ask_is_asked_once_more_after_a_minute_and_an_answer_is_kept`,
   `launch::tests::a_launch_script_exports_the_login_path`,
+  `launch::tests::the_inherited_path_stays_ahead_of_the_login_path`,
   `launch::tests::a_hook_in_a_launched_session_finds_a_tool_on_the_login_path` (a generated script
-  started with `PATH=/usr/bin:/bin` runs an agent whose `/bin/sh -c node` hook finds a `node` in a
+  started with `PATH=/usr/bin:/bin` runs an agent whose `/bin/sh -c` hook finds a tool in a
   synthetic Homebrew folder that only the login PATH names).
 
 ## Sign-ins across a restart (SB-65, 2026-10-11)
@@ -3804,7 +3815,7 @@ only while `duty.json` (0600: `on`, `stuck_minutes`, `waiting_minutes`, `idle_mi
 The resume script unsets the variables a nested launch must not inherit (`CONFLICTS`), copies the
 `export` lines of the home's `launch.command` except `SWITCHBOARD_LAUNCH_ID` and
 `CLAUDE_CONFIG_DIR`, sets `CLAUDE_CONFIG_DIR` to the session's config folder unless it is the
-person's own, then `export PATH=<the session PATH>"${PATH:+:$PATH}"` (SB-455: the program's folder, the login PATH, the owner's, `~/.local/bin`, Homebrew's; a `PATH` line of the home's script is not copied), `cd <folder> || exit 1` and `claude
+person's own, then `export PATH='<program folder>'"${PATH:+:$PATH}"':<the rest of the session PATH>'` (SB-455: the program's folder, the `PATH` the window started with, then the login PATH, the owner's, `~/.local/bin` and Homebrew's for what it lacks; a `PATH` line of the home's script is not copied), `cd <folder> || exit 1` and `claude
 [bypass flag] --resume <session>` (not `exec`: an end by a signal exits 0, so the window closes), with
 the prompt `duty::CONTINUE_PROMPT` («Switchboard restarted this session because it had stopped making progress. Continue the task from where you left off.») for `stuck`. No credential is in it: the home's sign-in stays in its own Keychain item or file.
 

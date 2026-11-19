@@ -1,35 +1,83 @@
 //! The person's login `PATH` (SB-455). The desktop app and `serve` start from launchd with a
 //! short `PATH` (`/usr/bin:/bin`, and whatever the app's own start added), not the one the person's
 //! login shell builds. A session Switchboard starts inherited that `PATH`, so a Claude Code hook
-//! that runs `node` from Homebrew failed with "node: command not found". The owner asks the login
-//! shell once, non-interactively and bounded, and every session it starts gets that `PATH`.
+//! that runs `node` from Homebrew failed with "node: command not found". The process that builds a
+//! session (the owner, or an offline `launch`) asks the login shell, non-interactively and bounded,
+//! the first time it needs the answer; the owner asks once at start (`warm`), so its first session
+//! does not wait.
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// How long the login shell may take to print its `PATH`; past it the shell's process group is
 /// killed and reaped and the fallback is used.
 pub const TIMEOUT: Duration = Duration::from_secs(3);
-/// The most output read from the login shell; a profile that prints more is not a `PATH`.
-const MAX_OUTPUT: usize = 64 * 1024;
+/// After a failed ask, how long before the shell is asked once more (a profile that was slow at
+/// login, a shell being installed); after the second failure the fallback stays for the process.
+pub const RETRY_AFTER: Duration = Duration::from_secs(60);
+/// How many times one process asks at most.
+const MAX_ASKS: u32 = 2;
+/// The most output read from the login shell; a marker line past it is not read.
+#[cfg(unix)]
+const MAX_OUTPUT: u64 = 64 * 1024;
+/// The prefix of the line the asked command prints, so a profile's own output (a greeting before
+/// it, `.zlogout` after it) is never read as the answer.
+#[cfg(unix)]
+const MARKER: &str = "__SB_PATH__=";
+/// The command given to `<shell> -l -c`: `/bin/sh` prints the exported `PATH` after the marker,
+/// the same for zsh, bash and fish, and without `/usr/bin/printenv` (absent on NixOS).
+pub const COMMAND: &str = r#"/bin/sh -c 'printf "__SB_PATH__=%s\n" "$PATH"'"#;
 /// The folders a package manager puts tools in that a launchd `PATH` lacks, added after whatever
 /// the login shell said (or after the process's own `PATH` when it said nothing).
 pub const FALLBACK_DIRS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin"];
 
-/// What the login shell answered, once per process: `None` when it could not be asked (no shell,
-/// a timeout, an error, an answer that is not a `PATH`).
-static LOGIN: OnceLock<Option<Vec<PathBuf>>> = OnceLock::new();
+/// What one ask found, when, and how many asks there were.
+struct Asked {
+    answer: Option<Vec<PathBuf>>,
+    at: Instant,
+    asks: u32,
+}
+/// The process's answer: `None` until the first ask.
+static LOGIN: Mutex<Option<Asked>> = Mutex::new(None);
 
-/// The login shell's `PATH` folders, asked at most once per process (blocking, at most `TIMEOUT`
-/// the first time). In this crate's unit tests no shell is asked: the person's profile is not
-/// part of a test, which sets its own folders with `with_login`.
+/// The login shell's `PATH` folders (blocking, at most `TIMEOUT` when it asks). An answer is kept
+/// for the process's life; a failure (no shell, a timeout, an answer that is not a `PATH`) is
+/// asked once more after `RETRY_AFTER`, then kept. In this crate's unit tests no shell is asked:
+/// the person's profile is not part of a test, which sets its own folders with `with_login`.
 pub fn login_dirs() -> Option<Vec<PathBuf>> {
     #[cfg(test)]
     if let Some(dirs) = TEST_LOGIN.with(|t| t.borrow().clone()) {
         return Some(dirs);
     }
-    LOGIN.get_or_init(resolve_once).clone()
+    cached(&LOGIN, Instant::now(), resolve_once)
+}
+
+/// `cache`'s answer at `now`: `ask` is called the first time, and once more when the first ask
+/// failed at least `RETRY_AFTER` before `now` (at most `MAX_ASKS` asks in all).
+fn cached(
+    cache: &Mutex<Option<Asked>>,
+    now: Instant,
+    ask: impl FnOnce() -> Option<Vec<PathBuf>>,
+) -> Option<Vec<PathBuf>> {
+    let mut slot = cache.lock().unwrap_or_else(|e| e.into_inner());
+    let asks = match &*slot {
+        None => 0,
+        Some(asked) if asked.answer.is_some() => return asked.answer.clone(),
+        Some(asked)
+            if asked.asks >= MAX_ASKS || now.saturating_duration_since(asked.at) < RETRY_AFTER =>
+        {
+            return None;
+        }
+        Some(asked) => asked.asks,
+    };
+    let answer = ask();
+    *slot = Some(Asked {
+        answer: answer.clone(),
+        at: now,
+        asks: asks + 1,
+    });
+    answer
 }
 
 #[cfg(test)]
@@ -46,9 +94,9 @@ pub(crate) fn with_login<R>(dirs: Vec<PathBuf>, f: impl FnOnce() -> R) -> R {
 }
 
 /// Asks the login shell now, off the caller's path, so the first session does not wait for it.
-/// The owner calls it once at start; a second call does nothing.
+/// The owner calls it once at start; a call after the first ask does nothing.
 pub fn warm() {
-    if LOGIN.get().is_some() {
+    if LOGIN.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
         return;
     }
     let _ = std::thread::Builder::new()
@@ -124,18 +172,27 @@ pub fn login_shell() -> Option<PathBuf> {
     None
 }
 
-/// Runs `shell -l -c '/usr/bin/printenv PATH'` with nothing on stdin and stderr discarded, in a
-/// process group of its own, and reads the last line it printed (a profile may print before it).
-/// `printenv` reads the exported value, so the answer is the same for zsh, bash and fish. At
-/// `timeout` the group is killed and reaped. `None` unless the answer is a `PATH` of absolute
-/// folders.
+/// What the reader thread hands over: a marker line's value, or the end of the output.
+#[cfg(unix)]
+enum Out {
+    Line(String),
+    End,
+}
+
+/// Runs `shell -l -c COMMAND` with nothing on stdin and stderr discarded, in a process group of
+/// its own, and reads the last line that starts with `MARKER`. A reader thread hands each marker
+/// line over as soon as it reads it, so a child of the profile that keeps the pipe open after the
+/// shell exits holds the answer up by at most half a second (the thread is left to end when the
+/// pipe closes). At `timeout` the group is killed while the shell is still unreaped, then the shell
+/// is reaped; no group is signalled after that. `None` unless the shell exited with success and
+/// the answer names at least one absolute folder.
 #[cfg(unix)]
 pub fn resolve(shell: &Path, timeout: Duration) -> Option<Vec<PathBuf>> {
-    use std::io::Read;
+    use std::io::{BufRead, Read};
     use std::process::{Command, Stdio};
     let mut command = Command::new(shell);
     command
-        .args(["-l", "-c", "/usr/bin/printenv PATH"])
+        .args(["-l", "-c", COMMAND])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -144,21 +201,21 @@ pub fn resolve(shell: &Path, timeout: Duration) -> Option<Vec<PathBuf>> {
     let stdout = child.stdout.take();
     let (sent, read) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut out = Vec::new();
         if let Some(stdout) = stdout {
-            let _ = stdout.take(MAX_OUTPUT as u64 + 1).read_to_end(&mut out);
-        }
-        let _ = sent.send(out);
-    });
-    let kill_group = |child: &std::process::Child| {
-        if let Ok(group) = libc::pid_t::try_from(child.id()) {
-            // SAFETY: killpg only signals the group this call created, called only while a member
-            // of it is known to live (before the shell is reaped, or while one holds the pipe).
-            unsafe {
-                libc::killpg(group, libc::SIGKILL);
+            let mut lines = std::io::BufReader::new(stdout.take(MAX_OUTPUT));
+            let mut line = Vec::new();
+            while matches!(lines.read_until(b'\n', &mut line), Ok(n) if n > 0) {
+                if let Some(value) = std::str::from_utf8(&line)
+                    .ok()
+                    .and_then(|text| text.trim_end().strip_prefix(MARKER))
+                {
+                    let _ = sent.send(Out::Line(value.to_string()));
+                }
+                line.clear();
             }
         }
-    };
+        let _ = sent.send(Out::End);
+    });
     let started = Instant::now();
     let status = loop {
         match child.try_wait() {
@@ -167,44 +224,47 @@ pub fn resolve(shell: &Path, timeout: Duration) -> Option<Vec<PathBuf>> {
                 std::thread::sleep(Duration::from_millis(20))
             }
             _ => {
-                kill_group(&child);
+                if let Ok(group) = libc::pid_t::try_from(child.id()) {
+                    // SAFETY: the shell leads this group and is not reaped yet, so its id still
+                    // names the group this call created.
+                    unsafe {
+                        libc::killpg(group, libc::SIGKILL);
+                    }
+                }
                 let _ = child.kill();
                 let _ = child.wait();
                 break None;
             }
         }
     };
-    // A profile that started a background process keeps the pipe open past the shell's exit: a
-    // member of the group is then alive, so the group is killed and the reader ends.
-    let out = match read.recv_timeout(
-        timeout
-            .saturating_sub(started.elapsed())
-            .max(Duration::from_millis(100)),
-    ) {
-        Ok(out) => out,
-        Err(_) => {
-            kill_group(&child);
-            read.recv().unwrap_or_default()
-        }
-    };
-    if !status?.success() || out.len() > MAX_OUTPUT {
+    if !status?.success() {
         return None;
     }
-    parse(&String::from_utf8(out).ok()?)
+    // The shell exited, so its marker line, if it printed one, is in the pipe already. The reader
+    // ends at once unless a child of the profile holds the pipe; then the last marker line handed
+    // over within a short wait is the answer.
+    let mut answer = None;
+    let deadline = Instant::now() + Duration::from_millis(500);
+    while let Ok(Out::Line(value)) =
+        read.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+    {
+        answer = Some(value);
+    }
+    parse(&answer?)
 }
 #[cfg(not(unix))]
 pub fn resolve(_: &Path, _: Duration) -> Option<Vec<PathBuf>> {
     None
 }
 
-/// The last non-empty line of `out`, read as a `PATH`: every entry absolute (empty entries
-/// dropped), at least one.
-fn parse(out: &str) -> Option<Vec<PathBuf>> {
-    let line = out.lines().rev().map(str::trim).find(|l| !l.is_empty())?;
-    let dirs: Vec<PathBuf> = std::env::split_paths(line)
-        .filter(|d| !d.as_os_str().is_empty())
+/// A marker line's value read as a `PATH`: its absolute entries (an empty or relative entry is
+/// dropped, never searched from the session's folder), at least one.
+#[cfg(unix)]
+fn parse(value: &str) -> Option<Vec<PathBuf>> {
+    let dirs: Vec<PathBuf> = std::env::split_paths(value.trim())
+        .filter(|d| d.is_absolute())
         .collect();
-    (!dirs.is_empty() && dirs.iter().all(|d| d.is_absolute())).then_some(dirs)
+    (!dirs.is_empty()).then_some(dirs)
 }
 
 /// The `PATH` a session gets: `first` (a program's own folder), then `login` (the login shell's),
@@ -228,6 +288,61 @@ pub fn merge(
     std::env::join_paths(dirs).unwrap_or_default()
 }
 
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn a_failed_ask_is_asked_once_more_after_a_minute_and_an_answer_is_kept() {
+        let cache = Mutex::new(None);
+        let asks = Cell::new(0);
+        let t0 = Instant::now();
+        let dirs = vec![PathBuf::from("/synthetic/brew/bin")];
+        let ask = |answer: Option<Vec<PathBuf>>| {
+            let asks = &asks;
+            move || {
+                asks.set(asks.get() + 1);
+                answer
+            }
+        };
+        assert_eq!(cached(&cache, t0, ask(None)), None);
+        // Within the minute the failure stands, nothing is asked.
+        assert_eq!(
+            cached(&cache, t0 + Duration::from_secs(30), ask(None)),
+            None
+        );
+        assert_eq!(asks.get(), 1);
+        // After it, once more; the answer is then kept.
+        let later = t0 + RETRY_AFTER + Duration::from_secs(1);
+        assert_eq!(
+            cached(&cache, later, ask(Some(dirs.clone()))),
+            Some(dirs.clone())
+        );
+        let much_later = later + Duration::from_secs(3600);
+        assert_eq!(cached(&cache, much_later, ask(None)), Some(dirs.clone()));
+        assert_eq!(asks.get(), 2);
+
+        // Two failures: the fallback stays for the process.
+        let cache = Mutex::new(None);
+        asks.set(0);
+        assert_eq!(cached(&cache, t0, ask(None)), None);
+        assert_eq!(cached(&cache, later, ask(None)), None);
+        assert_eq!(cached(&cache, much_later, ask(Some(dirs.clone()))), None);
+        assert_eq!(asks.get(), 2);
+
+        // A first answer is never asked again.
+        let cache = Mutex::new(None);
+        asks.set(0);
+        assert_eq!(
+            cached(&cache, t0, ask(Some(dirs.clone()))),
+            Some(dirs.clone())
+        );
+        assert_eq!(cached(&cache, much_later, ask(None)), Some(dirs));
+        assert_eq!(asks.get(), 1);
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -241,15 +356,16 @@ mod tests {
     }
 
     #[test]
-    fn the_login_shell_is_asked_as_a_login_shell_and_its_last_line_is_the_path() {
+    fn the_login_shell_runs_the_marker_command_and_only_the_marker_line_is_read() {
         let dir = tempfile::tempdir().unwrap();
         let brew = dir.path().join("homebrew/bin");
         let log = dir.path().join("args");
-        // A profile that greets before the answer, as some do.
+        // A profile that greets before the answer and says goodbye after it (`.zlogout`); the
+        // fake shell runs the command it was given, as a login shell does, with its own PATH.
         let fake = shell(
             dir.path(),
             &format!(
-                "printf '%s\\n' \"$@\" > '{}'\necho 'Welcome back'\nprintf '%s\\n' '{}:/usr/bin:/bin'",
+                "printf '%s\\n' \"$@\" > '{}'\necho 'Welcome back'\nPATH='{}:/usr/bin:/bin'\nexport PATH\n/bin/sh -c \"$3\"\necho 'Goodbye /usr/bin'",
                 log.display(),
                 brew.display()
             ),
@@ -261,29 +377,64 @@ mod tests {
             [PathBuf::from("/usr/bin"), PathBuf::from("/bin")]
         );
         let args = std::fs::read_to_string(log).unwrap();
-        assert_eq!(args, "-l\n-c\n/usr/bin/printenv PATH\n");
+        assert_eq!(args, format!("-l\n-c\n{COMMAND}\n"));
     }
 
     #[test]
     fn a_shell_that_hangs_is_killed_at_the_deadline() {
         let dir = tempfile::tempdir().unwrap();
         // A background child keeps the pipe open: the group is killed with the shell.
-        let fake = shell(dir.path(), "sleep 30 &\nsleep 30\necho /usr/bin");
+        let fake = shell(
+            dir.path(),
+            "sleep 30 &\nsleep 30\necho __SB_PATH__=/usr/bin",
+        );
         let started = Instant::now();
         assert_eq!(resolve(&fake, Duration::from_millis(300)), None);
         assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
+    fn a_child_of_the_profile_that_holds_the_pipe_does_not_hold_the_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        // The shell answers and exits; a daemon its profile started keeps stdout open.
+        let fake = shell(
+            dir.path(),
+            "echo __SB_PATH__=/usr/bin:/bin\nsleep 5 &\nexit 0",
+        );
+        let started = Instant::now();
+        assert_eq!(
+            resolve(&fake, TIMEOUT),
+            Some(vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")])
+        );
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn relative_entries_are_dropped_and_the_rest_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = shell(dir.path(), "echo __SB_PATH__=node_modules/.bin::/usr/bin:.");
+        assert_eq!(
+            resolve(&fake, TIMEOUT),
+            Some(vec![PathBuf::from("/usr/bin")])
+        );
+    }
+
+    #[test]
     fn a_failed_shell_or_an_answer_that_is_not_a_path_gives_nothing() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(
-            resolve(&shell(dir.path(), "echo /usr/bin\nexit 1"), TIMEOUT),
+            resolve(
+                &shell(dir.path(), "echo __SB_PATH__=/usr/bin\nexit 1"),
+                TIMEOUT
+            ),
             None
         );
         let dir = tempfile::tempdir().unwrap();
+        // A line without the marker is never the answer.
+        assert_eq!(resolve(&shell(dir.path(), "echo /usr/bin"), TIMEOUT), None);
+        let dir = tempfile::tempdir().unwrap();
         assert_eq!(
-            resolve(&shell(dir.path(), "echo 'not a path'"), TIMEOUT),
+            resolve(&shell(dir.path(), "echo '__SB_PATH__=not a path'"), TIMEOUT),
             None
         );
         let dir = tempfile::tempdir().unwrap();

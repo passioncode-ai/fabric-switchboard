@@ -538,9 +538,9 @@ pub fn resume_script_for(
             quote(&config.to_string_lossy())
         ));
     }
-    // A Terminal window runs the script without the person's login shell: the PATH a run started
-    // by the owner gets, the person's login PATH first (SB-455), so the session's hooks find `node`
-    // (operator 2026-11-15: every hook failed with "node: command not found").
+    // A Terminal window runs the script with the PATH it was started with; the program's folder
+    // goes first and the person's login PATH fills what that PATH lacks (SB-455), so the session's
+    // hooks find `node` (operator 2026-11-15: every hook failed with "node: command not found").
     out.push_str(&crate::launch::path_export(program));
     out.push_str(&format!(
         "cd {} || exit 1\n{}",
