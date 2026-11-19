@@ -5646,6 +5646,45 @@ fn attention_report(
         now,
     }))
 }
+/// SB-573: the answer of `Operation::AccessGrants`, kept out of `execute`, whose frame is already
+/// near a test thread's stack (its locals would join every arm's in a debug build).
+#[inline(never)]
+fn access_grants_answer(
+    store: &Store,
+    root: &Path,
+    input: access_grants::ListInput,
+) -> Result<Value, String> {
+    input.check()?;
+    let snapshot = store.snapshot()?;
+    let root = root.to_owned();
+    Ok(blocking::run(move || {
+        access_grants::list(&root, &snapshot, &input, monitor::now())
+    }))
+}
+/// SB-573: the name the account `id` is given to now, if any.
+#[inline(never)]
+fn assigned_to_now(store: &Store, id: &str) -> Result<Option<String>, String> {
+    Ok(store.snapshot()?.assigned_to.get(id).cloned())
+}
+/// SB-573: records a give or a take-back in `assignments.jsonl` when `assigned_to` changed, so a
+/// grant taken back stays listable (DEC-0187 AG-5). A failed write costs the record, never the
+/// act: it is logged.
+#[inline(never)]
+fn record_assignment_change(
+    store: &Store,
+    root: &Path,
+    id: &str,
+    before: Option<String>,
+) -> Result<(), String> {
+    let after = assigned_to_now(store, id)?;
+    if after != before
+        && access_grants::record_assignment(root, monitor::now(), id, after.as_deref()).is_err()
+    {
+        oplog::event("assignment_record", &[("failed", oplog::Field::Flag(true))]);
+    }
+    Ok(())
+}
+
 async fn execute(
     store: Arc<Store>,
     root: &Path,
@@ -5948,17 +5987,9 @@ async fn execute(
             {
                 return Err(account_send::MOVED_AWAY.into());
             }
-            let before = store.snapshot()?.assigned_to.get(&id).cloned();
+            let before = assigned_to_now(&store, &id)?;
             store.assign_to_agent(&id, to.as_deref())?;
-            // SB-573: kept so a grant taken back stays listable (DEC-0187 AG-5). A failed write
-            // costs the record, never the act.
-            let after = store.snapshot()?.assigned_to.get(&id).cloned();
-            if after != before
-                && access_grants::record_assignment(root, monitor::now(), &id, after.as_deref())
-                    .is_err()
-            {
-                oplog::event("assignment_record", &[("failed", oplog::Field::Flag(true))]);
-            }
+            record_assignment_change(&store, root, &id, before)?;
             Ok(Value::Null)
         }
         // Only the offline CLI reaches this arm (`Runtime::execute` answers a quota check
@@ -7558,14 +7589,7 @@ async fn execute(
         Operation::Seats { limit } => Ok(json!({
             "seats": seats::recent(root, limit.unwrap_or(50).clamp(1, 1000)),
         })),
-        Operation::AccessGrants { input } => {
-            input.check()?;
-            let snapshot = store.snapshot()?;
-            let root = root.to_owned();
-            Ok(blocking::run(move || {
-                access_grants::list(&root, &snapshot, &input, monitor::now())
-            }))
-        }
+        Operation::AccessGrants { input } => access_grants_answer(&store, root, input),
         Operation::Targets { probe } => {
             let root = root.to_owned();
             blocking::run(move || -> Result<Value, String> {
