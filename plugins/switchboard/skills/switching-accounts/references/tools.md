@@ -55,7 +55,7 @@ The server works out which session asks from its own environment, first match wi
 
 ## Read tools
 
-Annotations: `readOnlyHint: true`.
+Annotations: `readOnlyHint: true` for the tools that only read. Some sections here belong to write tools kept beside the reads they act on (for example `switchboard_session_continue`, `switchboard_sessions_restart_apply`, `switchboard_github_clone`, and the three that end a process: `switchboard_session_close_copy`, `switchboard_dispatch_stop`, `switchboard_session_end`), and some to write tools with a read form (`switchboard_app`, `switchboard_analytics`); on the full server they carry the write tools' annotations, under [Write tools](#write-tools).
 
 ### `switchboard_status`: no arguments
 
@@ -536,7 +536,7 @@ Each group folder whose Claude Code sessions are routed to the group's accounts 
 
 ## Write tools
 
-Annotations: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: true`.
+Annotations: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: true`, except two kinds. The tools that end a process (`switchboard_session_close_copy`, `switchboard_dispatch_stop`, `switchboard_session_end`, whose sections sit beside the session tools above) read `destructiveHint: true`, `idempotentHint: false`. The tools that delete what cannot be restored (`switchboard_account_remove`, `switchboard_project_delete`, `switchboard_kimi_remove`, `switchboard_openrouter_remove`) read `destructiveHint: true`, `idempotentHint: true`: a second call removes nothing more.
 
 ### `switchboard_switch`: `account_id`, `target?`, `global?`, `force?`
 
@@ -655,7 +655,8 @@ location or assigned_to to change.").
 Only when the operator asks. Removes one account from Switchboard and deletes its stored sign-in or
 key here, as the window's *Remove account* does; this cannot be undone. Refused while its group has
 it selected (select another first). Clients signed in elsewhere are not signed out; an account moved
-to another machine is called back or removed there with `switchboard_account_recall`.
+to another machine is called back or removed there with `switchboard_account_recall`. Annotated
+`destructiveHint` and `idempotentHint` (2026-11-19 audit M5-13).
 
 ### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`, `remote_data_dir?`, `decision?`, `delegate?`, `lease_hours?`
 
@@ -848,7 +849,8 @@ deleted. An account whose group here does not take it goes to the default group
 
 Only when the operator asks. Deletes a group as the window's *Delete group* does: its folders stop
 routing to its accounts and its own accounts go to the default group (nothing is signed out). A
-group with its own key or spending ceiling needs `decision`, the operator's words.
+group with its own key or spending ceiling needs `decision`, the operator's words. Annotated
+`destructiveHint` and `idempotentHint` (2026-11-19 audit M5-13).
 
 ### `switchboard_project_switch`: `pool`, `on`
 

@@ -176,6 +176,8 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_session_close_copy",
             "switchboard_dispatch_stop",
             "switchboard_session_end",
+            "switchboard_account_remove",
+            "switchboard_project_delete",
             "switchboard_kimi_remove",
             "switchboard_openrouter_remove"
         ]
@@ -1900,7 +1902,13 @@ async fn arguments_are_checked_against_the_schema_and_the_window_removals_have_t
     assert!(!error, "{removed}");
     assert_eq!(removed["removed"], false);
     let tools = agent.request("tools/list", json!({}));
-    for name in ["switchboard_openrouter_remove", "switchboard_kimi_remove"] {
+    // M5-13: so are removing an account and deleting a group.
+    for name in [
+        "switchboard_openrouter_remove",
+        "switchboard_kimi_remove",
+        "switchboard_account_remove",
+        "switchboard_project_delete",
+    ] {
         let tool = tools["result"]["tools"]
             .as_array()
             .unwrap()

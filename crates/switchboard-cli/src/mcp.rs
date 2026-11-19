@@ -259,8 +259,15 @@ const STOPS_PROCESSES: [&str; 3] = [
     "switchboard_session_end",
 ];
 
-/// SB-517: the tools that delete what cannot be restored (the window's Remove buttons).
-const DELETES: [&str; 2] = ["switchboard_kimi_remove", "switchboard_openrouter_remove"];
+/// SB-517: the tools that delete what cannot be restored (the window's Remove buttons). 2026-11-19
+/// audit M5-13: removing an account (its stored sign-in or key is deleted here) and deleting a
+/// group cannot be taken back either.
+const DELETES: [&str; 4] = [
+    "switchboard_account_remove",
+    "switchboard_project_delete",
+    "switchboard_kimi_remove",
+    "switchboard_openrouter_remove",
+];
 
 /// SB-517: the write tools that also have a read form. Called without the fields that change
 /// something they only read, so a read-only server lists them and answers that form
