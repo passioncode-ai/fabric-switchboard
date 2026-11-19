@@ -7327,10 +7327,17 @@ async fn execute(
                 );
                 let now = session_watch::now();
                 let mut resumable = resumable::recent(&root, now - resumable::WINDOW_SECONDS);
-                // SB-508: a session the person started that ended outside Switchboard (a
-                // reboot, a crash, a closed terminal) in the last day, seen live by the ledger;
-                // a live one or one Switchboard closed is listed once, by the rows themselves.
-                resumable.extend(live_ledger::ended_rows(&root, now));
+                // SB-508: a session the person started that ended outside Switchboard in the
+                // last day, from the ledger; only when the process table was read, so a live
+                // session is never listed as ended (review round 3 of PR #852). One Switchboard
+                // closed on purpose keeps its own line. The newest line of a session wins.
+                if session_watch::table_read(&tree) {
+                    let since = now - session_watch::WINDOW_SECONDS;
+                    let closed =
+                        session_watch::closed_on_purpose(&resumable, &duty::journal(&root), since);
+                    resumable.extend(live_ledger::ended_rows(&root, now, &closed));
+                    resumable.sort_by_key(|r| std::cmp::Reverse(r["at"].as_i64().unwrap_or(0)));
+                }
                 let monitors: HashMap<String, Value> = tree["live"]
                     .as_array()
                     .into_iter()

@@ -695,7 +695,7 @@ pub fn offer(
 }
 
 /// The last bytes of a transcript, for `exited`.
-fn transcript_tail(path: &Path) -> String {
+pub(crate) fn transcript_tail(path: &Path) -> String {
     use std::io::{Read, Seek, SeekFrom};
     let Ok(mut file) = std::fs::File::open(path) else {
         return String::new();

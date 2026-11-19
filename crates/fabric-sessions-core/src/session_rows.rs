@@ -273,6 +273,9 @@ pub fn build(sources: &Sources) -> Value {
             // SB-508: a session the person started that ended outside Switchboard (a reboot, a
             // crash, a closed terminal), from the ledger of live sessions.
             Some("seen_live") => "ended_seen",
+            // Review round 3 of PR #852: one the watch saw go (an `/exit`, a closed window) is
+            // only listed: nothing says it wants to go on.
+            Some("seen_gone") => "ended",
             _ => "closed_idle",
         };
         rows.push(row(
@@ -284,7 +287,11 @@ pub fn build(sources: &Sources) -> Value {
                 "launch_id": r["launch_id"], "account": Value::Null, "pool": Value::Null,
                 "origin": Value::Null, "since": r["at"],
             }),
-            vec!["continue"],
+            if r["reason"] == "seen_gone" {
+                vec![]
+            } else {
+                vec!["continue"]
+            },
         ));
     }
 
@@ -635,6 +642,7 @@ mod tests {
             json!({"session": "S40", "reason": "restart_back", "cwd": "/w/r", "at": 900}),
             json!({"session": "S41", "reason": "restart", "cwd": "/w/q", "at": 900}),
             json!({"session": "S42", "reason": "seen_live", "cwd": "/w/s", "at": 880}),
+            json!({"session": "S43", "reason": "seen_gone", "cwd": "/w/t", "at": 870}),
         ];
         let answer = build(&Sources {
             tree: &json!({"observed_at": 1000, "live": [], "launches": [], "findings": []}),
@@ -650,12 +658,18 @@ mod tests {
             .iter()
             .filter_map(|r| r["id"].as_str())
             .collect();
-        assert_eq!(ids, vec!["closed:S41", "closed:S42"]);
+        assert_eq!(ids, vec!["closed:S41", "closed:S42", "closed:S43"]);
         // SB-508: a session the ledger saw live that ended since can be continued.
         let seen = &answer["rows"][1];
         assert_eq!(
             (seen["why"].clone(), seen["acts"].clone()),
             (json!("ended_seen"), json!(["continue"]))
+        );
+        // One the watch saw go is listed with no act.
+        let gone = &answer["rows"][2];
+        assert_eq!(
+            (gone["why"].clone(), gone["acts"].clone()),
+            (json!("ended"), json!([]))
         );
     }
 

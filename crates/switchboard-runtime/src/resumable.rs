@@ -24,6 +24,29 @@ pub const UNKNOWN: &str =
     "Switchboard has no record of that session. Refresh the list, then retry.";
 pub const NO_FOLDER: &str = "That session's folder is gone, so it cannot be continued there.";
 pub const NO_CLAUDE: &str = "Claude Code was not found on this computer.";
+/// Review round 3 of PR #852: without the process table no one can tell the session is not still
+/// running, so nothing is started beside it.
+pub const UNREAD: &str = "The running sessions could not be read, so it is not known whether that session still runs. Try again in a moment.";
+
+/// Whether `session` may be continued as far as the process table says: refused while a process
+/// holds it (`LIVE`) and when the table could not be read (`UNREAD`). Pure, for tests.
+pub fn not_running(
+    live: Option<&std::collections::HashSet<String>>,
+    session: &str,
+) -> Result<(), &'static str> {
+    match live {
+        None => Err(UNREAD),
+        Some(live) if live.contains(session) => Err(LIVE),
+        Some(_) => Ok(()),
+    }
+}
+
+/// The sessions a live Claude Code process holds now, or `None` when the table was not read.
+#[cfg(unix)]
+fn live_now(root: &Path) -> Option<std::collections::HashSet<String>> {
+    let (scan, pairs) = crate::machine_sessions::scan_and_pairs(root);
+    crate::session_watch::table_read(&scan).then(|| pairs.into_iter().map(|(s, _, _)| s).collect())
+}
 pub const NOT_STARTED: &str = "The Terminal window to continue the session could not be opened.";
 /// The prompt a session continued by a person goes on with.
 pub const CONTINUE_PROMPT: &str =
@@ -136,14 +159,17 @@ pub fn locate(root: &Path, session: &str, now: i64) -> Option<(PathBuf, String)>
             found.push((if named { at } else { i64::MIN }, config, cwd.to_owned()));
         }
     }
-    if let Some(entry) = crate::live_ledger::read(root).sessions.get(session) {
-        if entry.last_seen >= now - WINDOW_SECONDS {
-            found.push((
-                entry.last_seen,
-                PathBuf::from(&entry.config),
-                entry.cwd.clone(),
-            ));
-        }
+    // Review round 3 of PR #852: what the ledger may resume here (own sign-in off keeps only
+    // Switchboard's own homes).
+    if let Some(entry) = crate::live_ledger::find(root, session, now) {
+        found.push((
+            entry
+                .ended_at
+                .unwrap_or(entry.last_seen)
+                .max(entry.last_seen),
+            PathBuf::from(&entry.config),
+            entry.cwd,
+        ));
     }
     // The newest wins; on a tie the order above (an end, a launch, the ledger).
     let mut best: Option<(i64, PathBuf, String)> = None;
@@ -187,9 +213,7 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
     if !crate::launches::valid_id(session) {
         return Err(UNKNOWN.into());
     }
-    if crate::machine_sessions::live_sessions(root).contains_key(session) {
-        return Err(LIVE.into());
-    }
+    not_running(live_now(root).as_ref(), session)?;
     let (config, cwd) = locate(root, session, now).ok_or(UNKNOWN)?;
     if !Path::new(&cwd).is_dir() {
         return Err(NO_FOLDER.into());
@@ -312,6 +336,7 @@ mod tests {
                 config: PathBuf::from("/h/.claude-work"),
                 cwd: "/w/mine".into(),
                 pid: 42,
+                kind: "interactive".into(),
             }],
             |_| "terminal".to_owned(),
             4000,
@@ -384,6 +409,15 @@ mod tests {
             locate(root.path(), session, 300),
             Some((PathBuf::from("/h/.claude-other"), "/w/c".to_owned()))
         );
+    }
+
+    #[test]
+    fn a_session_is_never_continued_beside_a_process_nobody_could_see() {
+        // Review round 3 of PR #852: an unread process table is not an empty one.
+        let live: std::collections::HashSet<String> = ["S1".to_owned()].into();
+        assert_eq!(not_running(None, "S2"), Err(UNREAD));
+        assert_eq!(not_running(Some(&live), "S1"), Err(LIVE));
+        assert_eq!(not_running(Some(&live), "S2"), Ok(()));
     }
 
     #[test]

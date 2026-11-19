@@ -2102,6 +2102,7 @@ export const RU: Record<string, string> = {
   "Did not start": "Не запустилась",
   "The switchboard command was not found next to this app, so the session cannot be opened here. Reinstall Switchboard, then retry.": "Команда switchboard не найдена рядом с приложением, поэтому сессию нельзя открыть здесь. Переустановите Switchboard и повторите.",
   "Switchboard has no record of that session. Refresh the list, then retry.": "У Switchboard нет записи об этой сессии. Обновите список и повторите.",
+  "The running sessions could not be read, so it is not known whether that session still runs. Try again in a moment.": "Запущенные сессии не удалось прочитать, поэтому неизвестно, работает ли эта сессия. Повторите через несколько секунд.",
   "That session is still running in a process. Open its window, or close it there first.": "Эта сессия ещё работает в процессе. Откройте её окно или сначала закройте её там.",
   "That session's folder is gone, so it cannot be continued there.": "Папки этой сессии больше нет, поэтому продолжить её там нельзя.",
   "That session's history is not on this computer any more, so it cannot be continued as the same session.": "Истории этой сессии на этом компьютере больше нет, поэтому её нельзя продолжить как ту же сессию.",

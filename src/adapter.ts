@@ -197,6 +197,7 @@ const safeErrors = new Set([
   "A session host runs on macOS and Linux for now.",
   "Switchboard has no record of that session. Refresh the list, then retry.",
   "That session is still running in a process. Open its window, or close it there first.",
+  "The running sessions could not be read, so it is not known whether that session still runs. Try again in a moment.",
   "That session's folder is gone, so it cannot be continued there.",
   "That session's history is not on this computer any more, so it cannot be continued as the same session.",
   "Claude Code was not found on this computer.",

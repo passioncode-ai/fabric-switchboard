@@ -36,7 +36,21 @@ pub struct Entry {
     pub pid: u32,
     pub first_seen: i64,
     pub last_seen: i64,
+    /// Claude Code's own kind of the session (`interactive`); only interactive sessions are kept.
+    #[serde(default)]
+    pub kind: String,
+    /// When it was found no longer live, and how (review round 3 of PR #852): `watched` (the
+    /// watch saw it go: an `/exit`, a closed window, `/clear` or `/resume` in its process, a crash)
+    /// or `boot` (live when this computer went down: never seen to go, last seen before the boot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<String>,
 }
+
+/// How a ledger session ended.
+pub const ENDED_WATCHED: &str = "watched";
+pub const ENDED_BOOT: &str = "boot";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ledger {
@@ -52,11 +66,13 @@ pub struct Observed {
     pub config: PathBuf,
     pub cwd: String,
     pub pid: u32,
+    pub kind: String,
 }
 
 /// The sessions whose file (`sessions/<pid>.json` in `config`) names a live Claude Code process.
 /// A file naming a dead pid, an id that is not a session id or a folder that is not absolute is
-/// left out. Pure, for tests.
+/// left out, and so is every session that is not `interactive` (a `claude -p` board run). Pure,
+/// for tests.
 pub fn observed(files: &[(PathBuf, Value)], alive: &HashSet<u32>) -> Vec<Observed> {
     files
         .iter()
@@ -64,7 +80,9 @@ pub fn observed(files: &[(PathBuf, Value)], alive: &HashSet<u32>) -> Vec<Observe
             let pid = u32::try_from(file["pid"].as_u64()?).ok()?;
             let session = file["sessionId"].as_str()?;
             let cwd = file["cwd"].as_str()?;
+            let kind = file["kind"].as_str().unwrap_or_default();
             (alive.contains(&pid)
+                && kind == "interactive"
                 && crate::launches::valid_id(session)
                 && Path::new(cwd).is_absolute())
             .then(|| Observed {
@@ -72,6 +90,7 @@ pub fn observed(files: &[(PathBuf, Value)], alive: &HashSet<u32>) -> Vec<Observe
                 config: config.clone(),
                 cwd: cwd.to_owned(),
                 pid,
+                kind: kind.to_owned(),
             })
         })
         .collect()
@@ -84,6 +103,19 @@ pub fn merge(
     seen: &[Observed],
     host: impl Fn(u32) -> String,
     now: i64,
+) -> Option<Ledger> {
+    merge_at(previous, seen, host, now, None)
+}
+
+/// `merge`, knowing when this computer started (`boot`): an entry not live now that was never
+/// seen to end is marked ended, `boot` when it was last seen before the boot (it was live when the
+/// computer went down), else `watched` (the watch saw it go). An entry live again is not ended.
+pub fn merge_at(
+    previous: &Ledger,
+    seen: &[Observed],
+    host: impl Fn(u32) -> String,
+    now: i64,
+    boot: Option<i64>,
 ) -> Option<Ledger> {
     let mut next = Ledger {
         version: VERSION,
@@ -115,9 +147,12 @@ pub fn merge(
         let entry = match previous.sessions.get(&s.session) {
             Some(old) if old.pid == s.pid && old.config == config && old.cwd == s.cwd => {
                 let mut kept = old.clone();
-                if refresh {
+                if refresh || kept.ended_at.is_some() {
                     kept.last_seen = now;
                 }
+                kept.ended_at = None;
+                kept.ended = None;
+                kept.kind.clone_from(&s.kind);
                 kept
             }
             Some(old) => Entry {
@@ -131,6 +166,9 @@ pub fn merge(
                 pid: s.pid,
                 first_seen: old.first_seen.min(now),
                 last_seen: now,
+                kind: s.kind.clone(),
+                ended_at: None,
+                ended: None,
             },
             None => Entry {
                 config,
@@ -139,9 +177,24 @@ pub fn merge(
                 pid: s.pid,
                 first_seen: now,
                 last_seen: now,
+                kind: s.kind.clone(),
+                ended_at: None,
+                ended: None,
             },
         };
         next.sessions.insert(s.session.clone(), entry);
+    }
+    let live: HashSet<&str> = seen.iter().map(|s| s.session.as_str()).collect();
+    for (id, e) in next.sessions.iter_mut() {
+        if e.ended_at.is_some() || live.contains(id.as_str()) {
+            continue;
+        }
+        let (at, how) = match boot {
+            Some(boot) if e.last_seen < boot => (boot, ENDED_BOOT),
+            _ => (now, ENDED_WATCHED),
+        };
+        e.ended_at = Some(at);
+        e.ended = Some(how.to_owned());
     }
     let since = now - crate::resumable::WINDOW_SECONDS;
     next.sessions.retain(|_, e| e.last_seen >= since);
@@ -180,38 +233,75 @@ fn write(root: &Path, ledger: &Ledger) {
 /// duty officer keeps only those.
 pub fn observe(root: &Path, alive: &HashSet<u32>, now: i64) {
     let mut seen = observed(&crate::machine_sessions::session_files(root), alive);
+    let mut previous = read(root);
+    // With the person's own sign-in off, their sessions are neither looked at nor marked ended:
+    // they are set aside and put back as they were.
+    let mut set_aside = BTreeMap::new();
     if crate::own_sign_in::is_off(root) {
         seen.retain(|s| s.config.starts_with(root));
+        let root_text = root.to_string_lossy().into_owned();
+        set_aside = std::mem::take(&mut previous.sessions);
+        previous.sessions = set_aside
+            .iter()
+            .filter(|(_, e)| ours(&root_text, e))
+            .map(|(id, e)| (id.clone(), e.clone()))
+            .collect();
+        set_aside.retain(|_, e| !ours(&root_text, e));
     }
-    let previous = read(root);
     let host =
         |pid: u32| crate::duty::host_of(&crate::machine_sessions::ancestor_paths(pid)).to_owned();
-    if let Some(next) = merge(&previous, &seen, host, now) {
+    if let Some(mut next) = merge_at(&previous, &seen, host, now, crate::watchdog::boot_time()) {
+        next.sessions.extend(set_aside);
         write(root, &next);
     }
+}
+
+/// Whether an entry's config folder is one of Switchboard's own homes (under its data folder).
+fn ours(root: &str, e: &Entry) -> bool {
+    Path::new(&e.config).starts_with(root)
+}
+
+/// Whether an entry may be shown or resumed here: an interactive session (an entry from before
+/// the kind was kept counts as one) outside Fabric Dashboards (which resumes its own consoles),
+/// and, with the person's own sign-in off, only one in Switchboard's own homes.
+fn shown(root: &Path, e: &Entry, own_off: bool) -> bool {
+    (e.kind.is_empty() || e.kind == "interactive")
+        && e.host != "dashboards"
+        && (!own_off || ours(&root.to_string_lossy(), e))
 }
 
 /// SB-508: how long after its last sighting the Sessions page lists a session that ended.
 pub const ENDED_LISTED_SECONDS: i64 = 86_400;
 
-/// SB-508: the ledger's sessions seen within `ENDED_LISTED_SECONDS`, as the Sessions page's
-/// resumable lines (`reason: seen_live`), newest first. The rows drop every session still live
-/// (`last_seen` is refreshed only hourly) and every one already listed, so only the ended stay.
-pub fn ended_rows(root: &Path, now: i64) -> Vec<Value> {
+/// SB-508: the ledger's sessions that ended within `ENDED_LISTED_SECONDS`, as the Sessions page's
+/// lines, newest first. Review round 3 of PR #852: only a session live when this computer went
+/// down (`ended: boot`) is offered for continuation (`reason: seen_live`), and not when its
+/// transcript ends with the person's `/exit` (`session_watch::exited`) or Switchboard closed it on
+/// purpose (`closed`: `session_watch::closed_on_purpose`, whose own line is listed instead). One the
+/// watch saw go (`/exit`, a closed window, `/clear` or `/resume` in its process, a crash) is listed
+/// as ended without an act (`reason: seen_gone`). `at` is when it ended.
+pub fn ended_rows(root: &Path, now: i64, closed: &HashSet<String>) -> Vec<Value> {
+    let own_off = crate::own_sign_in::is_off(root);
     let ledger = read(root);
     let mut rows: Vec<(i64, Value)> = ledger
         .sessions
         .iter()
-        .filter(|(_, e)| {
-            let age = now - e.last_seen;
-            (0..=ENDED_LISTED_SECONDS).contains(&age)
-        })
-        .map(|(id, e)| {
-            (
-                e.last_seen,
+        .filter(|(id, e)| shown(root, e, own_off) && !closed.contains(id.as_str()))
+        .filter_map(|(id, e)| {
+            let at = e.ended_at?;
+            if !(0..=ENDED_LISTED_SECONDS).contains(&(now - at)) {
+                return None;
+            }
+            let cut = e.ended.as_deref() == Some(ENDED_BOOT) && {
+                let path = crate::resumable::transcript(Path::new(&e.config), &e.cwd, id);
+                !crate::session_watch::exited(&crate::session_watch::transcript_tail(&path))
+            };
+            let reason = if cut { "seen_live" } else { "seen_gone" };
+            Some((
+                at,
                 serde_json::json!({"session": id, "config": e.config, "cwd": e.cwd,
-                    "reason": "seen_live", "at": e.last_seen, "by": "ledger"}),
-            )
+                    "reason": reason, "at": at, "by": "ledger"}),
+            ))
         })
         .collect();
     rows.sort_by_key(|a| std::cmp::Reverse(a.0));
@@ -221,10 +311,18 @@ pub fn ended_rows(root: &Path, now: i64) -> Vec<Value> {
 /// Where `session` can be resumed from (its config folder and working folder), when it was seen
 /// live in the last `resumable::WINDOW_SECONDS`.
 pub fn locate(root: &Path, session: &str, now: i64) -> Option<(PathBuf, String)> {
-    let ledger = read(root);
-    let entry = ledger.sessions.get(session)?;
-    (entry.last_seen >= now - crate::resumable::WINDOW_SECONDS)
-        .then(|| (PathBuf::from(&entry.config), entry.cwd.clone()))
+    find(root, session, now).map(|e| (PathBuf::from(&e.config), e.cwd))
+}
+
+/// The entry of `session` seen in the last `resumable::WINDOW_SECONDS` that may be resumed here
+/// (`shown`: own sign-in off keeps only Switchboard's own homes, review round 3 of PR #852).
+pub fn find(root: &Path, session: &str, now: i64) -> Option<Entry> {
+    let own_off = crate::own_sign_in::is_off(root);
+    read(root)
+        .sessions
+        .remove(session)
+        .filter(|e| e.last_seen >= now - crate::resumable::WINDOW_SECONDS)
+        .filter(|e| shown(root, e, own_off))
 }
 
 #[cfg(test)]
@@ -236,7 +334,7 @@ mod tests {
     const S2: &str = "22222222-2222-4222-8222-222222222222";
 
     fn file(session: &str, pid: u32, cwd: &str) -> Value {
-        json!({"pid": pid, "sessionId": session, "cwd": cwd, "status": "busy"})
+        json!({"pid": pid, "sessionId": session, "cwd": cwd, "status": "busy", "kind": "interactive"})
     }
 
     fn seen(session: &str, pid: u32, cwd: &str) -> Observed {
@@ -245,6 +343,7 @@ mod tests {
             config: PathBuf::from("/h/.claude"),
             cwd: cwd.into(),
             pid,
+            kind: "interactive".into(),
         }
     }
 
@@ -260,8 +359,13 @@ mod tests {
             (config.clone(), file("../escape", 12, &folder("c"))),
             (config.clone(), file(S2, 13, "relative")),
             (config.clone(), json!({"pid": 14, "cwd": folder("d")})),
+            // Review round 3: a `claude -p` board run is not an interactive session.
+            (
+                config.clone(),
+                json!({"pid": 15, "sessionId": S2, "cwd": folder("e"), "kind": "print"}),
+            ),
         ];
-        let alive: HashSet<u32> = [10, 12, 13, 14].into_iter().collect();
+        let alive: HashSet<u32> = [10, 12, 13, 14, 15].into_iter().collect();
         assert_eq!(observed(&files, &alive), vec![seen(S1, 10, &folder("a"))]);
     }
 
@@ -286,9 +390,28 @@ mod tests {
         assert_eq!(asked.get(), 1);
         // The next minutes change nothing: no write, and the host is not asked again.
         assert!(merge(&first, &[seen(S1, 10, "/work/a")], host, 1060).is_none());
-        assert!(
-            merge(&first, &[], host, 2000).is_none(),
-            "gone: kept as it was"
+        // Gone while watched: marked ended once, then kept as it is.
+        let gone = merge(&first, &[], host, 2000).unwrap();
+        assert_eq!(
+            (
+                gone.sessions[S1].ended_at,
+                gone.sessions[S1].ended.as_deref()
+            ),
+            (Some(2000), Some(ENDED_WATCHED))
+        );
+        assert!(merge(&gone, &[], host, 2060).is_none());
+        // Live again (resumed): not ended any more.
+        let again = merge(&gone, &[seen(S1, 10, "/work/a")], host, 2100).unwrap();
+        assert_eq!(again.sessions[S1].ended_at, None);
+        assert_eq!(again.sessions[S1].last_seen, 2100);
+        // Last seen before this boot and never seen to go: it was live when the computer went down.
+        let booted = merge_at(&first, &[], host, 5000, Some(4000)).unwrap();
+        assert_eq!(
+            (
+                booted.sessions[S1].ended_at,
+                booted.sessions[S1].ended.as_deref()
+            ),
+            (Some(4000), Some(ENDED_BOOT))
         );
         assert_eq!(asked.get(), 1);
         // An hour on, `last_seen` is written again.
@@ -326,8 +449,9 @@ mod tests {
         let host = |_: u32| "other".to_owned();
         let first = merge(&Ledger::default(), &[seen(S1, 10, "/w")], host, 0).unwrap();
         let week = crate::resumable::WINDOW_SECONDS;
-        assert!(merge(&first, &[], host, week).is_none(), "still within");
-        assert!(merge(&first, &[], host, week + 1)
+        let ended = merge(&first, &[], host, 1).unwrap();
+        assert!(merge(&ended, &[], host, week).is_none(), "still within");
+        assert!(merge(&ended, &[], host, week + 1)
             .unwrap()
             .sessions
             .is_empty());
@@ -345,6 +469,9 @@ mod tests {
                     pid: 1,
                     first_seen: n,
                     last_seen: n,
+                    kind: "interactive".into(),
+                    ended_at: Some(n),
+                    ended: Some(ENDED_WATCHED.into()),
                 },
             );
         }
@@ -396,22 +523,106 @@ mod tests {
         keys.sort_unstable();
         assert_eq!(
             keys,
-            ["config", "cwd", "first_seen", "host", "last_seen", "pid"]
+            [
+                "config",
+                "cwd",
+                "first_seen",
+                "host",
+                "kind",
+                "last_seen",
+                "pid"
+            ]
         );
-        // The Sessions page's lines: seen within a day, newest first.
-        let rows = ended_rows(root.path(), 2000);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(
-            (
-                rows[0]["session"].clone(),
-                rows[0]["reason"].clone(),
-                rows[0]["cwd"].clone()
-            ),
-            (json!(S1), json!("seen_live"), json!("/work/a"))
-        );
-        assert!(ended_rows(root.path(), 1000 + ENDED_LISTED_SECONDS + 1).is_empty());
+        // A live session is never a line of the Sessions page.
+        assert!(ended_rows(root.path(), 2000, &HashSet::new()).is_empty());
         // A broken file reads as empty and is replaced by the next write.
         std::fs::write(root.path().join(FILE), b"{").unwrap();
         assert_eq!(read(root.path()), Ledger::default());
+    }
+
+    /// Review round 3 of PR #852: only a session live when the computer went down is offered for
+    /// continuation; one closed on purpose, by `/exit`, in Fabric Dashboards, not interactive, or
+    /// outside Switchboard's homes while own sign-in is off is not.
+    #[test]
+    fn only_a_session_cut_by_a_reboot_is_offered_and_one_closed_on_purpose_never() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("homes/a");
+        let id = |n: u32| format!("{n}{n}{n}{n}{n}{n}{n}{n}-1111-4111-8111-111111111111");
+        let entry = |host: &str, kind: &str, ended: &str, config: &Path| Entry {
+            config: config.to_string_lossy().into_owned(),
+            cwd: "/w/a".into(),
+            host: host.into(),
+            pid: 1,
+            first_seen: 100,
+            last_seen: 900,
+            kind: kind.into(),
+            ended_at: Some(1000),
+            ended: Some(ended.into()),
+        };
+        let mut ledger = Ledger {
+            version: VERSION,
+            ..Ledger::default()
+        };
+        ledger
+            .sessions
+            .insert(id(1), entry("terminal", "interactive", ENDED_BOOT, &config));
+        ledger.sessions.insert(
+            id(2),
+            entry("terminal", "interactive", ENDED_WATCHED, &config),
+        );
+        ledger
+            .sessions
+            .insert(id(3), entry("terminal", "interactive", ENDED_BOOT, &config));
+        ledger.sessions.insert(
+            id(4),
+            entry("dashboards", "interactive", ENDED_BOOT, &config),
+        );
+        ledger
+            .sessions
+            .insert(id(5), entry("terminal", "interactive", ENDED_BOOT, &config));
+        ledger
+            .sessions
+            .insert(id(6), entry("terminal", "print", ENDED_BOOT, &config));
+        ledger.sessions.insert(
+            id(7),
+            entry(
+                "terminal",
+                "interactive",
+                ENDED_BOOT,
+                Path::new("/h/.claude"),
+            ),
+        );
+        write(root.path(), &ledger);
+        // Session 3's transcript ends with the person's own `/exit`.
+        let t = crate::resumable::transcript(&config, "/w/a", &id(3));
+        std::fs::create_dir_all(t.parent().unwrap()).unwrap();
+        std::fs::write(&t, "{\"content\":\"<command-name>/exit</command-name>\"}\n").unwrap();
+        let closed: HashSet<String> = [id(5)].into();
+        let rows = ended_rows(root.path(), 2000, &closed);
+        let by: BTreeMap<String, String> = rows
+            .iter()
+            .map(|r| {
+                (
+                    r["session"].as_str().unwrap().to_owned(),
+                    r["reason"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect();
+        assert_eq!(by.get(&id(1)).map(String::as_str), Some("seen_live"));
+        assert_eq!(by.get(&id(2)).map(String::as_str), Some("seen_gone"));
+        assert_eq!(by.get(&id(3)).map(String::as_str), Some("seen_gone"));
+        assert_eq!(by.get(&id(7)).map(String::as_str), Some("seen_live"));
+        for n in [4, 5, 6] {
+            assert!(!by.contains_key(&id(n)), "{n}");
+        }
+        assert_eq!(rows[0]["at"], 1000, "the time it ended");
+        assert!(ended_rows(root.path(), 1000 + ENDED_LISTED_SECONDS + 1, &closed).is_empty());
+        // Own sign-in off: only Switchboard's own homes, in the rows and in `locate`.
+        crate::own_sign_in::set(root.path(), false).unwrap();
+        let rows = ended_rows(root.path(), 2000, &closed);
+        assert!(rows.iter().all(|r| r["session"] != id(7).as_str()));
+        assert!(rows.iter().any(|r| r["session"] == id(1).as_str()));
+        assert_eq!(locate(root.path(), &id(7), 2000), None);
+        assert!(locate(root.path(), &id(1), 2000).is_some());
     }
 }

@@ -3693,19 +3693,22 @@ live sessions (SB-508, below), else a limit stop in the person's folder) and res
 config folder when it is not the person's, the prompt `resumable::CONTINUE_PROMPT`) and opens it in a
 Terminal window. SB-400: `--in-place` (CLI only) writes the same script and runs it in the calling
 terminal; with `--hosted` the session runs under a launch of its own (`launches::record_resume`: the
-record in `launches/` only, `mode: resume`, `provider_session_id`, the `launched_by` of the caller and
-its `--surface`; the person's Claude folder is never written) in a session host the command attaches
+record in `launches/` only, `mode: resume`, `provider_session_id`, `home_dir` (the config folder
+relative to the data folder, null when it is outside it), `config_dir` (the config folder itself,
+absolute; SB-508, so `locate` never guesses it), the `launched_by` of the caller and its `--surface`; the person's Claude folder is never written) in a session host the command attaches
 to, its script exporting `SWITCHBOARD_LAUNCH_ID` after its `unset` line so its hooks report to it.
 The operation carries `in_place` and `hosted` only when true, so a plain continue still reaches an
-owner of 0.7.109. Refused with `LIVE` while a process holds the session
-(`machine_sessions::live_sessions`), `UNKNOWN` without a record, `NO_FOLDER` and `NO_TRANSCRIPT`
+owner of 0.7.109. Refused with `LIVE` while a process holds the session and with `UNREAD` when the
+process table could not be read (`resumable::not_running`; review round 3 of PR #852), `UNKNOWN` without a record, `NO_FOLDER` and `NO_TRANSCRIPT`
 when its folder or `<config>/projects/<folder>/<id>.jsonl` is gone: never a fresh session in its
 place. On the Sessions page (SP-2) a session is one row: a live process with a waiting stop is
 `waiting` (`limit`, with `probe_at`) and no stop row; a ready stop not live, an ended Claude launch
 with its session id and every ledger line carry `continue` (ledger rows read `closed_idle`,
-`closed_idle_window`, `closed_duplicate`, `closed_stuck`, `closed_restart`, and `ended_seen` for a
-session the ledger of live sessions saw in the last day that is no longer live (SB-508,
-`live_ledger::ended_rows`, reason `seen_live`); a `restart_back` line hides
+`closed_idle_window`, `closed_duplicate`, `closed_stuck`, `closed_restart`, and, from the ledger of live
+sessions (SB-508, `live_ledger::ended_rows`, read only when the process table was read, merged with
+the resumable lines so a session's newest line wins), `ended_seen` with *Continue* for a session
+that ended in the last day because the computer went down (reason `seen_live`) and `ended` with no
+act for one the watch saw go (reason `seen_gone`); a `restart_back` line hides
 its session's ledger row). FD-291: each open stop carries `transcript_at`, the newest write of its
 transcript in any config folder it may live in (`machine_sessions::transcript_at`); a live session
 whose transcript was written more than 120 s after its stop, or whose process is `busy` 120 s after
@@ -3881,11 +3884,16 @@ to resume it. The owner's one-minute session watch (`session_watch::tick`, its o
 keeps `<data>/live-sessions.json` (0600, `live_ledger.rs`): `{version: 1, sessions: {<session id>:
 {config, cwd, host, pid, first_seen, last_seen}}}`, one entry per Claude Code session whose
 `sessions/<pid>.json` names a live Claude Code process of the scan (`live_ledger::observed`: a valid
-session id, an absolute folder), `host` from the process's ancestors (`duty::host_of`, asked only for
+session id, an absolute folder, Claude Code's `kind` `interactive`, so a `claude -p` board run is
+never kept), with that `kind`, `host` from the process's ancestors (`duty::host_of`, asked only for
 a session new to the ledger or on a new process). Written only when an entry appears or changes
 process or folder, an entry ages out, or an hour after the last refresh (`REFRESH_SECONDS`), when
 every live session's `last_seen` is refreshed at once (one write an hour; a session in two
-processes is one entry on the process the ledger names, else the lowest pid): an entry is kept 7 days after it was last seen (`resumable::WINDOW_SECONDS`), at most 500
+processes is one entry on the process the ledger names, else the lowest pid). An entry no longer
+live is marked once with when and how it ended (`ended_at`, `ended`): `boot` when it was last seen
+before this computer's boot (`watchdog::boot_time`: it was live when the computer went down) and
+`watched` otherwise (the watch saw it go: an `/exit`, a closed window, `/clear` or `/resume` in its
+process, a crash); a session live again clears it. an entry is kept 7 days after it was last seen (`resumable::WINDOW_SECONDS`), at most 500
 (`KEEP`, the most recently seen). A scan that did not read the process table changes nothing; with
 the person's own sign-in off (SB-403) only sessions in Switchboard's own homes are kept. Ids, paths,
 a host word, a pid and times only: never a transcript line, a prompt or a credential.
@@ -3894,10 +3902,15 @@ a host word, a pid and times only: never a transcript line, a prompt or a creden
 names the session; a launch record that names no config folder (no `home_dir` and no
 `config_dir`, which a resume outside the data folder now records) ranks below every source that
 names one, since its folder is only a guess (test
-`resumable::tests::a_launch_record_that_names_no_config_never_beats_a_source_that_does`). A session
-that ended outside Switchboard and was seen in the last day is listed on the Sessions page as
-`ended_seen` with *Continue* (above), so `sessions continue <id>` (and every continuation that goes through `locate`) resumes such
-a session as itself; `continue_as`'s refusals are unchanged (a live process, a folder or a transcript
+`resumable::tests::a_launch_record_that_names_no_config_never_beats_a_source_that_does`). Review round 3 of PR #852: the Sessions page offers *Continue* (`ended_seen`, above) only for a
+session that ended in the last day with `ended: boot`, whose transcript does not end with the
+person's `/exit` or `/quit` (`session_watch::exited`) and that Switchboard did not close on purpose
+(`session_watch::closed_on_purpose`, whose own line is listed instead); a session the watch saw go
+is listed as ended with no act; a Fabric Dashboards console (host `dashboards`) and, with own
+sign-in off, a session outside Switchboard's homes are left out of the rows and of `locate`
+(tests `live_ledger::tests::only_a_session_cut_by_a_reboot_is_offered_and_one_closed_on_purpose_never`,
+`resumable::tests::a_session_is_never_continued_beside_a_process_nobody_could_see`). Even so so `sessions continue <id>` (and every continuation that goes through `locate`) resumes such
+a session as itself; `continue_as` keeps its refusals (a live process, an unread process table, a folder or a transcript
 gone). Tests `live_ledger::tests::*`,
 `resumable::tests::a_session_nobody_closed_or_launched_is_found_in_the_live_ledger`.
 
@@ -3935,7 +3948,7 @@ a data folder with neither `owner-run.json` nor `control.json`, a run writes not
 what it says.
 
 **Readers.** `watchdog::current(root, now, owner_running)` answers the findings of a report no older
-than 15 minutes (`STALE_SECONDS`), without the codes the running owner says itself when it is the reader (`owner_says`: the owner codes, and `board_run_gone` and `duplicate_session`, which come from its own watch and which Needs attention already lists as `session_gone` and `session_duplicate` with their acts);
+than 15 minutes (`STALE_SECONDS`), without `board_run_gone` and `duplicate_session` for every reader (`watch_code`: they come from the owner's own `session-watch.json`, which Needs attention lists itself as `session_gone` and `session_duplicate` with their acts, offline too) and without the owner codes when the reader is the running owner;
 `None` when the watchdog is off, never ran or is stale. Needs attention (`attention::Inputs.watchdog`)
 lists one item per finding, first, `reason: watchdog` with `code`, `count`, `ids`, `since` (its
 `first_seen`), `severity` and a fixed sentence (`WATCHDOG_*` in `attention.rs`); `action` is

@@ -57,11 +57,11 @@ pub fn owner_code(code: &str) -> bool {
     matches!(code, OWNER_DOWN | OWNER_NOT_ANSWERING | OWNER_STOPPED)
 }
 
-/// The codes a running owner already says itself: its own state, and what the watchdog read from
-/// its `session-watch.json`, which Needs attention lists as `session_gone` and
-/// `session_duplicate` with their acts (review round 2 of PR #852: never the same finding twice).
-pub fn owner_says(code: &str) -> bool {
-    owner_code(code) || matches!(code, BOARD_RUN_GONE | DUPLICATE_SESSION)
+/// The codes read from the owner's `session-watch.json`, which every reader of Needs attention
+/// lists itself as `session_gone` and `session_duplicate` with their acts, with or without a
+/// running owner (review rounds 2 and 3 of PR #852: never the same finding twice).
+pub fn watch_code(code: &str) -> bool {
+    matches!(code, BOARD_RUN_GONE | DUPLICATE_SESSION)
 }
 
 fn severity(code: &str) -> &'static str {
@@ -137,7 +137,8 @@ pub fn boot_time() -> Option<i64> {
             0,
         )
     };
-    (done == 0 && tv.tv_sec > 0).then_some(tv.tv_sec)
+    (done == 0 && size == std::mem::size_of::<libc::timeval>() && tv.tv_sec > 0)
+        .then_some(tv.tv_sec)
 }
 /// When this computer started (Unix seconds): `btime` of `/proc/stat`.
 #[cfg(target_os = "linux")]
@@ -327,10 +328,10 @@ pub fn read(root: &Path) -> Option<Value> {
         .filter(|v| v["version"] == VERSION)
 }
 
-/// The findings a reader shows now: from a report no older than `STALE_SECONDS`, the codes the
-/// owner says itself left out when the reader is the owner (`owner_says`: its state, which it
-/// answers whatever an earlier run saw, and its own watch's gone runs and duplicates). `None`:
-/// the watchdog is off, never ran, or its report is stale, which is not the same as nothing found.
+/// The findings a reader shows now: from a report no older than `STALE_SECONDS`, without the
+/// watch's own codes (`watch_code`) and, when the reader is the running owner, without the owner
+/// codes (it answers, whatever an earlier run saw). `None`: the watchdog is off, never ran, or its
+/// report is stale, which is not the same as nothing found.
 pub fn current(root: &Path, now: i64, owner_running: bool) -> Option<Vec<Value>> {
     if is_off(root) {
         return None;
@@ -345,7 +346,12 @@ pub fn current(root: &Path, now: i64, owner_running: bool) -> Option<Vec<Value>>
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|f| !(owner_running && f["code"].as_str().is_some_and(owner_says)))
+            .filter(|f| {
+                let code = f["code"].as_str().unwrap_or_default();
+                // The watch's own codes always: Needs attention reads `session-watch.json` itself,
+                // offline too (review round 3 of PR #852).
+                !(watch_code(code) || (owner_running && owner_code(code)))
+            })
             .cloned()
             .collect(),
     )
@@ -630,7 +636,8 @@ mod tests {
                 .collect()
         };
         assert_eq!(codes(true), [ACT_UNFINISHED]);
-        assert_eq!(codes(false).len(), 4);
+        // Offline the owner's state is said, its watch's findings still are not.
+        assert_eq!(codes(false), [OWNER_DOWN, ACT_UNFINISHED]);
     }
 
     #[tokio::test]
