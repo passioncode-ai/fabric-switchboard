@@ -1096,7 +1096,8 @@ research notes); the ones still in force that the board cites are seeded below w
 
 - **Date:** 2026-11-19
 - **Status:** Accepted (design: [seat relay](plans/2026-11-19-seat-relay/design.md); the build,
-  SB-575, waits on PassionCode.ai's device registry and mailbox, board thread 14da4917)
+  SB-575, waits on Vesta's key fields and signed membership, thread 14da4917, and on the seat
+  mailbox asked of passioncode-platform, thread 54858223)
 - **Context:** DEC-0025 delegates a subscription to a teammate's computer over ssh: the operator's
   machine must reach the teammate's, so the teammate turns on Remote Login, adds a forced
   `switchboard ssh-serve` line to their `authorized_keys`, and both machines share a network, in
@@ -1111,14 +1112,21 @@ research notes); the ones still in force that the board cites are seeded below w
     operator's key.
   - Delegation over ssh (DEC-0025: `accounts send --delegate`, `ssh-serve`, the lease extended by
     the background read of DEC-0033) is used only between the operator's own machines.
-  - A seat for a teammate's computer goes through PassionCode.ai: each Switchboard registers a
-    device (an Ed25519 signing key and an X25519 encryption key, private parts only in the OS
-    vault) when it connects to PassionCode.ai; the seat travels as end-to-end encrypted, signed
-    envelopes (`seat.offer`, `lease.extend`, `usage.report`, `seat.recall`, `seat.surrender`) held
-    in the recipient device's mailbox until fetched; both sides only connect outward, over HTTPS.
-    PassionCode.ai routes, authorizes (an administrator's device to a member's device of the same
-    organization; replies only to the sender) and keeps an audit log; it never reads a credential
-    or a usage figure.
+  - A seat for a teammate's computer goes through PassionCode.ai, in two services that each do
+    one thing. Vesta is the key directory and the membership attestation: each Switchboard writes
+    its X25519 encryption key and Ed25519 signing key (private parts only in the OS vault) to the
+    person's device record in Vesta's per-person registry when it connects, and Vesta signs
+    membership statements (organization, person, role, device keys, expiry); Vesta stores and
+    relays no message (its answer on thread 14da4917, message d6656231). The seat travels as
+    end-to-end encrypted, signed envelopes (`seat.offer`, `lease.extend`, `usage.report`,
+    `seat.recall`, `seat.surrender`) through a separate store-and-forward seat mailbox, recommended
+    on passioncode-platform rather than the Fabric board hub (which would bring a teammate's device
+    into the operator's estate). The mailbox authorizes from Vesta's statements (an administrator's
+    device to a member's device of the same organization; replies only back to the sender), holds
+    ciphertext only, deletes at acknowledgement or expiry within 7 days, limits size and rate, gives
+    delivery receipts and keeps audit rows without payload. Both sides only connect outward, over
+    HTTPS. Neither service reads a credential or a usage figure. The operator approved this split
+    (relayed in announcement de0ba93c, 2026-11-19).
   - Everything DEC-0025 promised about the seat holds over the relay: a guest in one group the
     teammate chose, never moved on, handed over, given to an agent, lent, shared or made the
     ordinary sign-in, never in a backup; a lease of 48 hours by default (1 to 720) extended every 15
@@ -1126,8 +1134,9 @@ research notes); the ones still in force that the board cites are seeded below w
     called back only by its sender, the credential coming back as the one live copy; the
     revocation against an uncooperative teammate is signing the subscription out at the provider.
   - The owner sets each relayed seat's usage ceiling per window (the 5-hour and the weekly window at
-    least) and its place in the teammate's rotation (by default the last resort, chosen only when no
-    other account of the group has room) when offering it; both travel in the offer, the receiving
+    least; 80 % of the 5-hour window and 70 % of the week for the first teammate seat, approved by
+    the operator in the same relay) and its place in the teammate's rotation (by default the last
+    resort, chosen only when no other account of the group has room) when offering it; both travel in the offer, the receiving
     Switchboard refuses a request above the ceiling before it reaches the provider and says why, and
     the seat's reports carry its windows back to the owner.
   - The program's path on the teammate's computer is never assumed (`/Applications`,
@@ -1152,5 +1161,7 @@ research notes); the ones still in force that the board cites are seeded below w
   Должны работать типа в рамках, типа вот правильного, как мы все настроены, смотри, чтоб ничего не
   наделали, ерунды никакой.» Earlier the same day: the seat is the teammate's ordinary console
   session, managed by the operator, chosen per project, set up through Claude Code over MCP. The
-  board request to PassionCode.ai for the registry and mailbox: project `passioncode-vesta`, thread
-  14da4917, message 446daca9.
+  board request to Vesta: project `passioncode-vesta`, thread 14da4917, message 446daca9, answered
+  by message d6656231 (directory and membership only); the operator's approval of that split and of
+  the seat ceiling, relayed in announcement de0ba93c; the ask for the seat mailbox: project
+  `passioncode-platform`, thread 54858223, message 2216bf60.

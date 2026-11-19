@@ -122,7 +122,7 @@ side also pins:
 
 ## 6. The envelope
 
-One JSON object per message, at most 64 KiB encoded (open question Q6).
+One JSON object per message, at most 64 KiB encoded (open question M3).
 
 ```json
 {
@@ -394,8 +394,7 @@ one estate; admitting a teammate's device there repeats, at a smaller scale, the
 removed, and its units (Projects, threads kept as history) fit neither device-level authorization
 nor deletion at acknowledgement. The hosting backend serves organizations and their members by
 design and can be held to the guarantees below. The ask is filed on the board: project
-`passioncode-platform` (fd8b81cf), capability `change.request`, see the backlog row SB-575 for the
-message id.
+`passioncode-platform` (fd8b81cf), capability `change.request`, thread 54858223, message 2216bf60.
 
 ### 14.3 What the seat mailbox must guarantee
 
