@@ -526,6 +526,7 @@ pub fn resume_script_for(
             for line in text.lines().filter(|l| l.starts_with("export ")) {
                 if !line.starts_with("export SWITCHBOARD_LAUNCH_ID=")
                     && !line.starts_with("export CLAUDE_CONFIG_DIR=")
+                    && !line.starts_with("export PATH=")
                 {
                     out.push_str(line);
                     out.push('\n');
@@ -537,13 +538,10 @@ pub fn resume_script_for(
             quote(&config.to_string_lossy())
         ));
     }
-    // A Terminal window runs the script without the person's login shell: the PATH a run started
-    // by the owner gets, so the session's hooks find `node` (operator 2026-11-15: every hook failed
-    // with "node: command not found").
-    out.push_str(&format!(
-        "export PATH={}\n",
-        quote(&crate::launch::headless_path(program).to_string_lossy())
-    ));
+    // A Terminal window runs the script with the PATH it was started with; the program's folder
+    // goes first and the person's login PATH fills what that PATH lacks (SB-455), so the session's
+    // hooks find `node` (operator 2026-11-15: every hook failed with "node: command not found").
+    out.push_str(&crate::launch::path_export(program));
     out.push_str(&format!(
         "cd {} || exit 1\n{}",
         quote(cwd),
@@ -616,15 +614,52 @@ fn closed_idle_before(lines: &[Value], session: &str) -> bool {
 }
 
 fn restarts(lines: &[Value], session: &str, now: i64) -> usize {
-    lines
-        .iter()
+    outcomes(lines)
         .filter(|l| {
             l["session"] == session
                 && l["action"] == "restart"
-                && l["phase"] != "intent"
                 && l["at"].as_i64().is_some_and(|t| now - t < RESTART_WINDOW)
         })
         .count()
+}
+
+/// SB-505: whether `line` is the outcome of `intent`: the same session, act and process, whatever
+/// its stamp (before 0.7.121 the two stamps could differ by the check's duration). A person's
+/// close of a copy, or another check's act on the session, settles nothing.
+fn settles(line: &Value, intent: &Value) -> bool {
+    line.get("outcome").is_some()
+        && line["session"] == intent["session"]
+        && line["action"] == intent["action"]
+        && line["pid"] == intent["pid"]
+}
+
+/// The outcome lines that record an act once (SB-505). Before 0.7.121 an intent was stamped later
+/// than its outcome, so a check longer than a second left the pair unmatched and the next check
+/// wrote a second outcome (`finished_at`) for an act already done. Such a line, written when no
+/// intent of its session was open, is not a second act.
+fn outcomes(lines: &[Value]) -> impl Iterator<Item = &Value> {
+    let mut open: Vec<&Value> = Vec::new();
+    let mut kept = Vec::new();
+    for line in lines {
+        // A dispatched run's stop names no session or process; its lines are its pass's own.
+        if line["action"] == crate::dispatch::JOURNAL_ACTION {
+            if line["phase"] != "intent" {
+                kept.push(line);
+            }
+            continue;
+        }
+        if line["phase"] == "intent" {
+            open.retain(|o| o["session"] != line["session"]);
+            open.push(line);
+            continue;
+        }
+        let had = open.iter().any(|o| settles(line, o));
+        open.retain(|o| !settles(line, o));
+        if had || line.get("finished_at").is_none() {
+            kept.push(line);
+        }
+    }
+    kept.into_iter()
 }
 
 /// `switchboard duty`: the settings, the last actions and what a check would do now.
@@ -653,13 +688,9 @@ pub fn status(root: &Path, now: i64) -> Result<Value, String> {
         })
         .collect();
     // An intent line is bookkeeping for a cut act (SB-397 W0.1); the outcome line is the act.
-    let recent: Vec<Value> = lines
-        .iter()
-        .rev()
-        .filter(|l| l["phase"] != "intent")
-        .take(20)
-        .cloned()
-        .collect();
+    // SB-505: without the second outcome an older owner wrote for one act.
+    let kept: Vec<&Value> = outcomes(&lines).collect();
+    let recent: Vec<Value> = kept.into_iter().rev().take(20).cloned().collect();
     let watched: Vec<&Seen> = seen
         .iter()
         .filter(|s| s.kind == "interactive" && !s.dashboards)
@@ -754,6 +785,8 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
             "restart"
         };
         let prompt = matches!(act, Act::Restart { prompt: true });
+        // SB-505: one stamp for the intent and its outcome, so the pair always matches.
+        let at = now + begun.elapsed().as_secs() as i64;
         let outcome = if dry_run {
             "planned"
         } else {
@@ -761,13 +794,13 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
             // when this one is cut by a quit (a close takes up to 10.5 s, the drain 8 s).
             append(
                 root,
-                json!({"at": now + begun.elapsed().as_secs() as i64, "phase": "intent", "action": action, "reason": reason,
+                json!({"at": at, "phase": "intent", "action": action, "reason": reason,
                     "session": s.session, "folder": s.cwd, "pid": s.pid, "host": s.host,
                     "config": s.config, "prompt": prompt}),
             );
             act_on(root, s, act)
         };
-        let line = json!({"at": now, "action": action, "reason": reason, "outcome": outcome,
+        let line = json!({"at": at, "action": action, "reason": reason, "outcome": outcome,
             "session": s.session, "folder": s.cwd, "pid": s.pid, "host": s.host});
         if !dry_run {
             append(root, line.clone());
@@ -776,7 +809,7 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
                 crate::resumable::record(
                     root,
                     json!({"session": s.session, "config": s.config, "cwd": s.cwd, "reason": reason,
-                        "at": now, "by": "duty"}),
+                        "at": at, "by": "duty"}),
                 );
             }
             crate::oplog::event(
@@ -865,12 +898,11 @@ pub fn interrupted(lines: &[Value], now: i64) -> Vec<Value> {
         .iter()
         .filter(|l| l["action"] != crate::dispatch::JOURNAL_ACTION)
     {
-        let key = (line["session"].clone(), line["at"].clone());
         if line["phase"] == "intent" {
             open.retain(|o| o["session"] != line["session"]);
             open.push(line.clone());
         } else {
-            open.retain(|o| (o["session"].clone(), o["at"].clone()) != key);
+            open.retain(|o| !settles(line, o));
         }
     }
     // An intent younger than `SETTLE_SECONDS` may belong to a check still running beside this one
@@ -1116,7 +1148,7 @@ mod tests {
     #[test]
     fn an_intent_without_its_outcome_is_an_act_cut_by_a_quit() {
         let intent = |session: &str, at: i64| json!({"at": at, "phase": "intent", "action": "close", "session": session, "pid": 1});
-        let outcome = |session: &str, at: i64| json!({"at": at, "action": "close", "outcome": "closed", "session": session});
+        let outcome = |session: &str, at: i64| json!({"at": at, "action": "close", "outcome": "closed", "session": session, "pid": 1});
         let lines = vec![
             intent("S1", 100),
             outcome("S1", 100),
@@ -1727,7 +1759,7 @@ mod tests {
         assert!(quiet.contains("'/bin/claude' --resume 's-1'\nstatus=$?"));
         // The person's tools are found (hooks run `node`), and an end by a signal closes the
         // window (status 0 for the window settings), not `exec`.
-        assert!(quiet.contains("export PATH='/bin:"));
+        assert!(quiet.contains("export PATH='/bin'\"${PATH:+:$PATH}\"':"));
         assert!(quiet.contains("/opt/homebrew/bin"));
         assert!(!quiet.contains("exec "));
         assert!(quiet.trim_end().ends_with("exit \"$status\""));
@@ -1747,6 +1779,69 @@ mod tests {
                 fabric_sessions_core::cli::quoted(&arg)
             )),
             "{routed}"
+        );
+    }
+
+    #[test]
+    fn an_outcome_settles_its_intent_whatever_its_stamp() {
+        // SB-505: before 0.7.121 the intent of a check that took longer than a second was
+        // stamped later than its outcome, and the next check finished the act a second time.
+        let lines = vec![
+            json!({"at": 1003, "phase": "intent", "action": "close", "session": "S1", "pid": 1}),
+            json!({"at": 1000, "action": "close", "outcome": "closed", "session": "S1", "pid": 1}),
+        ];
+        assert!(interrupted(&lines, 2000).is_empty(), "nothing is open");
+    }
+
+    #[test]
+    fn another_line_of_the_session_does_not_settle_a_cut_act() {
+        let lines = vec![
+            json!({"at": 1000, "phase": "intent", "action": "restart", "session": "S1", "pid": 7}),
+            // The person closed a copy of the same session meanwhile.
+            json!({"at": 1001, "session": "S1", "pid": 8, "by": "person"}),
+            // Another check's close of another process of it.
+            json!({"at": 1002, "action": "close", "outcome": "closed", "session": "S1", "pid": 9}),
+        ];
+        let open = interrupted(&lines, 2000);
+        assert_eq!(open.len(), 1, "the cut restart is still finished");
+        assert_eq!(open[0]["pid"], 7);
+    }
+
+    #[test]
+    fn a_second_outcome_of_one_act_is_not_counted_as_another_restart() {
+        let lines = vec![
+            json!({"at": 103, "phase": "intent", "action": "restart", "session": "s-1", "pid": 1}),
+            json!({"at": 100, "action": "restart", "outcome": "restarted", "session": "s-1", "pid": 1}),
+            // The phantom a later check wrote before SB-505.
+            json!({"at": 103, "action": "restart", "outcome": "restarted", "session": "s-1",
+                "pid": 1, "finished_at": 200}),
+            // An act a quit really cut, finished by the next owner: counted.
+            json!({"at": 300, "phase": "intent", "action": "restart", "session": "s-1", "pid": 2}),
+            json!({"at": 300, "action": "restart", "outcome": "restarted", "session": "s-1",
+                "pid": 2, "finished_at": 400}),
+        ];
+        assert_eq!(restarts(&lines, "s-1", 500), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_act_whose_check_took_seconds_is_finished_by_no_later_check() {
+        let root = tempfile::tempdir().unwrap();
+        append(
+            root.path(),
+            json!({"at": 1004, "phase": "intent", "action": "close", "reason": "idle",
+                "session": "S1", "folder": "/w/a", "pid": 999_999_999u64, "host": "terminal",
+                "config": "/h/.claude", "prompt": false}),
+        );
+        append(
+            root.path(),
+            json!({"at": 1000, "action": "close", "reason": "idle", "outcome": "closed",
+                "session": "S1", "folder": "/w/a", "pid": 999_999_999u64, "host": "terminal"}),
+        );
+        assert!(finish_interrupted(root.path(), 1200).is_empty());
+        assert!(
+            crate::resumable::recent(root.path(), 0).is_empty(),
+            "no second resumable line"
         );
     }
 
