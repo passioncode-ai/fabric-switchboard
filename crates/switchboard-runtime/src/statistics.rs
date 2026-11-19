@@ -1005,7 +1005,7 @@ mod tests {
     #[test]
     fn an_organizations_daily_usage_names_seats_and_clients_and_no_person_or_folder() {
         // SB-568: org-usage/1 per day, seat and client; personal and removed accounts left out.
-        use switchboard_core::{Account, AuthKind, ExternalIdentity, Organization, Provider};
+        use switchboard_core::{Account, Organization};
         let now = 1_792_400_000;
         let today = stats::day_of(now);
         let yesterday = stats::day_of(now - 86_400);
@@ -1045,22 +1045,15 @@ mod tests {
                 tally(1, 10),
             ),
         ]));
-        let seat = |id: &str, email: &str| Account {
-            id: id.into(),
-            label: email.into(),
-            provider: Provider::Claude,
-            kind: AuthKind::OAuth,
-            pool: "default".into(),
-            enabled: true,
-            created_at: 1,
-            identity: None,
-            usage: None,
-            external_identity: Some(ExternalIdentity {
-                account_id: None,
-                organization_id: None,
-                email: Some(email.into()),
-            }),
-            usage_health: None,
+        let seat = |id: &str, email: &str| -> Account {
+            // Built from its JSON, so a field added to `Account` later (with its serde default,
+            // as SB-418's `off`) needs no change here.
+            serde_json::from_value(json!({
+                "id": id, "label": email, "provider": "claude", "kind": "oauth",
+                "pool": "default", "enabled": true, "created_at": 1,
+                "external_identity": {"account_id": null, "organization_id": null, "email": email}
+            }))
+            .unwrap()
         };
         let mut snapshot = Snapshot {
             accounts: vec![
