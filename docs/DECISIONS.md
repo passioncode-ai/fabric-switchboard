@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0029` (`DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0033` (`DEC-0032` is SB-518, smart usage checks; `DEC-0027` is held for SB-418, a person's off switch for an account, `DEC-0029` and `DEC-0030` for pull requests #832 and #836; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
