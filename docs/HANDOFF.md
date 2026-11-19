@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-19: SB-580 sessions handed to Fabric (`fabric-session-links/1`), `sessions --rows` shared under load, on branch `feat/sb-session-links`
+
+- **Asked.** Owner's order 57445717 (thread 3ca40854, 2026-11-19 ~21:20 Warsaw, via Fabric's CEO), Switchboard's part e674295f; Fabric's contract `fabric-session-links/1` in b37c7dce.
+- **Done.** `crates/switchboard-runtime/src/fabric_links.rs` builds `fabric://session/{new,open,continue}` with ids only and `from=fabric-switchboard`, and the *Open terminal* script; window commands `fabric_link` and `session_terminal` (Operation `SessionTerminal`); Sessions page buttons *Open*, *Open terminal*, *Open in Fabric*, header *New session…* (SCN-098 steps 4a to 4c). `crates/switchboard-runtime/src/rows_share.rs`: concurrent `session_rows` share one read (3 s, invalidated by end, close copy, continue, restart, dispatch stop).
+- **Why the signal.** Fabric's `execFile` has a 10 s timeout (`fabric/apps/desktop/src/main/switchboardSessions.ts:152`); the owner's `session_rows` took over 10 s 1338 times in 40 h (owner log `control_slow`), ten concurrent calls 8 to 9.7 s each against 0.2 s alone, load average 120.
+- **Decisions.** Fabric's project for a folder is the folder's name (asked on the thread, 7932732c); Codex is not offered as a runner until Fabric names its runner kind; Fabric links only for Claude Code sessions on this computer (Fabric reads only this Mac's Claude files).
+- **Checks run.** `./scripts/check.sh` in the worktree (see the PR for its EXIT line); Copylot ids in [strings](brand/strings.md).
+- **Open.** `recovery` is slow alone under load (median 16.6 s), backlog SB-580's follow-up line; Fabric's `session/open` and `session/continue` ship in Fabric on 2026-11-20, until then the buttons open Fabric without that view.
+
+**Exact next task.** Merge the SB-580 pull request once its gate is green, release, measure `control_slow session_rows` in the owner log a day later, and answer Fabric's reply on the project slug.
+
 ## 2026-11-19: release 0.7.124 (carries 0.7.123; SB-558 Windows stack) and the lifecycle, remote and access audit
 
 - **Why.** v0.7.123's release stopped at its guard: nightly 44533106888 failed on Windows on Arm when `owner_tests::an_account_moves_between_projects_and_back_to_default` overflowed its 2 MiB test thread. The tag stays; 0.7.124 carries its changes.

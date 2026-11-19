@@ -171,6 +171,10 @@ export interface Adapter {
   sessionAttach(launchId: string, target?: string | null): Promise<unknown>;
   /** SB-396: *Continue* a session that ended, as that same session (its own history and context). */
   sessionContinue(sessionId: string): Promise<unknown>;
+  /** SB-580: *Open terminal*: a shell in the session's folder, here or on `target`. */
+  sessionTerminal(folder: string, target?: string | null): Promise<unknown>;
+  /** SB-580: a `fabric-session-links/1` link opened in Fabric, which asks the person before it acts. */
+  fabricLink(kind: 'new' | 'open' | 'continue', options: { folder?: string; runner?: string; session?: string }): Promise<unknown>;
   /** SB-397 R1: the plan of a restart of every running session; restarts nothing. */
   sessionsRestartPlan(): Promise<RestartPlan>;
   /** SB-397 R1: restart the sessions of the plan whose digest this is. */

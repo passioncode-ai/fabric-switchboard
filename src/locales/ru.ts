@@ -4,6 +4,28 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  // SB-580 (fabric-session-links/1, 2026-11-19): the Sessions page hands sessions to Fabric.
+  "This folder's name cannot name a Fabric project: use letters, digits, dots, dashes, underscores or colons.": "Имя этой папки не может быть именем проекта Fabric: нужны буквы, цифры, точки, дефисы, подчёркивания или двоеточия.",
+  "This session has no id Fabric can open.": "У этой сессии нет id, который Fabric может открыть.",
+  "That agent is not one Fabric can start.": "Fabric не умеет запускать этого агента.",
+  "The session's folder is not known, so no terminal can open in it.": "Папка сессии неизвестна, поэтому терминал в ней открыть нельзя.",
+  "Fabric could not be opened. Check that Fabric is installed.": "Fabric не открылся. Проверьте, что Fabric установлен.",
+  "Opening a terminal in a session's folder works on macOS and Linux for now.": "Терминал в папке сессии пока открывается только на macOS и Linux.",
+  "New session…": "Новая сессия…",
+  "Open": "Открыть",
+  "Opened in Fabric.": "Открыто в Fabric.",
+  "Open the session in {folder} in Fabric": "Открыть в Fabric сессию в {folder}",
+  "Open terminal": "Открыть терминал",
+  "Opened a terminal in {folder}.": "Открыт терминал в {folder}.",
+  "Open a terminal in {folder}": "Открыть терминал в {folder}",
+  "Open in Fabric": "Открыть в Fabric",
+  "Fabric asks whether to continue the session there.": "Fabric спросит, продолжить ли сессию у него.",
+  "Continue the session in {folder} in Fabric": "Продолжить в Fabric сессию в {folder}",
+  "New session": "Новая сессия",
+  "Fabric opens its launch in the project of this folder, and starts the session when you press Start there.": "Fabric откроет запуск в проекте этой папки и начнёт сессию, когда вы нажмёте там «Запустить».",
+  "No group has a folder yet. Add a repository to a group first.": "Ни в одной группе пока нет папки. Сначала добавьте репозиторий в группу.",
+  "Fabric chooses": "На выбор Fabric",
+  "Fabric opened the launch. Press Start there.": "Fabric открыл запуск. Нажмите там «Запустить».",
   // SB-450 (DEC-0030, 2026-11-18): continuing the sessions a restart cut. Copylot en-US reports 52cdef07…9f96a565, ru-RU 149e0051…b8c22300 (suggestions only).
   "Sessions after a restart": "Сессии после перезагрузки",
   "After this computer restarts, Switchboard continues the Claude Code sessions the restart cut in the middle of a turn: those it launched that were working and wrote in the two hours before. It leaves alone the sessions that waited for you, those you or Switchboard closed, and board runs. While Switchboard leaves your own sign-in alone, only sessions in its own homes are continued. Each opens as itself in a session you can attach to from Fabric Dashboards. At most five after one restart.": "После перезагрузки компьютера Switchboard продолжает сессии Claude Code, прерванные ею посреди хода: запущенные им, работавшие и писавшие в последние два часа перед ней. Сессии, ждавшие вас, закрытые вами или Switchboard, и запуски с доски он не трогает. Пока Switchboard не трогает ваш собственный вход, продолжаются только сессии в его собственных домашних папках. Каждая открывается как та же сессия, к ней можно подключиться из Fabric Dashboards. Не больше пяти после одной перезагрузки.",

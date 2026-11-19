@@ -1994,6 +1994,16 @@ check(() => {
   assert.ok(logic.attentionReasonText('session_stuck').includes('30 minutes'));
 });
 // Sessions wave 1 (2026-11-16): a row's colour follows its state; what was not read is said; a restart's sessions read in words.
+// SB-580: a row offers Open, Open terminal and Open in Fabric by what Fabric and the row allow.
+check(() => {
+  const row = { agent: 'claude-code', folder: '/w/a', session_id: 'd4a341f6-0124-47dc-9b0d-04dea0b255d1', acts: [] };
+  assert.deepEqual(logic.sessionLinkActs(row, null), { open: true, terminal: true, fabric: true });
+  assert.deepEqual(logic.sessionLinkActs({ ...row, acts: ['attach', 'end'] }, null), { open: false, terminal: true, fabric: true });
+  assert.deepEqual(logic.sessionLinkActs(row, 'studio'), { open: false, terminal: true, fabric: false });
+  assert.deepEqual(logic.sessionLinkActs({ ...row, agent: 'codex' }, null), { open: false, terminal: true, fabric: false });
+  assert.deepEqual(logic.sessionLinkActs({ ...row, session_id: null, folder: null }, null), { open: false, terminal: false, fabric: false });
+  assert.deepEqual(logic.sessionLinkActs({ ...row, session_id: 'a b' }, null), { open: false, terminal: true, fabric: false });
+});
 check(() => {
   i18n.setLocale('en');
   assert.equal(logic.sessionTone('working'), 'ok');

@@ -766,6 +766,8 @@ export function createDemoAdapter(): Adapter {
     async sessionAttach() { await pause(); return { opened: true }; },
     async sessionEnd() { await pause(); return { ended: true }; },
     async sessionContinue(sessionId) { await pause(); return { continued: sessionId }; },
+    async sessionTerminal(folder) { await pause(); return { opened: folder }; },
+    async fabricLink(kind, options) { await pause(); return { opened: `fabric://session/${kind}`, ...options }; },
     async sessionsRestartPlan() { await pause(); return { restart: [{ session_id: 'demo-1', folder: '/Users/demo/DATA/app', caller: false, how: 'in_place' }, { session_id: 'demo-2', folder: '/Users/demo/DATA/site', caller: false, how: 'terminal' }], skipped: [{ session_id: 'demo-3', folder: '/Users/demo/DATA/api', reason: 'limit' }], caller: null, digest: 'd'.repeat(64), warning: '' }; },
     async sessionsRestartApply() { await pause(); demoWave = { wave: 'demo-wave', reason: 'Restarted from the Sessions page', at: Math.floor(Date.now() / 1000), done_at: null, caller: null, counts: { pending: 1, ending: 0, resuming: 0, back: 1, continuing: 0, failed: 0, cancelled: 0, skipped: 1 }, sessions: [{ session_id: 'demo-1', folder: '/Users/demo/DATA/app', state: 'back', reason: null, caller: false, how: 'in_place' }, { session_id: 'demo-2', folder: '/Users/demo/DATA/site', state: 'pending', reason: null, caller: false, how: 'terminal' }], skipped: [{ session_id: 'demo-3', folder: '/Users/demo/DATA/api', reason: 'limit' }] }; return { wave: 'demo-wave', restart: 2, skipped: 1 }; },
     async sessionsRestartStatus() { await pause(); if (!demoWave) throw new Error('No restart wave has run on this computer.'); return structuredClone(demoWave); },
