@@ -1857,6 +1857,15 @@ enum AgentsCommand {
         /// pay-per-token group (where it is needed).
         #[arg(long)]
         model: Option<String>,
+        /// With `--anthropic`: the reasoning level, passed to Hermes as `--reasoning` (none,
+        /// minimal, low, medium, high, xhigh, max, ultra); default: Hermes's own.
+        #[arg(
+            long,
+            visible_alias = "reasoning",
+            requires = "anthropic",
+            value_name = "LEVEL"
+        )]
+        effort: Option<String>,
     },
 }
 #[derive(Subcommand)]
@@ -3883,6 +3892,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 openrouter,
                 anthropic,
                 model,
+                effort,
             } => Operation::LaunchAgent {
                 agent: agent.clone(),
                 pool: pool.clone(),
@@ -3896,6 +3906,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 },
                 model: model.clone(),
                 key: anthropic.clone(),
+                effort: effort.clone(),
             },
         },
         Command::Keys {

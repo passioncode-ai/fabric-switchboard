@@ -196,6 +196,7 @@ const ALLOWLIST = {
   // `failures` in CLI output; uninstall is never a desktop operation (SB-28).
   'Could not remove the login item.': 'uninstall CLI output only',
   "Could not remove the watchdog's job.": 'uninstall CLI output only (SB-510)',
+  'Choose a reasoning level: none, minimal, low, medium, high, xhigh, max or ultra.': 'switchboard agents launch --effort on the CLI only; the window has no reasoning-level field (SB-535)',
   // runtime lib.rs StopSignals (listen/requested): used by `switchboard serve` (CLI output) and
   // by the desktop app's signal task, which ignores an error; never a renderer reply.
   'Shutdown signal unavailable.': 'serve CLI and the desktop signal task only',

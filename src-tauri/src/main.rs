@@ -1714,6 +1714,7 @@ async fn launch_agent(
             via: via.unwrap_or_default(),
             model,
             key,
+            effort: None,
         })
         .await
 }

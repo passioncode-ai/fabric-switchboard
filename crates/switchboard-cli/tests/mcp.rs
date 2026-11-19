@@ -1695,7 +1695,20 @@ fn a_server_whose_program_was_replaced_answers_with_the_new_program() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = command.spawn().unwrap();
+    // A copy just written can be busy for a moment on Linux (`ETXTBSY`) when another test of
+    // this binary forked while the copy's descriptor was open: start it again then (SB-547; the
+    // v0.7.121 release's Linux x64 job read "Text file busy").
+    let mut attempt = 0;
+    let mut child = loop {
+        match command.spawn() {
+            Ok(child) => break child,
+            Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && attempt < 5 => {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50 << attempt));
+            }
+            Err(e) => panic!("{e}"),
+        }
+    };
     let mut agent = Agent {
         input: child.stdin.take(),
         output: BufReader::new(child.stdout.take().unwrap()),
