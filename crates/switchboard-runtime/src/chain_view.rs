@@ -224,6 +224,7 @@ mod tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         }
     }
     fn group(pool: &str) -> Project {

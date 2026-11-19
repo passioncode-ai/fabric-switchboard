@@ -97,7 +97,9 @@ pub fn status(target: &str, program: &Program<'_>, run: &Run<'_>) -> Result<Valu
 
 /// One thing the check found. `kind`:
 /// - `missing_there`: a move recorded here whose account the other machine no longer lists;
-/// - `off_there`: the copy there is turned off or marked used elsewhere, so nobody uses it;
+/// - `off_there`: the copy there is turned off or marked used elsewhere, so nobody uses it (not
+///   reported for a seat delegated there that the person here turned off: it lapses there by their
+///   choice, W1.2);
 /// - `refused_there`: the provider refused the copy there at its last check (it needs a sign-in);
 /// - `not_marked_here`: a move recorded here, but this machine uses the account too;
 /// - `held_twice`: an account the other machine uses is used here as well (same provider
@@ -171,9 +173,18 @@ pub fn check(
         let copy = s.remote_account.as_deref().and_then(by_id);
         match copy {
             None => findings.push(finding("missing_there", Some(&s.account), &label, None)),
-            Some(c) if c["enabled"] != true || c["elsewhere"] == true => {
+            // W1.2 review round 3 of PR #821: a seat delegated there (a lease) that the person
+            // here turned off is no longer extended, so its copy there lapses by their choice,
+            // not as a fault. A plain move keeps working there whatever the switch says here.
+            Some(c)
+                if (c["enabled"] != true || c["elsewhere"] == true)
+                    && !(here.is_some_and(|a| a.off.is_some())
+                        && (s.lease_hours.is_some()
+                            || snapshot.delegated_out.contains_key(&s.account))) =>
+            {
                 findings.push(finding("off_there", Some(&s.account), &label, Some(c)))
             }
+            Some(c) if c["enabled"] != true || c["elsewhere"] == true => {}
             Some(c) if c["usage_health"]["status"] == "failed" => {
                 findings.push(finding("refused_there", Some(&s.account), &label, Some(c)))
             }
@@ -363,6 +374,58 @@ mod tests {
         );
         assert_eq!(answer["moved_there"], 5);
         assert_eq!(answer["counts"]["missing_there"], 1);
+    }
+
+    /// W1.2 review round 3 of PR #821, SB-428 (j): a seat the person here turned off lapses
+    /// there by their choice, so its copy turned off there is not reported as a fault.
+    #[test]
+    fn a_seat_turned_off_here_is_not_a_fault_when_its_copy_there_lapsed() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+        let seat = account(&store, "seat@example.test", "r1");
+        let moved = account(&store, "moved@example.test", "r2");
+        for id in [&seat, &moved] {
+            store
+                .mark_elsewhere_at(id, true, 1, Some("studio.local"))
+                .unwrap();
+        }
+        let mut delegated = grant(&seat, "t-seat");
+        delegated.lease_hours = Some(48);
+        let seats = vec![delegated, grant(&moved, "t-moved")];
+        let there = json!([
+            {"id": "t-seat", "label": "seat@example.test", "provider": "claude", "enabled": false, "elsewhere": false},
+            {"id": "t-moved", "label": "moved@example.test", "provider": "claude", "enabled": false, "elsewhere": false},
+        ]);
+        let kinds = |store: &Store| -> Vec<(String, String)> {
+            check(
+                &store.snapshot().unwrap(),
+                &seats,
+                "studio.local",
+                &DEFAULT_APP,
+                &fake(there.clone()),
+            )
+            .unwrap()["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| {
+                    (
+                        f["kind"].as_str().unwrap().to_owned(),
+                        f["label"].as_str().unwrap().to_owned(),
+                    )
+                })
+                .collect()
+        };
+        let both = vec![
+            ("off_there".to_owned(), "seat@example.test".to_owned()),
+            ("off_there".to_owned(), "moved@example.test".to_owned()),
+        ];
+        assert_eq!(kinds(&store), both, "both off there: faults while on here");
+        // Turned off here: the delegated seat lapses by the person's choice; a plain move off
+        // there is still a fault.
+        store.update_fields(&seat, None, Some(false)).unwrap();
+        store.update_fields(&moved, None, Some(false)).unwrap();
+        assert_eq!(kinds(&store), vec![both[1].clone()]);
     }
 
     #[test]

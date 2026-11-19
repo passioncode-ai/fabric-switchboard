@@ -3132,7 +3132,10 @@ fn validate(
         .into_iter()
         .find(|a| a.id == id)
         .ok_or("Account not found.")?;
-    if !account.enabled {
+    if account.off.is_some() {
+        return Err(switchboard_core::off::ACCOUNT_OFF.into());
+    }
+    if !account.usable() {
         return Err("Enable the account before launch.".into());
     }
     let snapshot = store.snapshot()?;
@@ -4280,6 +4283,7 @@ mod tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         };
         let snapshot = Snapshot {
             accounts: vec![
@@ -4830,6 +4834,7 @@ mod tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         };
         let login = fixture_login(home.clone(), account);
         assert_eq!(login_state(&login), "pending");
@@ -6792,6 +6797,7 @@ mod tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         };
         let mut snapshot = switchboard_core::Snapshot {
             accounts: vec![account.clone()],
@@ -6808,6 +6814,7 @@ mod tests {
                 lease_until: 2,
                 ended_at: None,
                 purged_at: None,
+                surrendered_at: None,
             },
         );
         assert_eq!(
@@ -8229,7 +8236,15 @@ mod tests {
             refuse(&f.project, &Uuid::new_v4().to_string(), "isolated"),
             "Account not found."
         );
+        // W1.2 (DEC-0027): turned off by the person, it says so.
         f.store.update(&id, "Synthetic".into(), false).unwrap();
+        assert_eq!(
+            refuse(&f.project, &id, "isolated"),
+            switchboard_core::off::ACCOUNT_OFF
+        );
+        // Off because it is used on another machine: the older sentence.
+        f.store.update(&id, "Synthetic".into(), true).unwrap();
+        f.store.mark_elsewhere(&id, true, 1).unwrap();
         assert_eq!(
             refuse(&f.project, &id, "isolated"),
             "Enable the account before launch."

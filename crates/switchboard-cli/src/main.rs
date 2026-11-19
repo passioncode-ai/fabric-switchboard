@@ -1338,14 +1338,15 @@ enum Accounts {
         #[arg(long, required = true)]
         secret_stdin: bool,
     },
-    /// Rename an account, enable or disable it, or both; what is left out stays as it is.
+    /// Rename an account, turn it off or on, or both; what is left out stays as it is.
     Update {
         /// The account id (`switchboard accounts list`).
         id: String,
         /// The new name.
         #[arg(long)]
         label: Option<String>,
-        /// `true` or `false`. A disabled account is never selected or switched to.
+        /// `false` turns it off: nothing selects, switches to, renews, checks or launches it,
+        /// and nothing turns it on again until you run this with `true`. The list says since when.
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: Option<bool>,
         /// `true`: the account is used on another machine, so this one never renews it or
@@ -2008,6 +2009,17 @@ enum KimiCommand {
         id: String,
         /// The new name.
         label: String,
+    },
+    /// Turn an account off: no fallback step, launch or usage question uses it, and nothing
+    /// turns it on again until you do.
+    Off {
+        /// The account id (`switchboard kimi list`).
+        id: String,
+    },
+    /// Turn an account you turned off on again.
+    On {
+        /// The account id (`switchboard kimi list`).
+        id: String,
     },
     /// Forget an account and delete its login folder.
     Remove {
@@ -4030,6 +4042,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 id: id.clone(),
                 label: label.clone(),
             },
+            KimiCommand::Off { id } => Operation::KimiSetEnabled {
+                id: id.clone(),
+                enabled: false,
+            },
+            KimiCommand::On { id } => Operation::KimiSetEnabled {
+                id: id.clone(),
+                enabled: true,
+            },
             KimiCommand::Remove { id } => Operation::KimiRemove { id: id.clone() },
         },
         Command::Project { command } => match command {
@@ -4215,6 +4235,11 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             let organizations = call(&root, Operation::Organizations).await.ok();
             let accounts: Vec<Value> = value["accounts"].as_array().cloned().unwrap_or_default().into_iter().map(|mut a| {
                 let id = a["id"].as_str().unwrap_or_default().to_owned();
+                // W1.2 (DEC-0027): turned off by the person, since when; and why it is not on.
+                a["off_since"] = a["off"]["since"].clone();
+                a["off_by"] = a["off"]["by"].clone();
+                let availability = mcp::availability(&value, &a);
+                a["availability"] = json!(availability);
                 a["elsewhere"] = json!(value["elsewhere"].get(&id).is_some());
                 a["location"] = value["locations"].get(&id).cloned().unwrap_or(Value::Null);
                 // SB-322: the agent it was given to, null when none.
@@ -5697,25 +5722,34 @@ fn print_result(value: &Value, cli: &Cli) {
                 return;
             }
             println!(
-                "ID                                    PROVIDER  GROUP         STATE      LABEL"
+                "ID                                    PROVIDER  GROUP         STATE      SINCE                 LABEL"
             );
             for a in accounts {
                 let selected = value["routes"]
                     .as_object()
                     .is_some_and(|routes| routes.values().any(|id| id == &a["id"]));
-                let state = if a["enabled"] == false {
-                    "disabled"
-                } else if selected {
-                    "selected"
+                // W1.2 (DEC-0027): turned off by the person, with since when; off for another
+                // reason says which.
+                let state = match a["availability"].as_str() {
+                    Some("off") => "off",
+                    Some("elsewhere") => "elsewhere",
+                    Some("lease_ended" | "called_back") => "away",
+                    _ if a["enabled"] == false => "disabled",
+                    _ if selected => "selected",
+                    _ => "ready",
+                };
+                let since = if a["off_since"].is_i64() {
+                    utc(&a["off_since"])
                 } else {
-                    "ready"
+                    "-".into()
                 };
                 println!(
-                    "{}  {:8}  {:12}  {:9}  {}",
+                    "{}  {:8}  {:12}  {:9}  {:20}  {}",
                     text(&a["id"]),
                     text(&a["provider"]),
                     text(&a["pool"]),
                     state,
+                    since,
                     text(&a["label"])
                 );
             }
@@ -7046,6 +7080,8 @@ mod mcp_parity {
         ("kimi relogin", Tool("switchboard_kimi_login")),
         ("kimi launch", Not(LAUNCH)),
         ("kimi rename", Tool("switchboard_kimi_rename")),
+        ("kimi off", Tool("switchboard_kimi_update")),
+        ("kimi on", Tool("switchboard_kimi_update")),
         ("kimi remove", Tool("switchboard_kimi_remove")),
         ("recovery register", Not(HOST)),
         ("recovery claim", Not(HOST)),
@@ -7249,6 +7285,7 @@ mod onboard_commands {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         });
         onboarding::Probe {
             folder: Some(PathBuf::from("/work/acme app")),

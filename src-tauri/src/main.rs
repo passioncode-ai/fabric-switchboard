@@ -233,7 +233,9 @@ async fn add_account(
 async fn update_account(
     id: String,
     label: String,
-    enabled: bool,
+    // W1.2 (DEC-0027), review round 1 of PR #821: absent when the person did not touch the
+    // switch, so a rename never turns an account off.
+    enabled: Option<bool>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
@@ -242,7 +244,7 @@ async fn update_account(
         .execute(Operation::Update {
             id,
             label: Some(label),
-            enabled: Some(enabled),
+            enabled,
             elsewhere: None,
             location: None,
             force: false,
@@ -1464,6 +1466,19 @@ async fn kimi_launch(
         })
         .await
 }
+/// W1.2 (DEC-0027): the person turns a Kimi Code account off or on.
+#[tauri::command]
+async fn kimi_set_enabled(
+    id: String,
+    enabled: bool,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::KimiSetEnabled { id, enabled })
+        .await
+}
 #[tauri::command]
 async fn kimi_remove(id: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -2267,6 +2282,7 @@ fn main() {
             kimi_login_cancel,
             kimi_sign_in_again,
             kimi_launch,
+            kimi_set_enabled,
             kimi_remove,
             remove_project,
             project_switch,

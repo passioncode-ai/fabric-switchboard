@@ -18,6 +18,26 @@ struct Disk {
     snapshot: Snapshot,
 }
 
+/// 2026-11-19 audit M5-03: a file of a later version is refused by its version before the typed
+/// parse, whose unknown fields (`deny_unknown_fields`) would otherwise read it as corrupt: the
+/// person reads that a newer Switchboard wrote it. Readers of 0.7.123 and older lack this and
+/// report such a file as corrupt.
+/// The newest `accounts.json` version this build reads and writes; every check names it once.
+const MAX_SCHEMA: u32 = 17;
+
+#[derive(Deserialize)]
+struct VersionOnly {
+    schema_version: u32,
+}
+fn refuse_later_version(bytes: &[u8]) -> Result<(), String> {
+    match serde_json::from_slice::<VersionOnly>(bytes) {
+        Ok(v) if v.schema_version > MAX_SCHEMA => {
+            Err("Unsupported account metadata version".into())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Version 3 only while project rules exist, so 0.3 builds keep opening rule-free files;
 /// version 4 only while projects exist, so 0.5 builds refuse a file whose reservations they
 /// would ignore rather than silently hand a project's accounts to every folder.
@@ -48,7 +68,28 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // Version 16 only while an account another machine delegated is here, or a journal entry
     // of one (SB-403, DEC-0025): a 0.7.112 or older reader refuses the unknown field rather
     // than treat a guest's sign-in as its own (send it on, give it to an agent, remove it).
-    if !snapshot.delegated.is_empty()
+    // Version 17 only while the person turned an account or a Kimi Code account off, a
+    // delegated seat records its call back, or the journal holds such a turn (W1.2, DEC-0027): a
+    // 0.7.123 or older reader refuses the unknown field and action rather than read an account
+    // the person turned off as one it may turn on. It parses the whole file before the version,
+    // so a file whose account, Kimi Code account or delegated seat carries the new field reads to
+    // it as corrupt, and one with only the journal's turns as an unsupported version (from this
+    // version on, `refuse_later_version` names a later version first, 2026-11-19 audit M5-03).
+    // The way back to such a version is restoring a
+    // backup there (its accounts come back off, as before).
+    if snapshot.accounts.iter().any(|a| a.off.is_some())
+        || snapshot.kimi_accounts.iter().any(|k| k.off.is_some())
+        || snapshot
+            .delegated
+            .values()
+            .any(|d| d.surrendered_at.is_some())
+        || snapshot
+            .events
+            .iter()
+            .any(|e| e.action == crate::off::TURNED_OFF || e.action == crate::off::TURNED_ON)
+    {
+        17
+    } else if !snapshot.delegated.is_empty()
         || !snapshot.delegated_out.is_empty()
         || snapshot.events.iter().any(|e| e.action == "delegation")
     {
@@ -175,9 +216,10 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             if bytes.len() as u64 > MAX_FILE {
                 return Err("Account metadata exceeds size limit".into());
             }
+            refuse_later_version(&bytes)?;
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=16) {
+            if !matches!(disk.schema_version, 1..=MAX_SCHEMA) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -257,9 +299,10 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
     let path = root.join(METADATA);
     let snapshot = if path.exists() {
         let bytes = read_private(&path, MAX_FILE)?;
+        refuse_later_version(&bytes)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=16) {
+        if !matches!(disk.schema_version, 1..=MAX_SCHEMA) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;

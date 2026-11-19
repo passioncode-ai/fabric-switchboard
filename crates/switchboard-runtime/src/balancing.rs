@@ -363,10 +363,10 @@ pub fn room(
 /// An account balancing may count or move at all: a subscription sign-in, enabled, not used on
 /// another machine, not given to an agent and not a seat another machine delegated here
 /// (SB-403: a guest is never lent).
-// TODO(SB-418): `account.enabled` gives way to the shared usability check (the person's own off
-// switch, DEC-0027) once that lands; the feed reads this function too.
+// W1.2 (SB-418, DEC-0027): the person's off switch included (`Account::usable`); the feed reads
+// this function too.
 pub(crate) fn usable(snapshot: &Snapshot, account: &Account) -> bool {
-    account.enabled
+    account.usable()
         && account.kind == AuthKind::OAuth
         && !snapshot.elsewhere.contains_key(&account.id)
         && !snapshot.is_assigned(&account.id)
@@ -1026,6 +1026,7 @@ mod tests {
                 checked_at: NOW - 30,
                 next_check_at: NOW + 150,
             }),
+            off: None,
         }
     }
     fn group(pool: &str) -> Project {

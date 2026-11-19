@@ -1914,7 +1914,7 @@ check(() => {
   }
   assert.equal(logic.dutyReasonText('martian'), 'martian', 'an unknown reason shows its code');
   for (const outcome of [undefined, 'restarted', 'closed', 'planned']) assert.equal(logic.dutyOutcomeText(outcome), null, String(outcome));
-  for (const outcome of ['still_running', 'closed_held_elsewhere', 'closed_no_folder', 'closed_no_claude', 'closed_not_restarted']) assert.ok(logic.dutyOutcomeText(outcome)?.length, outcome);
+  for (const outcome of ['still_running', 'closed_held_elsewhere', 'closed_no_folder', 'closed_no_claude', 'closed_not_restarted', 'closed_account_off']) assert.ok(logic.dutyOutcomeText(outcome)?.length, outcome);
   i18nForShell.setLocale('ru');
   assert.equal(logic.dutyReasonText('idle'), 'закончила работу и простаивала');
   i18nForShell.setLocale('en');
@@ -2090,6 +2090,29 @@ check(() => {
   assert.equal(logic.poolChoices([], groups).find((c) => c.pool === 'tokens').name, 'Ключи с оплатой за токены');
   assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys' }), 'Pay-per-token keys', 'a group the person named so stays as typed');
   i18n.setLocale('en');
+});
+// W1.2 (DEC-0027), review round 1 of PR #821: the Edit dialog sends its switch only when touched,
+// so renaming an account used on another machine (enabled false, no off) never turns it off.
+check(() => {
+  assert.equal(logic.editedEnabled(false, false), undefined);
+  assert.equal(logic.editedEnabled(true, true), undefined);
+  assert.equal(logic.editedEnabled(true, false), false);
+  assert.equal(logic.editedEnabled(false, true), true);
+});
+// W1.2 review round 3 of PR #821: Turn on says when the account stays away; a lapsed or called-back seat is the sender's.
+check(() => {
+  const acc = (id, pool = 'default') => ({ id, pool });
+  assert.equal(logic.heldAway(null, acc('a')), null);
+  assert.equal(logic.heldAway({}, acc('a')), null);
+  assert.equal(logic.heldAway({ elsewhere: { a: 1 } }, acc('a')), 'machine');
+  assert.equal(logic.heldAway({}, acc('a', 'machine_studio')), 'machine');
+  assert.equal(logic.heldAway({ delegated_out: { a: {} } }, acc('a')), 'machine');
+  assert.equal(logic.heldAway({ delegated: { a: { ended_at: 5 } } }, acc('a')), 'seat');
+  assert.equal(logic.heldAway({ delegated: { a: { surrendered_at: 5 } } }, acc('a')), 'seat');
+  assert.equal(logic.heldAway({ delegated: { a: { ended_at: null, surrendered_at: null } } }, acc('a')), null);
+  assert.equal(logic.turnOnNotice('W', null), 'W is on again.');
+  assert.match(logic.turnOnNotice('W', 'machine'), /stays on the other machine/);
+  assert.match(logic.turnOnNotice('W', 'seat'), /decides when it works here again/);
 });
 // SB-473 to SB-476: a move to another machine is chosen, read and batched.
 check(() => {

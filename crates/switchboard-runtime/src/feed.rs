@@ -1042,6 +1042,7 @@ mod tests {
                 checked_at: NOW - 30,
                 next_check_at: NOW + 150,
             }),
+            off: None,
         }
     }
     fn group(pool: &str) -> Project {
@@ -1772,6 +1773,13 @@ mod tests {
         let mut s = base.clone();
         for a in s.accounts.iter_mut() {
             a.enabled = false;
+        }
+        assert!(run(&s, &settings, &Held::default()).is_empty());
+        // W1.2 (SB-418, DEC-0027): turned off by the person.
+        let mut s = base.clone();
+        for a in s.accounts.iter_mut() {
+            a.enabled = false;
+            a.off = Some(switchboard_core::TurnedOff::by_person(NOW - 60));
         }
         assert!(run(&s, &settings, &Held::default()).is_empty());
         let mut s = base.clone();

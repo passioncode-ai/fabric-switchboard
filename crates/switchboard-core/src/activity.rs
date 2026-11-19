@@ -134,6 +134,9 @@ mod tests {
         ("account_updated", &["success"]),
         ("account_removed", &["success"]),
         ("account_selected", &["success"]),
+        // W1.2 (DEC-0027): the person's switch.
+        ("account_turned_off", &["person"]),
+        ("account_turned_on", &["person"]),
         ("usage", &["observed", "unavailable", "failed"]),
         (
             "request",
@@ -214,6 +217,8 @@ mod tests {
             ("account_updated", "other"),
             ("account_removed", "other"),
             ("account_selected", "switches"),
+            ("account_turned_off", "other"),
+            ("account_turned_on", "other"),
             ("usage", "other"),
             ("request", "other"),
             ("proxy", "other"),

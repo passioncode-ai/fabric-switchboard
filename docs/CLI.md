@@ -29,6 +29,8 @@ switchboard accounts add --provider claude --kind api-key --label Work --pool wo
 # is never selected or launched once an owner has started (it makes the group)
 switchboard accounts select ACCOUNT_UUID --provider claude --pool work
 switchboard accounts update ACCOUNT_UUID --label Work                  # or --enabled false, or both
+switchboard accounts update ACCOUNT_UUID --enabled false               # DEC-0027: turned off until you run it with true; nothing else turns it on
+                                                                       # `accounts list` shows STATE off and SINCE; --json carries off_since, off_by, availability
 switchboard accounts update ACCOUNT_UUID --elsewhere true              # used on another machine: never renewed, rotated to or switched to here (SB-175); false: used here again
 switchboard accounts update ACCOUNT_UUID --location "Mac Studio, user alex"   # SB-284: says where it works (and marks it used elsewhere); "" clears it
 switchboard accounts assign ACCOUNT_UUID --to "Frame Agent on Studio"   # SB-322: an agent signs in with it now: usage still checked, never selected or switched to by itself; clears --elsewhere
@@ -864,6 +866,7 @@ switchboard kimi list                 # tier and 5-hour / 7-day / monthly usage,
 switchboard kimi launch <id> --dir ~/src/app
 switchboard kimi relogin <id>         # when Kimi refused the saved login
 switchboard kimi rename <id> "New name" ; switchboard kimi remove <id>
+switchboard kimi off <id> ; switchboard kimi on <id>   # DEC-0027: off until you turn it on; not asked, launched or given a fallback step
 ```
 
 `list` also shows the ordinary `kimi`'s sign-in (`~/.kimi-code`), never changed. Switchboard

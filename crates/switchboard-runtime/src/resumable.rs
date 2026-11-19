@@ -28,6 +28,50 @@ pub const NO_CLAUDE: &str = "Claude Code was not found on this computer.";
 /// running, so nothing is started beside it.
 pub const UNREAD: &str = "The running sessions could not be read, so it is not known whether that session still runs. Try again in a moment.";
 
+/// 2026-11-19 audit M5-02 (DEC-0027): the account whose sign-in the config folder `config`
+/// holds, when the person turned it off. A session started in an account's isolated home
+/// (`<data>/homes/<id>`) runs on that account's sign-in, so resuming it there would use the
+/// account; a group's managed home goes through the proxy, which never routes to an account
+/// that is off, and the ordinary Claude folder is the person's own sign-in. Read from
+/// `accounts.json` as written, without the store's lock (an unreadable or absent file names
+/// no account: the owner refuses such a store before anything runs on it).
+pub fn turned_off_home(root: &Path, config: &Path) -> Option<String> {
+    let id = config
+        .strip_prefix(root.join("homes"))
+        .ok()?
+        .components()
+        .next()?
+        .as_os_str()
+        .to_str()?
+        .to_owned();
+    // The store's own cap on the file (2 MiB, `persistence::MAX_FILE`).
+    let bytes =
+        switchboard_core::private_fs::read_private(&root.join("accounts.json"), 2 << 20).ok()?;
+    let disk: Value = serde_json::from_slice(&bytes).ok()?;
+    disk["snapshot"]["accounts"]
+        .as_array()?
+        .iter()
+        .any(|a| a["id"] == id.as_str() && a["off"].is_object())
+        .then_some(id)
+}
+
+/// M5-02: refuses to continue `session` when its config folder is the home of an account the
+/// person turned off (`switchboard_core::off::ACCOUNT_OFF`). Every continuation asks it: a
+/// person's Continue, the boot resume, the duty officer's restart, a restart wave and a
+/// recovery claim.
+pub fn refuse_if_off(root: &Path, config: &Path) -> Result<(), String> {
+    match turned_off_home(root, config) {
+        Some(_) => {
+            crate::oplog::event(
+                "session_continue",
+                &[("outcome", crate::oplog::Field::Code("account_off"))],
+            );
+            Err(switchboard_core::off::ACCOUNT_OFF.into())
+        }
+        None => Ok(()),
+    }
+}
+
 /// Whether `session` may be continued as far as the process table says: refused while a process
 /// holds it (`LIVE`) and when the table could not be read (`UNREAD`). Pure, for tests.
 pub fn not_running(
@@ -306,6 +350,7 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
         return Err(LIVE.into());
     }
     let (config, cwd) = locate(root, session, now).ok_or(UNKNOWN)?;
+    refuse_if_off(root, &config)?;
     if !Path::new(&cwd).is_dir() {
         return Err(NO_FOLDER.into());
     }
@@ -544,6 +589,67 @@ mod tests {
             transcript(Path::new("/h/.claude"), "/Users/a/DATA/my app", "S1"),
             PathBuf::from("/h/.claude/projects/-Users-a-DATA-my-app/S1.jsonl")
         );
+    }
+
+    #[cfg(unix)]
+    /// A store at `root` with one Claude account; its id.
+    fn store_with_account(root: &Path) -> (switchboard_core::Store, String) {
+        use switchboard_core::{AuthKind, Credential, MemoryVault, Provider, Store};
+        let store =
+            Store::open(root.to_owned(), std::sync::Arc::new(MemoryVault::default())).unwrap();
+        let credential = Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            r#"{"claudeAiOauth":{"accessToken":"a-1","refreshToken":"r-1"}}"#,
+        )
+        .unwrap();
+        let account = store
+            .add(
+                "one".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                credential,
+            )
+            .unwrap();
+        (store, account.id)
+    }
+
+    /// 2026-11-19 audit M5-02 (DEC-0027): a session whose config folder is the home of an
+    /// account the person turned off is never continued there (a person's Continue and the
+    /// boot resume both go through `continue_as`); turned on, it is again; another folder is
+    /// never read as that account's.
+    #[cfg(unix)]
+    #[test]
+    fn a_session_in_the_home_of_an_account_turned_off_is_not_continued() {
+        let root = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let cwd = work.path().to_string_lossy().into_owned();
+        let (store, id) = store_with_account(root.path());
+        let home = root.path().join("homes").join(&id);
+        record(
+            root.path(),
+            json!({"session": "S1", "config": home, "cwd": cwd, "reason": "idle", "at": 100}),
+        );
+        let t = transcript(&home, &cwd, "S1");
+        std::fs::create_dir_all(t.parent().unwrap()).unwrap();
+        std::fs::write(&t, b"{}\n").unwrap();
+        assert_eq!(turned_off_home(root.path(), &home), None);
+        store.update_fields(&id, None, Some(false)).unwrap();
+        assert_eq!(turned_off_home(root.path(), &home), Some(id.clone()));
+        assert_eq!(
+            turned_off_home(root.path(), &home.join("projects")),
+            Some(id.clone()),
+            "anything under the home is that account's"
+        );
+        assert_eq!(turned_off_home(root.path(), &root.path().join("cfg")), None);
+        assert_eq!(turned_off_home(root.path(), Path::new("/h/.claude")), None);
+        assert_eq!(
+            continue_session(root.path(), "S1", 300),
+            Err(switchboard_core::off::ACCOUNT_OFF.into())
+        );
+        store.update_fields(&id, None, Some(true)).unwrap();
+        assert_eq!(turned_off_home(root.path(), &home), None);
     }
 
     #[cfg(unix)]

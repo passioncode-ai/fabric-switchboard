@@ -673,7 +673,7 @@ fn due(a: &Account, time: i64) -> bool {
 }
 /// `spread` false: the `timer` mode's fixed cadence, every schedule due exactly when it says.
 fn due_at(a: &Account, time: i64, spread: bool) -> bool {
-    a.enabled
+    a.usable()
         && a.kind == AuthKind::OAuth
         && a.usage_health.as_ref().is_none_or(|h| {
             let next = if spread {
@@ -945,7 +945,7 @@ async fn check_as(
     // marked it failed; a caller that refreshed every account did so for each turned-off one.
     let snapshot = store.snapshot()?;
     let account = snapshot.accounts.iter().find(|a| a.id == id);
-    if account.is_some_and(|a| !a.enabled) {
+    if account.is_some_and(|a| !a.usable()) {
         crate::oplog::event(
             "usage_check",
             &[("outcome", crate::oplog::Field::Code("disabled"))],
@@ -1143,7 +1143,7 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
                 .accounts
                 .iter()
                 .filter(|a| {
-                    a.enabled
+                    a.usable()
                         && a.provider == Provider::Claude
                         && a.kind == AuthKind::OAuth
                         && !ended.contains(&a.id)
@@ -2143,6 +2143,7 @@ mod tests {
                 checked_at,
                 next_check_at,
             }),
+            off: None,
         };
         let time = now();
         assert!(!due(&account(time, time + 180), time));
@@ -2963,6 +2964,7 @@ mod tests {
                 checked_at: 100_000,
                 next_check_at: 100_900,
             }),
+            off: None,
         };
         assert!(due_now(&account, 10_000, &gate));
         gate.hold(
@@ -2996,6 +2998,7 @@ mod tests {
                     kind: AuthKind::OAuth,
                     pool: "default".into(),
                     enabled: true,
+                    off: None,
                     created_at: 1,
                     identity: None,
                     usage: None,
@@ -3054,6 +3057,7 @@ mod tests {
                 kind: AuthKind::OAuth,
                 pool: "default".into(),
                 enabled: true,
+                off: None,
                 created_at: 1,
                 identity: None,
                 usage: None,
@@ -3111,6 +3115,7 @@ mod tests {
             kind: AuthKind::OAuth,
             pool: "default".into(),
             enabled: true,
+            off: None,
             created_at: 1,
             identity: None,
             usage: None,

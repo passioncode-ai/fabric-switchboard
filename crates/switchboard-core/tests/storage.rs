@@ -4298,8 +4298,8 @@ fn schema_eleven_is_written_only_while_the_domain_rule_is_retired() {
     // SB-322: 12 is a known version now (an account given to an agent), and SB-352 wave 2 made
     // 13 one (a loan to or from the default group), SB-355 14 (a machine group), SB-401 15 (the
     // pay-per-token group or a group switched off), SB-403 16 (a seat another machine delegated
-    // here); 17 is not.
-    disk["schema_version"] = 17.into();
+    // here), W1.2 17 (an account the person turned off); 18 is not.
+    disk["schema_version"] = 18.into();
     fs::write(
         root.path().join("accounts.json"),
         serde_json::to_vec(&disk).unwrap(),

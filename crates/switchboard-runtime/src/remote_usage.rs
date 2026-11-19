@@ -650,6 +650,11 @@ pub fn delegated_to(root: &Path, snapshot: &Snapshot, machine: &str) -> Vec<(Str
         .accounts
         .iter()
         .filter(|a| a.pool == pool)
+        // W1.2 (DEC-0027), review round 1 of PR #821: a seat the person here turned off is not
+        // extended, so it lapses on the teammate's machine at the end of its lease. Turning it on
+        // again keeps it in this group with its record (review round 2, P1-A), so the next read
+        // extends it (`extend_lease` brings back a lapsed seat whose sign-in is still there).
+        .filter(|a| a.off.is_none())
         .filter_map(|a| {
             // The store's record (review P2-5), else the move's `seats.jsonl` line.
             if let Some(o) = snapshot.delegated_out.get(&a.id) {
@@ -853,6 +858,7 @@ mod tests {
             external_identity: None,
             usage: None,
             usage_health: None,
+            off: None,
         }
     }
     fn snapshot() -> Snapshot {
@@ -951,6 +957,31 @@ mod tests {
             extend_leases(root.path(), &s, "studio", &program, &refuse),
             (0, 1)
         );
+    }
+
+    /// W1.2 (DEC-0027), review round 1 of PR #821 (P2-4): a seat delegated out that the person
+    /// here turned off is not extended; turned on again, it is.
+    #[test]
+    fn a_seat_turned_off_here_is_not_extended_there() {
+        let root = tempfile::tempdir().unwrap();
+        let mut s = snapshot();
+        s.delegated_out.insert(
+            "a1".into(),
+            switchboard_core::DelegatedOut {
+                remote_id: "r1".into(),
+                lease_hours: 48,
+                sender_key: "KEY".into(),
+                sent: None,
+            },
+        );
+        assert_eq!(delegated_to(root.path(), &s, "studio").len(), 1);
+        let a1 = s.accounts.iter_mut().find(|a| a.id == "a1").unwrap();
+        a1.off = Some(switchboard_core::TurnedOff::by_person(5));
+        assert!(delegated_to(root.path(), &s, "studio").is_empty());
+        // Review round 2 (P1-A): turned on again, it stays in the machine's group with its
+        // record, so the next read extends it.
+        s.accounts.iter_mut().find(|a| a.id == "a1").unwrap().off = None;
+        assert_eq!(delegated_to(root.path(), &s, "studio").len(), 1);
     }
 
     fn ok(accounts: Vec<Value>) -> Result<Remote, String> {

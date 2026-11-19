@@ -113,6 +113,7 @@ const PARITY: &[(&str, Over)] = &[
     ("kimi_login_cancel", Tool("switchboard_kimi_login")),
     ("kimi_sign_in_again", Tool("switchboard_kimi_login")),
     ("kimi_launch", Not(LAUNCH)),
+    ("kimi_set_enabled", Tool("switchboard_kimi_update")),
     ("kimi_remove", Tool("switchboard_kimi_remove")),
     ("remove_project", Tool("switchboard_project_delete")),
     ("project_switch", Tool("switchboard_project_switch")),

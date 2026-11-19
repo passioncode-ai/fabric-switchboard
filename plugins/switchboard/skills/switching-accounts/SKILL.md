@@ -64,7 +64,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_github_clone` | yes | clone a GitHub repository into a new absolute folder, only when the operator asks |
 | `switchboard_statistics` | no | requests and the provider's token counts of the last 1-90 days by group, project, account, coding agent and day |
 | `switchboard_events` | no | recent activity as fixed codes |
-| `switchboard_account_update` | yes | rename, enable or disable an account, or mark it as used on another machine and say where (`location`), only when the operator asks |
+| `switchboard_account_update` | yes | rename, turn off (until the operator turns it on; `off_since` in `switchboard_accounts`) or turn on an account, or mark it as used on another machine and say where (`location`), only when the operator asks |
 | `switchboard_account_move` | yes | move an account into a project's pool or back to `default`, only when the operator asks |
 | `switchboard_account_send` | yes | move a subscription sign-in to another machine over ssh, one holder, undone on failure; only when the operator asks |
 | `switchboard_account_recall` | yes | take a moved Claude or Codex sign-in back from the machine it went to; its copy there is removed and proved gone; only when the operator asks |
@@ -99,6 +99,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_kimi_accounts` | no | Kimi Code subscription accounts: tier, 5-hour / 7-day / monthly usage, and the ordinary `kimi`'s sign-in; never a token |
 | `switchboard_kimi_login` | yes | start, follow, finish or cancel a Kimi Code sign-in, or sign an account in again; the person signs in, only when the operator asks |
 | `switchboard_kimi_rename` | yes | rename a Kimi Code account, only when the operator asks |
+| `switchboard_kimi_update` | yes | turn a Kimi Code account off (nothing uses it until the operator turns it on) or on, only when the operator asks |
 | `switchboard_kimi_remove` / `switchboard_openrouter_remove` | yes / yes | the window's *Remove* of a Kimi Code account or of the OpenRouter key (a group's with `pool`); deletes what cannot be restored, only when the operator asks |
 | `switchboard_handovers_set` | yes | whether hand-overs open in Fabric's console, only when the operator asks |
 | `switchboard_openrouter_models` | no | OpenRouter's model list, recommended first; no key used |

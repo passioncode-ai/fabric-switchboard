@@ -1288,6 +1288,11 @@ pub enum Operation {
         id: String,
         label: String,
     },
+    /// W1.2 (DEC-0027): the person turns a Kimi Code account off (`enabled: false`) or on.
+    KimiSetEnabled {
+        id: String,
+        enabled: bool,
+    },
     /// Forgets an account and deletes its home.
     KimiRemove {
         id: String,
@@ -4335,7 +4340,7 @@ fn project_stop_account(snapshot: &switchboard_core::Snapshot, pool: &str) -> Op
             .find(|a| {
                 snapshot.serves(a, pool)
                     && a.provider == Provider::Claude
-                    && a.enabled
+                    && a.usable()
                     && a.kind == AuthKind::OAuth
             })
             .map(|a| a.id.clone())
@@ -5880,9 +5885,19 @@ async fn execute(
         } => {
             // SB-315: a sign-in moved to another machine and not called back has its holder there;
             // using it here too would renew it from two places.
+            // W1.2 review round 2 of PR #821 (P1-A): turning on an account the person turned
+            // off clears only their word and keeps its mark, so it clears nothing here. P2-6:
+            // the store's record of a seat delegated out counts as a move too.
+            let snapshot = store.snapshot()?;
+            let turned_off = snapshot
+                .accounts
+                .iter()
+                .any(|a| a.id == id && a.off.is_some());
             let clearing = elsewhere == Some(false)
-                || (enabled == Some(true) && store.snapshot()?.elsewhere.contains_key(&id));
-            if clearing && !force && seats::outstanding(root, &id).is_some() {
+                || (enabled == Some(true) && !turned_off && snapshot.elsewhere.contains_key(&id));
+            let moved =
+                seats::outstanding(root, &id).is_some() || snapshot.delegated_out.contains_key(&id);
+            if clearing && !force && moved {
                 return Err(account_send::MOVED_AWAY.into());
             }
             if label.is_some() || enabled.is_some() || (elsewhere.is_none() && location.is_none()) {
@@ -5932,10 +5947,14 @@ async fn execute(
             // SB-315: giving away an account a move sent to another machine would renew it from
             // two places, as using it here would.
             let giving = to.as_deref().is_some_and(|t| !t.trim().is_empty());
+            // W1.2 review round 3 of PR #821: the store's record of a seat delegated out counts
+            // as a move too, as for `Update`.
+            let snapshot = store.snapshot()?;
             if giving
                 && !force
-                && store.snapshot()?.elsewhere.contains_key(&id)
-                && seats::outstanding(root, &id).is_some()
+                && snapshot.elsewhere.contains_key(&id)
+                && (seats::outstanding(root, &id).is_some()
+                    || snapshot.delegated_out.contains_key(&id))
             {
                 return Err(account_send::MOVED_AWAY.into());
             }
@@ -6436,6 +6455,9 @@ async fn execute(
         ),
         Operation::KimiRename { id, label } => Ok(json!({
             "account": store.update_kimi_account(&id, Some(&label), None, None)?
+        })),
+        Operation::KimiSetEnabled { id, enabled } => Ok(json!({
+            "account": store.set_kimi_off(&id, !enabled)?
         })),
         Operation::KimiRemove { id } => Ok(json!({"removed": kimi::remove(root, &store, &id)?})),
         Operation::AgentKey => {
@@ -7030,7 +7052,7 @@ async fn execute(
                     .ok_or("Account not found")?;
                 if account.provider == Provider::Claude
                     && account.kind == AuthKind::OAuth
-                    && account.enabled
+                    && account.usable()
                     && !snapshot.elsewhere.contains_key(&id)
                 {
                     let next = account_send::next_for_cli(&snapshot, account, monitor::now())
@@ -9683,7 +9705,10 @@ fn replace_native(
     native: NativeSources,
     refresh: Option<&refresh::RefreshState>,
 ) -> Result<(), String> {
-    if !account.enabled {
+    if account.off.is_some() {
+        return Err(switchboard_core::off::ACCOUNT_OFF.into());
+    }
+    if !account.usable() {
         return Err("Account is disabled".into());
     }
     // A switch is decided on what is signed in now, never on a remembered read: a stale one
@@ -15257,6 +15282,88 @@ mod usage_gate_tests {
             .unwrap_or(true));
     }
 
+    /// W1.2 review round 2 of PR #821 (P1-A, P2-6): a seat delegated to a teammate that the
+    /// person turns off is not extended; turning it on (`Operation::Update`, as the window and
+    /// MCP do) clears only their word, is not refused as a move, and keeps the seat in the
+    /// machine's group with its record, so the next read extends it again.
+    #[tokio::test]
+    async fn a_seat_delegated_out_turned_off_and_on_is_extended_again() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let id = fixtures::save(&runtime.store, "synthetic-seat", "default").id;
+        let at = switchboard_core::MachineRef {
+            target: "studio".into(),
+            identity: None,
+            aliases: vec![],
+        };
+        runtime.store.join_machine(&id, &at, 5).unwrap();
+        runtime
+            .store
+            .record_delegated_out(
+                &id,
+                switchboard_core::DelegatedOut {
+                    remote_id: "0b1edeee-4125-403c-9c12-44c6aadaeb2b".into(),
+                    lease_hours: 48,
+                    sender_key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".into(),
+                    sent: None,
+                },
+            )
+            .unwrap();
+        let switch = |enabled: bool| Operation::Update {
+            id: id.clone(),
+            label: None,
+            enabled: Some(enabled),
+            elsewhere: None,
+            location: None,
+            force: false,
+        };
+        let extended = || {
+            remote_usage::delegated_to(root.path(), &runtime.store.snapshot().unwrap(), "studio")
+        };
+        assert_eq!(extended().len(), 1);
+        runtime.execute(switch(false)).await.unwrap();
+        assert!(extended().is_empty());
+        runtime.execute(switch(true)).await.unwrap();
+        let s = runtime.store.snapshot().unwrap();
+        let a = s.accounts.iter().find(|a| a.id == id).unwrap();
+        assert!(a.off.is_none() && !a.enabled);
+        assert!(switchboard_core::is_machine_pool(&a.pool));
+        assert!(s.elsewhere.contains_key(&id) && s.delegated_out.contains_key(&id));
+        assert_eq!(
+            extended(),
+            vec![(
+                "0b1edeee-4125-403c-9c12-44c6aadaeb2b".to_owned(),
+                48,
+                "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".to_owned()
+            )]
+        );
+        // P2-6: clearing the mark of a seat the store records as delegated out is a move to
+        // call back, even with no `seats.jsonl` line.
+        let use_here = Operation::Update {
+            id: id.clone(),
+            label: None,
+            enabled: None,
+            elsewhere: Some(false),
+            location: None,
+            force: false,
+        };
+        assert_eq!(
+            runtime.execute(use_here).await.unwrap_err(),
+            account_send::MOVED_AWAY
+        );
+        // Round 3: giving it to an agent would clear its mark too, so it is refused the same way.
+        let give = Operation::Assign {
+            id: id.clone(),
+            to: Some("an agent".into()),
+            force: false,
+        };
+        assert_eq!(
+            runtime.execute(give).await.unwrap_err(),
+            account_send::MOVED_AWAY
+        );
+        assert!(!runtime.store.snapshot().unwrap().is_assigned(&id));
+    }
+
     #[tokio::test]
     async fn an_update_can_say_where_an_account_works() {
         // SB-284: `location` marks the account as used elsewhere and says where; `elsewhere:
@@ -15847,6 +15954,7 @@ mod tokens_group_tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         };
         snapshot.projects.push(group.clone());
         let allows = |s: &switchboard_core::Snapshot, a: &Account, mode| {

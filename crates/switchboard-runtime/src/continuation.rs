@@ -379,7 +379,7 @@ pub fn plan(
         workflow_id,
         provider_name(account.provider),
         &account.id,
-        account.enabled,
+        account.usable(),
         dir,
     )
 }
@@ -679,6 +679,7 @@ mod tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         }
     }
 

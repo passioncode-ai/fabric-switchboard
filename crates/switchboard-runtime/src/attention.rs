@@ -220,7 +220,8 @@ pub fn build(inputs: &Inputs) -> Value {
             }
             continue;
         }
-        if !account.enabled {
+        // W1.2: an account turned off is the person's choice, never a problem to attend to.
+        if !account.usable() {
             continue;
         }
         // SB-401 D-18: a key from before, outside the pay-per-token group: nothing selects or
@@ -530,6 +531,7 @@ mod tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         }
     }
     fn seat(at: i64, event: &str, account: &str) -> Seat {

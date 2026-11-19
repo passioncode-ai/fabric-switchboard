@@ -121,7 +121,8 @@ pub struct Facts {
     pub waiting: HashSet<String>,
     /// Session id to (launch id, what its host answered about restarting in place).
     pub hosted: HashMap<String, (String, HostOffer)>,
-    /// Sessions that cannot be resumed (folder, transcript, `claude` or home missing).
+    /// Sessions that cannot be resumed (folder, transcript, `claude` or home missing, or the home
+    /// of an account the person turned off).
     pub cannot_resume: HashSet<String>,
     pub caller: Option<String>,
 }
@@ -492,6 +493,9 @@ fn gather(root: &Path, caller_pid: Option<u32>, now: i64) -> (Vec<crate::duty::S
             program.is_none()
                 || !Path::new(&s.cwd).is_dir()
                 || !crate::resumable::transcript(&s.config, &s.cwd, &s.session).is_file()
+                // 2026-11-19 audit M5-02 (DEC-0027): never resumed in the home of an account
+                // the person turned off.
+                || crate::resumable::turned_off_home(root, &s.config).is_some()
                 || (person.as_deref() != Some(s.config.as_path())
                     && !s.config.join("launch.command").is_file())
         })
@@ -906,6 +910,11 @@ fn in_place_outcome(
 /// process did not end) or `not_started` (no Terminal window opened).
 #[cfg(unix)]
 fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'static str>) {
+    // 2026-11-19 audit M5-02 (DEC-0027): an account turned off between the plan and the wave is
+    // never resumed in its home; the session is left as it is.
+    if crate::resumable::turned_off_home(root, &e.config).is_some() {
+        return ("failed", Some("cannot_resume"));
+    }
     let Some(program) = crate::launch::find_program("claude") else {
         return ("failed", Some("cannot_resume"));
     };
@@ -1109,6 +1118,55 @@ mod tests {
             skipped: Vec::new(),
             done_at: None,
         }
+    }
+
+    /// 2026-11-19 audit M5-02 (DEC-0027): an account turned off between the plan and the wave
+    /// leaves its session as it is: the wave writes no script and stops no process for it.
+    #[cfg(unix)]
+    #[test]
+    fn a_wave_never_resumes_a_session_in_the_home_of_an_account_turned_off_since_its_plan() {
+        use switchboard_core::{AuthKind, Credential, MemoryVault, Provider, Store};
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(
+            root.path().to_owned(),
+            std::sync::Arc::new(MemoryVault::default()),
+        )
+        .unwrap();
+        let account = store
+            .add(
+                "one".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                Credential::parse(
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    r#"{"claudeAiOauth":{"accessToken":"a-1","refreshToken":"r-1"}}"#,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        store.update_fields(&account.id, None, Some(false)).unwrap();
+        let e = Entry {
+            config: root.path().join("homes").join(&account.id),
+            // No such process: a stop would answer, never kill anything.
+            ..entry("S1", u32::MAX - 7, false)
+        };
+        let wave = Wave {
+            id: "w1".into(),
+            reason: "test".into(),
+            at: 1,
+            digest: String::new(),
+            caller: None,
+            sessions: vec![e.clone()],
+            skipped: Vec::new(),
+            done_at: None,
+        };
+        assert_eq!(
+            restart_one(root.path(), &wave, &e),
+            ("failed", Some("cannot_resume"))
+        );
+        assert!(!terminal_script_path(root.path(), "w1", "S1").exists());
     }
 
     fn entry(session: &str, pid: u32, caller: bool) -> Entry {

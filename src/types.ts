@@ -31,7 +31,11 @@ export interface Account {
   id: string; label: string; provider: Provider; kind: AuthKind; pool: string;
   external_identity?: ExternalIdentity | null; usage_health?: UsageHealth | null;
   enabled: boolean; created_at: number; identity: string | null; usage: Usage | null;
+  /** W1.2 (DEC-0027): the person turned it off, and since when; absent while on. Only the person turns it on again. */
+  off?: TurnedOff | null;
 }
+/** W1.2 (DEC-0027): an account's off, by the person's word. */
+export interface TurnedOff { since: number; by: 'person' }
 export interface Event { at: number; action: string; account_id: string | null; detail: string }
 /** WF-11.1 (SB-373): one page of the journal from the `events` command, newest first; `next_before` pages on (null at the end); `kinds` are the filter kinds the owner knows. */
 export interface EventsPage { events: Event[]; next_before: number | null; kinds: string[] }
@@ -51,7 +55,7 @@ export interface ProjectInput { pool?: string; name: string; folders: string[]; 
 export interface Organization { id: string; name: string; domains?: string[]; provider_organizations?: string[]; created_at: number; /** SB-159: its organization on PassionCode.ai. */ vesta_id?: string | null }
 /** SB-159: the PassionCode.ai connection, no token. */
 export interface PassioncodeStatus { connected: boolean; base: string; state?: 'ok' | 'sign_in_again' | 'provider_sign_in' | 'unreachable'; connected_at?: number; read_at?: number | null; checked_at?: number | null; organizations?: number; cancelled?: boolean; disconnected?: boolean; /** SB-160 (B-7): organizations a read stopped listing, by local id, since `at`. */ released?: { organization: string; at: number }[] }
-export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string>; /** SB-282: account id → organizations it also works for */ also_organizations?: Record<string, string[]>; /** SB-175: account id → when it was marked as used on another machine */ elsewhere?: Record<string, number>; /** SB-284: account id → where it works, in the person's words */ locations?: Record<string, string>; /** SB-322: account id → the agent it is given to, in the person's words */ assigned_to?: Record<string, string>; /** SB-352 wave 2: accounts a group lent to the default group */ default_shared?: string[]; /** SB-352 wave 2: accounts of the default group lent to a group */ default_lent?: string[]; /** SB-355: the other machines accounts live on, one group each */ machines?: Machine[]; /** SB-355: account on a machine → the group here it comes back to */ returns_to?: Record<string, string> }
+export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string>; /** SB-282: account id → organizations it also works for */ also_organizations?: Record<string, string[]>; /** SB-175: account id → when it was marked as used on another machine */ elsewhere?: Record<string, number>; /** SB-403: seats another machine delegated here, by account id (W1.2: `ended_at` a lapsed lease, `surrendered_at` a call back). */ delegated?: Record<string, { ended_at?: number | null; surrendered_at?: number | null }>; /** SB-403: seats this computer delegated to another machine, by account id. */ delegated_out?: Record<string, unknown>; /** SB-284: account id → where it works, in the person's words */ locations?: Record<string, string>; /** SB-322: account id → the agent it is given to, in the person's words */ assigned_to?: Record<string, string>; /** SB-352 wave 2: accounts a group lent to the default group */ default_shared?: string[]; /** SB-352 wave 2: accounts of the default group lent to a group */ default_lent?: string[]; /** SB-355: the other machines accounts live on, one group each */ machines?: Machine[]; /** SB-355: account on a machine → the group here it comes back to */ returns_to?: Record<string, string> }
 /** SB-355 (DEC-0013): another machine an account lives on, a group of its own (no folders). */
 export interface Machine { pool: string; name: string; identity?: string | null; aliases?: string[]; created_at: number }
 /** SB-355: an account's copy on its machine, as a live read found it. */
@@ -94,7 +98,8 @@ export interface Adapter {
   sessions(): Promise<{ sessions: SessionInfo[] }>;
   runtime(): Promise<RuntimeStatus>;
   add(input: AddInput): Promise<Account>;
-  update(id: string, label: string, enabled: boolean): Promise<void>;
+  /** `enabled` absent: the switch is left as it is (a rename never turns an account off; W1.2). */
+  update(id: string, label: string, enabled?: boolean): Promise<void>;
   /** SB-175: mark an account as used on another machine (disabled here), or clear the mark. */
   /** SB-284: `location` says where it works (blank clears it). */ markElsewhere(id: string, on: boolean, location?: string): Promise<void>;
   /** SB-322: gives an account to an agent (`to` names it), or takes it back (`to` null). */ assignAccount(id: string, to: string | null): Promise<void>;
@@ -242,6 +247,8 @@ export interface Adapter {
   kimiLoginStatus(id: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
   kimiLoginFinish(id: string): Promise<{ account: KimiAccount }>;
   kimiLoginCancel(id: string): Promise<unknown>;
+  /** W1.2 (DEC-0027): turns a Kimi Code account off (`enabled` false) or on. */
+  kimiSetEnabled(id: string, enabled: boolean): Promise<{ account: KimiAccount }>;
   kimiSignInAgain(id: string): Promise<unknown>;
   kimiLaunch(id: string, workingDirectory: string): Promise<unknown>;
   kimiRemove(id: string): Promise<unknown>;
@@ -336,9 +343,9 @@ export interface AgentInfo { id: string; name: string; maker?: string | null; ki
 export interface OpenrouterCredit { label: string | null; limit: number | null; limit_remaining: number | null; limit_reset: string | null; usage: number | null; usage_daily: number | null; is_free_tier: boolean | null }
 export interface HermesModel { installed: boolean; configured: boolean; model?: string | null; provider?: string | null; base_url?: string | null; api_mode?: string | null; providers: string[]; error: string | null }
 export type KimiRegion = 'mainland-cn' | 'global';
-export interface KimiAccount { id: string; label: string; region: KimiRegion; added_at: number; nickname?: string | null; tier?: string | null }
+export interface KimiAccount { id: string; label: string; region: KimiRegion; added_at: number; nickname?: string | null; tier?: string | null; /** W1.2: turned off by the person, and since when. */ off?: TurnedOff | null }
 /** A Kimi Code home's state at this read: the plan windows, or `error` naming why there are none. */
-export interface KimiStatus { signed_in: boolean; nickname?: string | null; tier?: string | null; windows?: { name: string; used_percent: number; resets_at: number | null }[]; error: string | null; region?: KimiRegion; checked_at?: number | null }
+export interface KimiStatus { /** W1.2: the account is turned off, so Kimi was not asked. */ off?: boolean; signed_in: boolean; nickname?: string | null; tier?: string | null; windows?: { name: string; used_percent: number; resets_at: number | null }[]; error: string | null; region?: KimiRegion; checked_at?: number | null }
 export interface KimiAccounts { accounts: { account: KimiAccount; status: KimiStatus }[]; current: KimiStatus | null; installed: boolean }
 /** SB-120: one catalog agent as this computer has it. */
 export interface AgentRow { id: string; name: string; maker?: string | null; url: string; install?: string | null; installed: boolean; switchable: boolean; enabled: boolean; disabled: boolean; default: boolean; openrouter: boolean; mcp: boolean; command: string; argv?: string[]; path?: string | null }

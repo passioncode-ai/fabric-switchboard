@@ -45,7 +45,7 @@ export const nativeAdapter: Adapter = {
   sessions: () => readWithDeadline(invoke('sessions')),
   runtime: () => readWithDeadline(invoke('runtime_status')),
   add: (input) => invoke('add_account', { ...input }),
-  update: (id, label, enabled) => invoke('update_account', { id, label, enabled }),
+  update: (id, label, enabled) => invoke('update_account', { id, label, enabled: enabled ?? null }),
   markElsewhere: (id, on, location) => invoke('mark_elsewhere', { id, on, location: location ?? null }),
   assignAccount: (id, to) => invoke('assign_account', { id, to }),
   sendAccount: (id, to, pool, delegate) => invoke('send_account', { id, to, pool, delegate: delegate ? true : null, leaseHours: delegate?.leaseHours ?? null }),
@@ -153,6 +153,7 @@ export const nativeAdapter: Adapter = {
   kimiLoginCancel: (id) => invoke('kimi_login_cancel', { id }),
   kimiSignInAgain: (id) => invoke('kimi_sign_in_again', { id }),
   kimiLaunch: (id, workingDirectory) => invoke('kimi_launch', { id, workingDirectory }),
+  kimiSetEnabled: (id, enabled) => invoke('kimi_set_enabled', { id, enabled }),
   kimiRemove: (id) => invoke('kimi_remove', { id }),
   anthropicKeys: () => invoke('anthropic_keys'),
   launchKeys: (agent, folder) => invoke('launch_keys', { agent, folder }),
@@ -283,6 +284,8 @@ const safeErrors = new Set([
   "This seat was delegated to this computer by another machine, so it is not given to an agent.",
   "This seat was delegated to this computer by another machine. Ask that machine to call it back; it can be removed here 30 days after its lease ran out.",
   "This seat was delegated to this computer by another machine. It serves its group's sessions only and never becomes the ordinary Claude Code or Codex sign-in.",
+  // W1.2 review round 2 of PR #821 (P2-3): a seat its sender called back.
+  "The machine that delegated this seat called it back, so it is switched off here until that machine delegates it again.",
   "This seat's lease ran out, so it is switched off here. The machine that delegated it extends its lease to use it again, or calls it back.",
   "Give the lease in whole hours, from 1 to 720.",
   "A delegated seat joins one of the other machine's groups. Name that group; the default group takes none.",
@@ -574,6 +577,9 @@ const safeErrors = new Set([
   'Account home cleanup failed. Close its sessions and retry.',
   'Choose isolated or managed launch.',
   'Enable the account before launch.',
+  // W1.2 (DEC-0027): an account or a Kimi Code account the person turned off.
+  'This account is turned off. Turn it on to use it again.',
+  'This Kimi Code account is turned off. Turn it on to use it again.',
   'Usage unavailable. Check the account and retry later.',
 ]);
 /**

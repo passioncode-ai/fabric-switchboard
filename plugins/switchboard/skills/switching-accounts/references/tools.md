@@ -641,8 +641,18 @@ themselves. Without `add` or `remove`, reads them; changing them only when the o
 
 ### `switchboard_account_update`: `account_id`, `label?`, `enabled?`, `elsewhere?`, `location?`, `assigned_to?`, `force?`
 
-Only when the operator asks. Renames, enables or disables an account; `elsewhere: true`
-disables it here because another machine uses it; `location` says where it works (a machine and
+Only when the operator asks. Renames an account (without `enabled`, its switch stays as it is), or
+turns it off (`enabled: false`: nothing on this computer
+selects, switches to, renews, checks, launches, lends or sends it, and nothing turns it on again by
+itself, not a call back, a restore, a lease or a cleared mark, until the operator sends
+`enabled: true`; `switchboard_accounts` shows `off_since`, `off_by` and `availability`) or on (`enabled: true`
+on an account turned off that is also held away, used on another machine, in a machine group,
+delegated out, or a seat whose lease ran out or that its sender called back, clears only the
+operator's off and leaves it there; a sign-in moved or delegated there comes home with
+`switchboard_account_recall`, and `elsewhere: false` with `force` is only for a copy that is gone
+there); `elsewhere: true`
+disables it here because another machine uses it (`elsewhere: false` clears the mark and turns it
+on again, unless the operator turned it off); `location` says where it works (a machine and
 its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it.
 `assigned_to` gives the account to an agent or service that signs in with it now (its name, at
 most 120 characters): unlike `elsewhere` it stays enabled, its sign-in is renewed and its usage
@@ -1042,6 +1052,12 @@ and `again` (sign a saved account in again) take `id`.
 ### `switchboard_kimi_rename`: `id`, `label`
 
 Only when the operator asks. Renames a saved Kimi Code account.
+
+### `switchboard_kimi_update`: `id`, `enabled`
+
+Only when the operator asks. `enabled: false` turns a saved Kimi Code account off: no fallback
+step, launch, continuation or usage question uses it, and nothing turns it on again until the
+operator does (`enabled: true`). `switchboard_kimi_accounts` shows `off.since`.
 
 ### `switchboard_kimi_remove`: `id`
 

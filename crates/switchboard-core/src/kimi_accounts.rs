@@ -26,6 +26,10 @@ pub struct KimiAccount {
     /// The membership tier (`user_level_name`, for example Allegretto).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tier: Option<String>,
+    /// W1.2 (DEC-0027): the person turned it off, and since when: no chain step, launch,
+    /// continuation or usage question uses it until the person turns it on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off: Option<crate::TurnedOff>,
 }
 
 /// A profile field as shown: control characters dropped, at most 80 characters.
@@ -57,6 +61,7 @@ pub(crate) fn validate_kimi_accounts(s: &Snapshot) -> Result<(), String> {
             || k.added_at <= 0
             || !profile_valid(&k.nickname)
             || !profile_valid(&k.tier)
+            || k.off.is_some_and(|o| o.since <= 0)
         {
             return Err("Invalid Kimi Code account metadata".into());
         }
@@ -87,6 +92,7 @@ impl Store {
             added_at: now(),
             nickname: nickname.as_deref().and_then(profile_text),
             tier: tier.as_deref().and_then(profile_text),
+            off: None,
         };
         let mut state = self.lock()?;
         let mut candidate = state.clone();
@@ -136,6 +142,35 @@ impl Store {
         Ok(entry)
     }
 
+    /// W1.2 (DEC-0027): the person turns a Kimi Code account off (`off`, recording when; one
+    /// already off keeps its time) or on. Answers the account as saved.
+    pub fn set_kimi_off(&self, id: &str, off: bool) -> Result<KimiAccount, String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let entry = candidate
+            .kimi_accounts
+            .iter_mut()
+            .find(|k| k.id == id)
+            .ok_or(NO_KIMI_ACCOUNT)?;
+        let action = match (off, entry.off.is_some()) {
+            (true, false) => {
+                entry.off = Some(crate::TurnedOff::by_person(now()));
+                crate::off::TURNED_OFF
+            }
+            (false, true) => {
+                entry.off = None;
+                crate::off::TURNED_ON
+            }
+            _ => return Ok(entry.clone()),
+        };
+        let entry = entry.clone();
+        // Review round 1 of PR #821: the entry names the Kimi Code account it turned.
+        append_event(&mut candidate, action, Some(id), "person");
+        crate::validate_snapshot(&candidate)?;
+        self.publish(&mut state, candidate)?;
+        Ok(entry)
+    }
+
     pub fn kimi_account(&self, id: &str) -> Result<KimiAccount, String> {
         self.snapshot()?
             .kimi_accounts
@@ -164,6 +199,43 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W1.2 (DEC-0027): a Kimi Code account turns off with its time, stays off through a
+    /// rename or a profile refresh, and turns on only when asked.
+    #[test]
+    fn a_kimi_account_turns_off_with_its_time_and_on_only_when_asked() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(
+            root.path().into(),
+            std::sync::Arc::new(crate::MemoryVault::default()),
+        )
+        .unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        store
+            .add_kimi_account(&id, "Kimi", "global", None, None)
+            .unwrap();
+        let off = store.set_kimi_off(&id, true).unwrap().off.unwrap();
+        assert_eq!(
+            store.set_kimi_off(&id, true).unwrap().off,
+            Some(off),
+            "time kept"
+        );
+        store
+            .update_kimi_account(&id, Some("Renamed"), Some("nick".into()), None)
+            .unwrap();
+        let saved = store.kimi_account(&id).unwrap();
+        assert_eq!((saved.label.as_str(), saved.off), ("Renamed", Some(off)));
+        assert!(store.set_kimi_off(&id, false).unwrap().off.is_none());
+        let s = store.snapshot().unwrap();
+        assert!(s
+            .events
+            .iter()
+            .any(|e| e.action == crate::off::TURNED_ON && e.account_id.as_deref() == Some(&id)));
+        assert_eq!(
+            store.set_kimi_off("nope", true).unwrap_err(),
+            NO_KIMI_ACCOUNT
+        );
+    }
 
     #[test]
     fn profile_text_drops_controls_and_bounds_length() {

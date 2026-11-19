@@ -209,7 +209,7 @@ pub(crate) fn candidates(
         .accounts
         .iter()
         .filter(|a| {
-            a.enabled
+            a.usable()
                 // SB-322: an account given to an agent never continues a stopped session.
                 && !snapshot.is_assigned(&a.id)
                 && a.kind == AuthKind::OAuth
@@ -312,7 +312,7 @@ fn probe_accounts(
         .accounts
         .iter()
         .filter(|a| {
-            a.enabled
+            a.usable()
                 && !snapshot.is_assigned(&a.id)
                 && a.kind == AuthKind::OAuth
                 && a.provider == wait.provider
@@ -587,6 +587,7 @@ mod tests {
                 checked_at: 101,
                 next_check_at: 281,
             }),
+            off: None,
         }
     }
     fn snapshot() -> Snapshot {
@@ -747,6 +748,64 @@ mod tests {
             102
         )
         .is_err());
+    }
+    /// 2026-11-19 audit M5-02 (DEC-0027): a stopped session is never continued on an account
+    /// the person turned off: such an account is neither ready capacity nor a probe, and a
+    /// claim naming it is refused, while another account still is.
+    #[test]
+    fn a_recovery_claim_never_takes_an_account_turned_off() {
+        let root = tempfile::tempdir().unwrap();
+        let mut s = snapshot();
+        // `off` alone (a store never holds it with `enabled`, but the test does): the rule must
+        // ask `usable()`, not `enabled`.
+        let new = s.accounts.iter_mut().find(|a| a.id == "new").unwrap();
+        new.off = Some(switchboard_core::TurnedOff::by_person(50));
+        s.accounts.push(account("spare"));
+        let none = HashSet::new();
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        let wait = read(root.path()).unwrap().remove(0);
+        let ready = readiness(&wait, &s, &none, &none, &none, 102);
+        assert!(
+            !ready.accounts.iter().any(|a| a == "new"),
+            "{:?}",
+            ready.accounts
+        );
+        assert_eq!(
+            claim(
+                root.path(),
+                "limit:1",
+                "new",
+                &s,
+                &none,
+                &none,
+                &none,
+                &|_| false,
+                102,
+            )
+            .unwrap_err(),
+            NOT_READY
+        );
+        assert!(claim(
+            root.path(),
+            "limit:1",
+            "spare",
+            &s,
+            &none,
+            &none,
+            &none,
+            &|_| false,
+            102,
+        )
+        .is_ok());
     }
     #[test]
     fn an_account_near_its_limit_is_not_capacity_for_a_stopped_session() {

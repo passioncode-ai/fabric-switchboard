@@ -101,6 +101,9 @@ export function eventAction(action: string): string {
   switch (action) {
     case 'account_added': return t('Account added');
     case 'account_updated': return t('Account updated');
+    // W1.2 (DEC-0027): the person's switch.
+    case 'account_turned_off': return t('Account turned off');
+    case 'account_turned_on': return t('Account turned on');
     case 'account_removed': return t('Account removed');
     case 'account_selected': return t('Account selected');
     case 'usage': return t('Usage check');
@@ -168,6 +171,8 @@ export function eventDetail(detail: string): string {
     case 'managed': return t('managed session');
     // SB-322: an account given to an agent that the person used anyway.
     case 'override': return t('used anyway');
+    // W1.2: who turned an account off or on.
+    case 'person': return t('by you');
     case 'lent': return t('lent to another group');
     case 'returned': return t('back in its own group');
     case 'joined': return t('moved to its machine\'s group');
@@ -607,6 +612,7 @@ export function dutyOutcomeText(outcome: string | undefined): string | null {
     case 'closed_no_folder': return t('closed, not reopened: its folder is gone');
     case 'closed_no_claude': return t('closed, not reopened: Claude Code was not found');
     case 'closed_not_restarted': return t('closed, not reopened: the Terminal window did not open');
+    case 'closed_account_off': return t('closed, not reopened: its account is turned off');
     default: return outcome;
   }
 }
@@ -1396,6 +1402,34 @@ export function chainSummary(executors: readonly ChainExecutor[] | null | undefi
     return label ? `${name} (${label})` : name;
   }).join(' → ');
 }
+/**
+ * W1.2 review round 3 of PR #821: why an account the person turns on stays away anyway. `machine`:
+ * used on another machine, in a machine group or delegated out (turning on clears only the off;
+ * *Use here* or a call back brings it home); `seat`: a seat delegated here whose lease ran out or
+ * that its sender called back (the sender decides; *Enable* is not offered). Null: nothing else
+ * keeps it off. Mirrors `off::held_away` in the core.
+ */
+export function heldAway(snapshot: { elsewhere?: Record<string, number>; delegated?: Record<string, { ended_at?: number | null; surrendered_at?: number | null }>; delegated_out?: Record<string, unknown> } | null | undefined, account: { id: string; pool: string }): 'machine' | 'seat' | null {
+  if (!snapshot) return null;
+  if (snapshot.elsewhere?.[account.id] !== undefined || account.pool.startsWith('machine_') || snapshot.delegated_out?.[account.id] !== undefined) return 'machine';
+  const seat = snapshot.delegated?.[account.id];
+  if (seat && (seat.ended_at != null || seat.surrendered_at != null)) return 'seat';
+  return null;
+}
+/** The notice after *Turn on*: on again, or no longer turned off but still held away (W1.2 round 3). */
+export function turnOnNotice(label: string, away: 'machine' | 'seat' | null): string {
+  if (away === 'machine') return t('{label} is no longer turned off. It stays on the other machine until you call it back or use it here.', { label });
+  if (away === 'seat') return t('{label} is no longer turned off. The machine that delegated it decides when it works here again.', { label });
+  return t('{label} is on again.', { label });
+}
+/**
+ * W1.2 (DEC-0027), review round 1 of PR #821: what the *Edit account* dialog sends for its switch.
+ * Untouched, nothing (`undefined`), so renaming an account that is off for another reason (used
+ * on another machine, a lapsed seat) never records it as turned off by the person.
+ */
+export function editedEnabled(enabledNow: boolean, checked: boolean): boolean | undefined {
+  return checked === enabledNow ? undefined : checked;
+}
 /** Why a step would be passed over, as a phrase: the chains view's readiness reasons and the
  * hand-over gate's (fallback.rs, spend gate C-5). An unknown code is shown as itself. */
 export function skipReasonText(reason: string | null | undefined, agent?: string): string | null {
@@ -1415,6 +1449,8 @@ export function skipReasonText(reason: string | null | undefined, agent?: string
     case 'not_installed': return t('not installed');
     case 'quota_unknown': return t('remaining quota not seen yet');
     case 'permission_mode': return t('asks for less approval than the agent before it');
+    // W1.2 (DEC-0027): its account, or every Kimi Code account, is turned off.
+    case 'account_off': return t('its account is turned off');
     default: return null;
   }
 }

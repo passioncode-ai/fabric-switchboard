@@ -1607,7 +1607,7 @@ async fn probe_usage_from(
             ..e.into()
         })?,
     };
-    if !account.enabled {
+    if !account.usable() {
         return Err(USAGE_DISABLED.into());
     }
     if credential.expires_at.is_some_and(|t| t <= now()) {

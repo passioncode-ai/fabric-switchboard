@@ -135,7 +135,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
     let account = json!({"type":"string","description":"Account id from switchboard_accounts."});
     vec![
         (false, json!({"name":"switchboard_status","title":"Switchboard status","description":"Who handles this session's requests: runtime state, this session (managed in a group, isolated, or native), the signed-in CLI accounts, the selected account per group, active folder rules, automatic switching, and keychain_too_large (Claude Code Keychain items Switchboard could not write because they are too large: item, during, at). Call this first.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool) and every group it serves (groups), whether selected or signed in now, the lowest remaining quota, the organization each belongs to (null: personal) with what decided it (person or provider), the organizations it also works for, and whether it is used on another machine (elsewhere) with where (location), and the agent it is given to (assigned_to, null when none: Switchboard keeps observing its usage but never uses it by itself), with assigned on such a row: the machine it runs on, the group, folder and time of the newest launch on it, and its last activity. machine: here or elsewhere lists only those. A seat another machine delegated here carries delegated (from, sender_key, lease_until, lease_ended): it serves its group only and only that machine calls it back.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"machine":{"type":"string","enum":["here","elsewhere"]}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool) and every group it serves (groups), whether selected or signed in now, enabled, and when the operator turned it off: off_since (Unix seconds) and off_by (person), null while on; availability says why it is or is not usable here (on, off, elsewhere, lease_ended, called_back, disabled); the lowest remaining quota, the organization each belongs to (null: personal) with what decided it (person or provider), the organizations it also works for, and whether it is used on another machine (elsewhere) with where (location), and the agent it is given to (assigned_to, null when none: Switchboard keeps observing its usage but never uses it by itself), with assigned on such a row: the machine it runs on, the group, folder and time of the newest launch on it, and its last activity. machine: here or elsewhere lists only those. A seat another machine delegated here carries delegated (from, sender_key, lease_until, lease_ended): it serves its group only and only that machine calls it back.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"machine":{"type":"string","enum":["here","elsewhere"]}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account; within 60 seconds of its last check it returns that observation with a note, and after a 429 on any check of that provider it is refused for at least 15 minutes (longer when the provider asks), and in the smart and on_demand modes as paced past the provider's budget of two checks a minute with a reserve of up to eight; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. A read-only server never asks and shows the stored observation. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_capacity","title":"Session pool","description":"This computer's cap on live coding sessions: cap (null when none), used (live Claude Code and Codex sessions doing work, managed or not: a Claude Code session counts by its own transcript and status, so one quiet for 30 minutes outside a turn is not counted, nor one on a limit stop or on a wait of its own (a wake-up, a monitor, a cron job, a hold); a process with no session file counts by its folder), free, at_capacity, total, quiet, on_limit_stop and on_waits (not counted), degraded when the process table could not be read. board_share (null without a cap) is how many board runs may run whatever the cap holds: a dispatch, or launch --hosted --surface fabric, starts while used is under the cap or board_used (board runs live now, and admitted ones not yet recorded: pending) is under board_share; board_share_set says the person set it (else a quarter of the cap, rounded up); board_admitted says a board run would start now. switchboard dispatch answers state refused with reason at_capacity (and used, cap, board_used, board_share) when neither holds, and any other launch --hosted is refused at the cap: a wait, not a failed run; ask again when a session ends. waiting counts the board runs refused since the pool last admitted one; refused_waiting (null when none) has count, since (the first), last_at, newest_request and freed (a session ended since), with no time cutoff; refused_last_hour (null when none) keeps the last hour's count and per_hour. switchboard_attention lists the waiting ones as one dispatch_refused item. cap sets the cap (1 to 500), board sets the board's share (0 to the cap; with cap or on the cap already set), board_default: true goes back to the default share, and cap alone keeps a share set before, clamped to the cap (board_share_clamped says so); clear removes both and takes neither; without any, reads only. Setting or clearing it only when the operator asks.","inputSchema":{"type":"object","properties":{"cap":{"type":"integer","minimum":1,"maximum":500},"board":{"type":"integer","minimum":0,"maximum":500},"board_default":{"type":"boolean"},"clear":{"type":"boolean"}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_own_sign_in","title":"Own sign-in","description":"Whether Switchboard reads or changes the person's own Claude Code and Codex sign-in on this computer. Off on a teammate's computer that serves only seats an organization delegated to it: the background no longer reads that sign-in, nothing is captured, imported, activated or renewed in it, a launch copies no MCP sign-in out of it, and the session duty officer leaves the person's own sessions alone. Claude Desktop is outside Switchboard either way. on true or false changes it, only when the operator asks; without on, the setting (own_sign_in: on or off).","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"}},"additionalProperties":false}})),
@@ -172,7 +172,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_repository_map","title":"Repositories on disk","description":"The Git repositories under the folders named (absolute; none: ~/DATA, else the home folder; up to three folders deep, not into a repository, a hidden folder or dependencies), each with its group (pool as its id, name; place folder or inside) or none. Linked worktrees are listed under their root in switchboard_projects, not here. Reads only.","inputSchema":{"type":"object","properties":{"under":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_statistics","title":"Statistics","description":"What the local proxy relayed in the last days (1-90, default 30): requests, how they ended (ok, limited, failed) and the token counts the provider itself reported (input, output, cache read and write), by group, project (a repository with its checkouts, placed by the folder the request came from), account, coding agent (from its user-agent) and day, plus each group-project-account-agent combination and each day's split by group. Only managed traffic: a session on its own sign-in outside Switchboard is not counted. Counts only, never a prompt, answer or path. Reads only.","inputSchema":{"type":"object","properties":{"days":{"type":"integer","minimum":1,"maximum":90}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, groups, automatic switching, sign-ins) and how it ended, as fixed codes. kind keeps one class: switches, sign_ins, groups, moves, other, or errors (any event that failed, of every class); account_id keeps one account's events. A page holds limit events and every other event of the second it ends in; pass its next_before as before for older ones (null: nothing older). kinds names every kind present in the journal. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50},"kind":{"type":"string","enum":["switches","sign_ins","groups","moves","errors","other"]},"account_id":{"type":"string"},"before":{"type":"integer","description":"Unix seconds, exclusive."}},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). An account whose sign-in was moved with switchboard_account_send is called back with switchboard_account_recall, not used here again, unless force. assigned_to gives the account to an agent or service that holds its sign-in now (its name, at most 120 characters; empty takes it back): Switchboard keeps renewing it and observing its usage but never selects it, switches to it or launches on it by itself, and giving it clears elsewhere. Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80},"assigned_to":{"type":"string","maxLength":120,"description":"The agent or service that holds the account now; empty takes it back."},"force":{"type":"boolean","description":"With elsewhere false, enabled true or assigned_to: use it here although its sign-in was moved to another machine and not called back."}},"required":["account_id"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_update","title":"Rename, turn off or turn on an account","description":"Rename an account, turn it off (enabled false: nothing selects, switches to, renews, checks, launches, lends or sends it, and nothing turns it on again by itself, not a call back, a restore or a lease, until the operator turns it on with enabled true) or on (enabled true on an account turned off that is also used on another machine, in a machine group, delegated out or a lapsed or called-back seat clears only the operator's off and leaves it there; a sign-in moved or delegated there comes home with switchboard_account_recall; elsewhere false, with force, only when its copy there is gone), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false clears the mark and enables it again, unless the operator turned it off), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). An account whose sign-in was moved with switchboard_account_send is called back with switchboard_account_recall, not used here again, unless force. assigned_to gives the account to an agent or service that holds its sign-in now (its name, at most 120 characters; empty takes it back): Switchboard keeps renewing it and observing its usage but never selects it, switches to it or launches on it by itself, and giving it clears elsewhere. Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80},"assigned_to":{"type":"string","maxLength":120,"description":"The agent or service that holds the account now; empty takes it back."},"force":{"type":"boolean","description":"With elsewhere false, enabled true or assigned_to: use it here although its sign-in was moved to another machine and not called back."}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_remove","title":"Remove an account","description":"Only when the operator asks. Remove one account from Switchboard and delete its stored sign-in or key here, as the window's Remove account does; this cannot be undone. Refused while its group has it selected: select another account first. Clients signed in elsewhere are not signed out. An account moved to another machine is called back or removed there with switchboard_account_recall.","inputSchema":{"type":"object","properties":{"account_id":account},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another group","description":"Move an account into a group (pool: its group id), or back to the default group (pool: default). Only when the operator asks. Joining or leaving a group is that group's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a group, and a second copy of a login already in that group is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A group id from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_send","title":"Move an account to another machine","description":"Move an account's sign-in to another machine over ssh, without a new sign-in there: it is marked here as used elsewhere first (this machine never renews it again), saved there with switchboard accounts add (the tokens on stdin), checked there with a quota check, and both are undone on any failure. Only a Claude or Codex subscription sign-in; a group that has it selected first moves to its next account here (one with room, else the one free first), and a group with no other account refuses; when the ordinary Claude Code here is signed in to it, Claude Code first switches to another Claude account here (answer.cli_switched_to). to: the machine as ssh knows it, reachable without a prompt; pool: its group there (default); remote: that machine's switchboard, an absolute path (default the one the newest move or run there used, else the macOS app's); remote_data_dir: its data folder when it runs with --data-dir. Only when the operator asks. The person's word on its organizations goes with it (organizations match by name; one the other machine lacks is added there); answer.organizations says whether it was carried. delegate true delegates the seat instead: the other machine (a teammate's, reached through its restricted entry switchboard ssh-serve) keeps it as a guest in the group named in pool (never its default group), pinned to this machine's key; there it cannot be moved on, given to an agent, lent or made the ordinary sign-in, and only this machine calls it back with switchboard_account_recall. lease_hours (1 to 720, default 48): this machine's background read of that machine extends it; past it, the copy there is switched off and its sign-in removed.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"to":{"type":"string","minLength":1,"maxLength":255},"pool":{"type":"string"},"delegate":{"type":"boolean","description":"Delegate the seat to a teammate's machine: a guest there, called back only from here."},"lease_hours":{"type":"integer","minimum":1,"maximum":720,"description":"With delegate: the lease in hours, extended at each background read; 48 by default."},"remote":{"type":"string"},"remote_data_dir":{"type":"string","description":"The other machine's data folder, an absolute path, when its Switchboard runs with --data-dir."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
@@ -216,9 +216,10 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_observatory_key_add","title":"Add a key from Observatory","description":"Saves a key Project Observatory holds in Switchboard by its slot (project/env/NAME), so an agent starts on it at once. The value goes from Observatory's vault to Switchboard's through a pipe; it never appears in an argument, a file, a log or this answer. An Anthropic key becomes an account in the pay-per-token group (to: account, the default), counted against that group's daily ceiling; to: agent or both also saves it as a named key Hermes runs on directly (no ceiling counts that). An OpenRouter key becomes this computer's OpenRouter key, or a group's with pool. An OpenAI key is refused for now. A name or key already saved is kept unless replace is true. The answer lists what was saved and the next steps.","inputSchema":{"type":"object","properties":{"slot":{"type":"string","description":"project/env/NAME, as switchboard_observatory_keys lists it."},"to":{"type":"string","enum":["account","agent","both"],"description":"For an Anthropic key; default account."},"as":{"type":"string","description":"The account's name, or the named key's name; default from the project."},"pool":{"type":"string","description":"For an OpenRouter key: the group id whose folders run on it."},"model":{"type":"string","description":"The named key's default model."},"replace":{"type":"boolean","description":"Replace a named key or an OpenRouter key already saved there."}},"required":["slot"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_launch_keys","title":"Keys an agent can start on","description":"Every key an agent can start on here, by name and never a value: the OpenRouter key a launch in the folder spends, marked default (its group's own, else this computer's), the other OpenRouter keys with the group whose folders use them (why_not), then the Anthropic keys for an agent that takes one (Hermes), and for Claude Code and Hermes the pay-per-token group's Claude API keys as kind group (pool, group, account_id, selected; usable once the group is on, has a daily ceiling, holds the folder and has the key selected, else why_not). Every key carries metered: whether a ceiling counts it (an Anthropic key's direct launch does not). none_usable says no key is saved to start on. No MCP tool launches an agent yet: launch from the window, or with switchboard agents launch on the default OpenRouter key, or with --anthropic and a key's name.","inputSchema":{"type":"object","properties":{"agent":{"type":"string","description":"The agent's catalog id, such as hermes."},"folder":{"type":"string","description":"The absolute folder it would start in; without it, this computer's key counts as the default."}},"required":["agent"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_agents","title":"Coding agents on this computer","description":"The coding agents Switchboard knows: which are installed here, which the operator enabled for taking over work (fallback chains and switchboard continue; account switching is separate), the machine's default agent (null is Auto: switchboard continue without an account hands work to it, and Fabric starts with it unless a project sets its own), the command Switchboard runs for each, and the recommended OpenRouter models. Changing these is the operator's (the Agents page or switchboard agents enable|disable|default).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_kimi_accounts","title":"Kimi Code accounts","description":"The operator's Kimi Code subscription accounts saved in Switchboard: label, region, membership tier and each plan window's used percent and reset (5-hour, 7-day, monthly), asked of Kimi; plus the ordinary kimi CLI's sign-in. Never a token. Signing in and launching are the operator's (the app or switchboard kimi); remove one with switchboard_kimi_remove when the operator asks.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_kimi_accounts","title":"Kimi Code accounts","description":"The operator's Kimi Code subscription accounts saved in Switchboard: label, region, membership tier, off (since when the operator turned it off, null while on; such an account is not asked) and each plan window's used percent and reset (5-hour, 7-day, monthly), asked of Kimi; plus the ordinary kimi CLI's sign-in. Never a token. Signing in and launching are the operator's (the app or switchboard kimi); remove one with switchboard_kimi_remove when the operator asks.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_kimi_login","title":"Sign in a Kimi Code account","description":"Start the official Kimi Code sign-in for a new account (action begin: label, region; the person finishes it in the browser), follow it (status, finish once the person signed in, cancel), or sign an existing account in again (again: id). The person signs in; this never takes a password or a token. Only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["begin","status","finish","cancel","again"]},"id":{"type":"string","minLength":1},"label":{"type":"string","maxLength":80},"region":{"type":"string","enum":["mainland-cn","global"],"description":"mainland-cn (kimi.com, the default) or global (kimi.ai)."}},"required":["action"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_kimi_rename","title":"Rename a Kimi Code account","description":"Rename a saved Kimi Code account. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","minLength":1,"description":"The account id from switchboard_kimi_accounts."},"label":{"type":"string","minLength":1,"maxLength":80}},"required":["id","label"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_kimi_update","title":"Turn a Kimi Code account off or on","description":"Turn a saved Kimi Code account off (enabled false: no fallback step, launch, continuation or usage question uses it, and nothing turns it on again until the operator does) or on again (enabled true). switchboard_kimi_accounts shows off.since. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","minLength":1,"description":"The account id from switchboard_kimi_accounts."},"enabled":{"type":"boolean"}},"required":["id","enabled"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_kimi_remove","title":"Remove a Kimi Code account","description":"Forget a saved Kimi Code account and delete its home here, as the window's Remove does; this cannot be undone (sign the account in again to bring it back). Refused while a kimi session runs in it. removed is false when no such account was saved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","minLength":1,"maxLength":200,"description":"The account id from switchboard_kimi_accounts."}},"required":["id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_openrouter_remove","title":"Remove an OpenRouter key","description":"Remove the OpenRouter key agents run on, or with pool that group's own key, as the window's Remove does: the saved key and its vault item are deleted, which cannot be undone (save or issue a new key to replace it). A key whose spend a ceiling counts is removed only with decision, the operator's own words. removed is false when no key was saved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1,"maxLength":200,"description":"A group id from switchboard_projects; omit for the machine's key."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words, when a spending ceiling counts the key."}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_handovers_set","title":"Hand-overs in Fabric's console","description":"Whether hand-overs open in Fabric's console (on) or straight in Terminal (off). Only when the operator asks.","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"}},"required":["on"],"additionalProperties":false}})),
@@ -923,6 +924,7 @@ impl Server {
                 });
                 let usage = usage_view(&a, &snapshot, time);
                 let mut row = json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "kind": a["kind"], "pool": a["pool"], "enabled": a["enabled"],
+                    "off_since": a["off"]["since"], "off_by": a["off"]["by"], "availability": availability(&snapshot, &a),
                     "selected_for_next_request": routes.get(&key) == Some(&a["id"]), "signed_in_cli": signed_in,
                     "lowest_remaining_percent": usage["lowest_remaining_percent"], "usage_fresh": usage["fresh"],
                     "organization": organization_of(&a["id"]), "also_organizations": also_of(&a["id"]), "groups": groups_of(&a),
@@ -1726,6 +1728,17 @@ impl Server {
         })
         .await
     }
+    /// W1.2 (DEC-0027): the person's switch for a Kimi Code account.
+    async fn kimi_update(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        self.call(Operation::KimiSetEnabled {
+            id: required(args, "id")?.into(),
+            enabled: args
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .ok_or("Give enabled: true or false.")?,
+        })
+        .await
+    }
     async fn project_suggestion(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let folder: String = required(args, "folder")?.into();
         match required(args, "action")? {
@@ -2308,6 +2321,7 @@ impl Server {
             "switchboard_kimi_accounts" => self.call(Operation::KimiAccounts).await,
             "switchboard_kimi_login" => self.kimi_login(args).await,
             "switchboard_kimi_rename" => self.kimi_rename(args).await,
+            "switchboard_kimi_update" => self.kimi_update(args).await,
             // SB-517: the window's Remove of a Kimi Code account and of the OpenRouter key.
             "switchboard_kimi_remove" => {
                 self.call(Operation::KimiRemove {
@@ -2716,6 +2730,38 @@ fn usage_view(account: &Value, snapshot: &Value, time: i64) -> Value {
     view
 }
 
+/// W1.2 (DEC-0027): why an account is or is not usable here, as `switchboard_core::off::
+/// availability` words it, from the snapshot's JSON: `on`, `off` (the person turned it off),
+/// `elsewhere`, `lease_ended`, `called_back` or `disabled`.
+pub(crate) fn availability(snapshot: &Value, a: &Value) -> &'static str {
+    let id = a["id"].as_str().unwrap_or_default();
+    let seat = snapshot["delegated"].get(id);
+    let called_back = || {
+        seat.is_some_and(|d| !d["surrendered_at"].is_null())
+            || seat.is_some()
+                && snapshot["events"].as_array().is_some_and(|events| {
+                    events
+                        .iter()
+                        .rev()
+                        .find(|e| e["action"] == "delegation" && e["account_id"] == id)
+                        .is_some_and(|e| e["detail"] == "surrendered")
+                })
+    };
+    if a["off"].is_object() {
+        "off"
+    } else if snapshot["elsewhere"].get(id).is_some() {
+        "elsewhere"
+    } else if seat.is_some_and(|d| !d["ended_at"].is_null()) {
+        "lease_ended"
+    } else if a["enabled"] == false && called_back() {
+        "called_back"
+    } else if a["enabled"] == true {
+        "on"
+    } else {
+        "disabled"
+    }
+}
+
 /// SB-328: an account's organizations as `switchboard_accounts` gives them: its first
 /// (`{id, name, by}`, null when personal or decided by no rule) from the organizations answer,
 /// and the ones it also works for (`[{id, name}]`) from the snapshot.
@@ -2870,6 +2916,85 @@ mod usage_view_tests {
 #[cfg(test)]
 mod views {
     use super::*;
+
+    /// 2026-11-19 audit M5-05: `availability` over the snapshot's JSON (the CLI and MCP) and
+    /// `switchboard_core::off::availability` over the snapshot answer the same for every reason,
+    /// so the two cannot drift apart unseen.
+    #[test]
+    fn availability_over_the_json_agrees_with_the_core_for_every_reason() {
+        use switchboard_core::{
+            Account, AuthKind, Delegation, Event, Provider, Snapshot, TurnedOff,
+        };
+        let account = |id: &str, enabled: bool| Account {
+            id: id.into(),
+            label: id.into(),
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            pool: "default".into(),
+            enabled,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: None,
+            off: None,
+        };
+        let seat = |ended_at: Option<i64>, surrendered_at: Option<i64>| Delegation {
+            sender_key: "key".into(),
+            from: None,
+            pool: "default".into(),
+            granted_at: 1,
+            lease_until: 2,
+            ended_at,
+            purged_at: None,
+            surrendered_at,
+        };
+        let mut s = Snapshot {
+            accounts: vec![
+                account("on", true),
+                Account {
+                    off: Some(TurnedOff::by_person(5)),
+                    ..account("off", false)
+                },
+                account("away", false),
+                account("lease", false),
+                account("back", false),
+                account("back-before", false),
+                account("plain", false),
+            ],
+            ..Default::default()
+        };
+        s.elsewhere.insert("away".into(), 3);
+        s.delegated.insert("lease".into(), seat(Some(4), None));
+        s.delegated.insert("back".into(), seat(None, Some(4)));
+        s.delegated.insert("back-before".into(), seat(None, None));
+        s.events.push(Event {
+            at: 6,
+            action: "delegation".into(),
+            account_id: Some("back-before".into()),
+            detail: "surrendered".into(),
+        });
+        let json = serde_json::to_value(&s).unwrap();
+        let mut seen: Vec<&str> = Vec::new();
+        for (a, row) in s.accounts.iter().zip(json["accounts"].as_array().unwrap()) {
+            let core = switchboard_core::off::availability(&s, a);
+            assert_eq!(availability(&json, row), core, "{}", a.id);
+            seen.push(core);
+        }
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(
+            seen,
+            [
+                "called_back",
+                "disabled",
+                "elsewhere",
+                "lease_ended",
+                "off",
+                "on"
+            ]
+        );
+    }
 
     /// SB-339: a group lists the accounts it shares from another group after its own, and a group
     /// of several organizations names its first, not personal.
