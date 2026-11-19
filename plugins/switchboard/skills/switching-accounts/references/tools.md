@@ -55,7 +55,7 @@ The server works out which session asks from its own environment, first match wi
 
 ## Read tools
 
-Annotations: `readOnlyHint: true`.
+Annotations: `readOnlyHint: true`, except the three tools here that end a process (`switchboard_session_close_copy`, `switchboard_dispatch_stop`, `switchboard_session_end`), which are write tools: their annotations are under [Write tools](#write-tools).
 
 ### `switchboard_status`: no arguments
 
