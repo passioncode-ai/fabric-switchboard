@@ -2119,6 +2119,18 @@ check(() => {
   assert.deepEqual([rejected.tone, rejected.line], ['failed', 'Needs a sign-in on studio']);
   const silent = logic.remoteUsageView(read({ reason: 'unreachable', as_of: now - 3 * 3600 }), own, 'studio', now);
   assert.deepEqual([silent.percent, silent.tone, silent.line], [42, 'stale', 'Not read: studio did not answer, last read 3 h ago']);
+  // Review of PR #861 (P2-4): once that machine answered, its read speaks alone, with or without a
+  // figure: this computer's own 17% from 8 days ago never comes back.
+  const signIn = logic.remoteUsageView(read({ used_percent: null, usage_status: 'rejected' }), own, 'studio', now);
+  assert.deepEqual([signIn.percent, signIn.tone, signIn.ownCheck, signIn.line], [null, 'failed', false, 'Needs a sign-in on studio']);
+  const unmeasured = logic.remoteUsageView(read({ used_percent: null }), own, 'studio', now);
+  assert.deepEqual([unmeasured.percent, unmeasured.at, unmeasured.tone, unmeasured.ownCheck, unmeasured.line], [null, null, 'unknown', false, 'studio has no usage figure for it yet']);
+  const noCopy = logic.remoteUsageView(read({ used_percent: null, usage_status: null, enabled: null, listed: false }), own, 'studio', now);
+  assert.deepEqual([noCopy.percent, noCopy.ownCheck, noCopy.line], [null, false, 'Not in the account list of studio at its last read']);
+  const offThere = logic.remoteUsageView(read({ used_percent: null, enabled: false }), own, 'studio', now);
+  assert.deepEqual([offThere.percent, offThere.ownCheck, offThere.line], [null, false, 'Turned off on studio']);
+  const neverAnswered = logic.remoteUsageView(read({ used_percent: null, as_of: null, reason: 'unreachable' }), own, 'studio', now);
+  assert.deepEqual([neverAnswered.percent, neverAnswered.ownCheck, neverAnswered.line], [17, true, "This computer's last check · Not read yet: studio did not answer"]);
   const before = logic.remoteUsageView(null, own, 'studio', now);
   assert.deepEqual([before.percent, before.tone, before.ownCheck], [17, 'stale', true]);
   assert.equal(before.line, "This computer's last check · Not read on studio yet");
@@ -2138,7 +2150,8 @@ check(() => {
   assert.deepEqual(items.map((i) => i.reason), ['machine_unreachable', 'machine_health', 'machine_sessions']);
   assert.equal(items[0].label, 'studio');
   for (const item of items) { const line = logic.attentionReasonText(item.reason); assert.ok(line && !line.includes('\u2014') && !line.includes('studio'), item.reason); }
-  for (const v of [shared, silent, before, nothing]) assert.ok(!v.line.includes('\u2014'));
+  for (const v of [shared, silent, before, nothing, signIn, unmeasured, noCopy, offThere, neverAnswered]) assert.ok(!v.line.includes('\u2014'));
+  assert.equal(logic.attentionReasonText('machine_sessions'), 'Sessions on this machine need a look: a second copy, or a board run that has gone quiet.');
   i18nForShell.setLocale('ru');
   assert.equal(logic.remoteUsageView(read({}), own, 'studio', now).line, 'На машине studio, прочитано 2 мин назад');
   assert.equal(logic.attentionReasonText('machine_unreachable'), 'Switchboard на этой машине не ответил на три чтения подряд. Проверьте, что машина включена и доступна по ssh.');

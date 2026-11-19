@@ -295,8 +295,9 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .usage-age { font-variant-numeric: tabular-nums; text-align: right; overflow: hidden; text-overflow: ellipsis; }
 .usage-age.is-warn { color: var(--warn); }
 .usage-line .usage-unknown { font-size: var(--t-chip); }
-/* SB-550: the line under the bar wraps below it, never clipped into a box over the bar. */
-.usage-sub { display: block; color: var(--muted); min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.usage-sub { color: var(--muted); min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* SB-550: the line under a remote account's bar names the machine and wraps below it whole. */
+.usage-sub.usage-remote { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; white-space: normal; }
 .usage-countdown { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .usage-sub.is-blocked, .usage-sub.is-blocked .usage-countdown { color: var(--danger); }
 .usage-sub.is-failed, .usage-sub.is-sign_in { color: var(--danger); }

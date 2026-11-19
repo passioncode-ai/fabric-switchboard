@@ -929,8 +929,12 @@ research notes); the ones still in force that the board cites are seeded below w
     sessions (the Sessions page's rows cut to ids and codes: id, group, why, agent, launch and
     session ids, since when; never a folder, a label or text a session wrote; the ended rows only
     counted) and its own `agent-health/1` report. A Switchboard there that does not know the call
-    is read with the older calls in the same read (`accounts list`, then `sessions --rows`) and
-    asked the one call again an hour later.
+    is read with the older calls in the same read (`accounts list`, then `sessions --rows`; only
+    `accounts list` through an older restricted entry, which refuses the other), and until it is
+    updated it is read at the old cadence, every 15 minutes, and asked the one call again an hour
+    later. The real cost per machine is one ssh call a minute; an older Switchboard costs two calls
+    (one through a restricted entry) every 15 minutes, and a machine that stopped answering one
+    call of at most 20 seconds every five minutes.
   - A teammate's restricted entry (`ssh-serve`, DEC-0025) answers the same call cut to the seats
     the calling key delegated and the sessions of the group its key line names, with no health:
     that computer's other data stays its own.
@@ -942,11 +946,13 @@ research notes); the ones still in force that the board cites are seeded below w
     and when the owner writes it (event `machines-changed`, one `stat` per 15-second look).
   - Needs attention names a machine that did not answer three reads in a row
     (`machine_unreachable`), and from a read that worked its failing health checks or its owner
-    not running (`machine_health`) and its sessions that need a person: a second copy, a quiet or
-    gone board run (`machine_sessions`). `agent-health/1` counts them in the check `machines`.
+    not running (`machine_health`) and its sessions that need a person: a second copy or a board
+    run gone quiet (`machine_sessions`; a gone run is history there). The last good items are
+    kept through one or two failed reads, so they do not come and go; `since` is when a read that
+    worked first saw the condition. `agent-health/1` counts them in the check `machines`.
     Switchboard itself sends no message about them.
   - The leases of seats delegated to a machine are extended at most every 15 minutes, as before;
-    a failed extension is tried at the next read.
+    a failed extension is tried again five minutes later, not at every read.
 - **Consequences / affects:** [CONTRACTS](CONTRACTS.md#background-reads-of-other-machines-sb-366-dec-0017),
   `AGENTS.md` Lifecycle (the child `ssh` and `remote-usage.json` every minute, the window's
   `machines-changed`, the idle budget), [CLI.md](CLI.md) (`remote-status`, `ssh-serve`,

@@ -548,7 +548,9 @@ let machinesLive: MachinesLive | null = null; let machinesReading = false; let m
 let machinesRead: MachinesList | null = null; let machinesReadLoading = false; let machinesReadAt = 0;
 function loadMachinesRead() {
   if (machinesReadLoading || !(snapshot?.machines?.length)) return;
-  if (machinesRead && Date.now() - machinesReadAt < 60_000) return;
+  // Review of PR #861: a failed read waits its minute too (it sets machinesReadAt), so a window
+  // whose first read fails does not ask again at every redraw.
+  if (machinesReadAt && Date.now() - machinesReadAt < 60_000) return;
   machinesReadLoading = true;
   // SB-550: read every minute now, so the page is redrawn as the background redraws it: never under an open menu or dialog.
   void adapter.machinesList().then((v) => { machinesRead = v; machinesReadAt = Date.now(); }, () => { machinesReadAt = Date.now(); }).finally(() => { machinesReadLoading = false; backgroundRender(); });
@@ -4912,8 +4914,9 @@ function backgroundRefresh() {
     if (reads.includes('session_rows')) void loadSessionRows();
     if (reads.includes('ceilings')) void loadCeilings();
     if (reads.includes('passioncode')) void loadPassioncode();
-    // SB-550: the other machines' last read, every minute while Accounts or Groups is on screen.
-    if (reads.includes('machines')) { machinesReadAt = 0; loadMachinesRead(); }
+    // SB-550: the other machines' last read while Accounts or Groups is on screen, at most once a
+    // minute: a read the owner's machines-changed already asked for is not asked again.
+    if (reads.includes('machines')) loadMachinesRead();
     // SB-100: Kimi's figures refresh in the background too, every five minutes.
     if (Date.now() - kimiLoadedAt > 5 * 60_000) void loadKimi();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });

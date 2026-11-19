@@ -3335,8 +3335,11 @@ Sessions are never contacted: only each machine's own Switchboard is asked.
 - **An older Switchboard there.** A refusal reading `Invalid arguments. Run switchboard --help.`
   (a CLI before the call) or the restricted entry's `NOT_ALLOWED` sentence (an `ssh-serve` before
   it) is `status_unknown`: the same read goes on with `accounts list`, then `sessions --rows`
-  (not through a restricted entry, which refuses it), and the machine is asked the one call again
-  `STATUS_RETRY_SECONDS` (an hour) later (`status_unknown_at`). Any other failure is `unreachable`.
+  (not through a restricted entry, which refuses it: kept as `restricted`, so the next reads never
+  ask it), the machine is read every `OLDER_EVERY_SECONDS` (15 minutes) while it is that old, and
+  asked the one call again `STATUS_RETRY_SECONDS` (an hour) later (`status_unknown_at`). A refusal
+  in its own words (`{"ok":false,...}`) is `refused` (`READ_REFUSED`); any other failure is
+  `unreachable`.
 - **A teammate's restricted entry.** `ssh-serve` answers `remote-status` cut to the seats the
   calling key delegated into its group (`accounts_view`) and the session rows whose `pool` is that
   group (`sessions_digest(rows, Some(pool))`), with `health: null`.
@@ -3344,20 +3347,25 @@ Sessions are never contacted: only each machine's own Switchboard is asked.
   and provider, as `machines --live` matches, and written to `remote-usage.json` (0600, at most
   1 MiB): `{machines: {<name>: {tried_at, as_of, reason, failures, accounts: [{id, used_percent,
   observed_at, usage_status, enabled}], sessions?: {counts, rows, degraded}, health?: {state,
-  checks: {<id>: <state>}}, call?, status_unknown_at?, leases_at?}}}`. Every field read from the
+  checks: {<id>: <state>}}, call?, status_unknown_at?, restricted?, leases_at?, lease_failed?,
+  health_since?, sessions_since?}}}` (`health_since` and `sessions_since`: when a read that worked
+  first saw a failing check, or sessions there that need a person; cleared by a read without it). Every field read from the
   other machine is checked: a code is a lowercase word of at most 40 characters, an id at most 160
   of letters, digits and `:_.-`; a row with a field that is neither is dropped
   (`SessionsRead::from_answer`, `HealthRead::from_answer`). A failure keeps `as_of`, the accounts,
   the sessions and the health, sets `reason` (`unreachable`, `refused` for a refused target or
-  path, `unreadable`) and counts `failures`; a success resets it. A machine group that is gone
+  path or a refusal in the other Switchboard's words, `unreadable`) and counts `failures`; a success
+  resets it. Its failing checks and troubled sessions keep naming it through one or two failed
+  reads, and stop once `failures >= 3`, when `machine_unreachable` takes over. A machine group that is gone
   loses its entry. One log line `remote_usage` with `read` and `failed` counts per thread.
 - **Leases (SB-403).** A machine that answered gets the leases of the seats delegated to it
   extended (`extend_leases`) when `leases_at` is older than `LEASE_EVERY_SECONDS` (15 minutes,
-  DEC-0025's cadence); a failed extension leaves `leases_at` and is tried at the next read.
+  DEC-0025's cadence); every try sets `leases_at`, and one that left a seat unextended
+  (`lease_failed`) is tried again after `LEASE_RETRY_SECONDS` (five minutes).
 - **What reads it.** `machines list` (no ssh) adds each machine's `read` (`machine_view`: `as_of`,
   `tried_at`, `reason`, `failures`, `call`, `sessions: {counts, troubled, degraded}` with the rows
   that need a person, `health: {state, failing}`) and each account's `there` (`remote_usage::view`,
-  with `observed_at`); the window's account row shows `there` (SCN-092 step 8); Attention lists
+  with `observed_at` and `listed`, whether its copy was in the last answer); the window's account row shows `there` (SCN-092 step 8); Attention lists
   `refused_there` when an account's last read says `usage_status: rejected`, and the machine
   reasons below. Nothing here selects, rotates, lends or renews (DEC-0013).
 - **The window.** It reads `machines list` again each minute while Accounts or Groups is on screen
@@ -3451,8 +3459,8 @@ WF-3.1). Code: [attention.rs](../crates/switchboard-runtime/src/attention.rs).
   | `token_rotated` | `proxy-rotated.json` names when the proxy took a new port and token because its port was taken (SB-269), and the live Claude Code or Codex sessions started before then that run through the proxy (a `managed` launch, a Claude Code session in a folder whose route `bindings.json` records, a Codex session in a group folder while the Codex route is on) are listed with `count`, `sessions` (`pid`, `agent`, `folder`, `launch_id`) and `since` (the rotation); the file is removed once the process table shows none (`token_rotation::sessions`, SB-509). Nothing restarts by itself: the fix is a restart wave the person or agent plans and applies; `action.command` `switchboard sessions restart plan` | `switchboard_sessions_restart_plan` | `restart_wave` |
   | `dispatch_refused` | board runs refused `at_capacity` that still wait (SB-412, SB-417: since the pool last admitted a board start, with no one-hour cutoff): one item with `count`, `since` (the first refusal that waits), `last_at` (the newest), `newest_request`, `freed` and `freed_at` (a session ended since, read by the one-minute watch) | `switchboard_capacity` | `open_capacity` |
   | `machine_unreachable` | a machine group's last `failures >= 3` reads (a minute apart) failed (SB-550); `label` and `machine` the machine's name, `machine_pool` its group, `failures`, `code` (the last `reason`); `since` the last read that worked, or null | `switchboard_machines` | `open_machines` |
-  | `machine_health` | from a machine's last read that worked, its health checks that `fail`, or its `owner` check not `ok` (SB-550, `MachineRead::failing_checks`); `checks` lists their ids; `since` that read | `switchboard_machines` | `open_machines` |
-  | `machine_sessions` | from a machine's last read that worked, its session rows in `needs_you` whose `why` is `duplicate`, `stuck` or `gone` (SB-550, `MachineRead::troubled_sessions`); `count`, `kinds` (the whys), `session_ids`; `since` the oldest row's | `switchboard_machines` | `open_sessions` |
+  | `machine_health` | from a machine's last read that worked, its health checks that `fail`, or its `owner` check not `ok` (SB-550, `MachineRead::failing_checks`); `checks` lists their ids; `since` when a read that worked first saw it (`health_since`); kept through one or two failed reads | `switchboard_machines` | `open_machines` |
+  | `machine_sessions` | from a machine's last read that worked, its session rows in `needs_you` whose `why` is `duplicate` or `stuck` (SB-550, `MachineRead::troubled_sessions`; a `gone` run is history there, as its own health reads `sessions_gone`); `count`, `kinds` (the whys), `session_ids`; `since` when a read that worked first saw the trouble (`sessions_since`) | `switchboard_machines` | `open_sessions` |
 
   The session reasons are listed first (`session_duplicate`, `session_stuck`, `session_gone`),
   named by their folder. A dispatched run's item also carries `action.command`, the CLI act

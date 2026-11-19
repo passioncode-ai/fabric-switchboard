@@ -40,6 +40,14 @@ pub const BACKOFF_SECONDS: i64 = 5 * 60;
 pub const LEASE_EVERY_SECONDS: i64 = 15 * 60;
 /// After a Switchboard there answered `remote-status` as unknown, it is asked again this late.
 pub const STATUS_RETRY_SECONDS: i64 = 3600;
+/// Review of PR #861 (P2-3): a Switchboard there that does not know `remote-status` costs two
+/// calls (one through a restricted entry), so it is read at the old cadence until it is updated.
+pub const OLDER_EVERY_SECONDS: i64 = 15 * 60;
+/// Review of PR #861 (P2-2): a lease extension that failed is tried again this late, not at every
+/// read.
+pub const LEASE_RETRY_SECONDS: i64 = 5 * 60;
+/// A Switchboard there refused the read with a sentence of its own (not ssh, not an unknown call).
+pub const READ_REFUSED: &str = "The other machine's Switchboard refused the read.";
 /// Each ssh call gives up after this.
 pub const CALL_SECONDS: u64 = 20;
 /// The one call that answers a machine's accounts, sessions and health.
@@ -48,8 +56,9 @@ pub const STATUS_WORDS: [&str; 2] = ["--json", "remote-status"];
 pub const STATUS_SCHEMA: &str = "remote-status/1";
 /// Session rows kept per machine (the rows of the ended group are only counted).
 pub const MAX_ROWS: usize = 100;
-/// The rows that need a person on that machine: a second copy, a quiet board run, a gone one.
-pub const TROUBLE: [&str; 3] = ["duplicate", "stuck", "gone"];
+/// The rows that need a person on that machine: a second copy, a board run gone quiet. A gone
+/// run is history there (its own health reads `sessions_gone` as ok), so it is not one.
+pub const TROUBLE: [&str; 2] = ["duplicate", "stuck"];
 /// The file is a few tens of kilobytes; anything larger is not ours.
 const MAX_BYTES: u64 = 1024 * 1024;
 
@@ -82,9 +91,23 @@ pub struct MachineRead {
     /// SB-550: when the Switchboard there last answered `remote-status` as unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_unknown_at: Option<i64>,
-    /// SB-550: when the leases of the seats delegated there were last extended.
+    /// SB-550: when the leases of the seats delegated there were last tried.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leases_at: Option<i64>,
+    /// Review of PR #861 (P2-2): that try left a seat unextended; tried again after
+    /// `LEASE_RETRY_SECONDS`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub lease_failed: bool,
+    /// Review of PR #861 (P2-1): the machine answers through a restricted entry (`ssh-serve`) that
+    /// does not know `remote-status`, so `sessions --rows`, which it refuses, is not asked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub restricted: bool,
+    /// Review of PR #861: since when its health has failed, and since when sessions there have
+    /// needed a person, as first seen by a read that worked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_since: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sessions_since: Option<i64>,
 }
 
 /// One account here as its copy there answered.
@@ -253,10 +276,11 @@ impl MachineRead {
     pub fn unreachable(&self) -> bool {
         self.failures >= BACKOFF_AFTER
     }
-    /// The session rows there that need a person (a second copy, a quiet or gone board run), from
-    /// the last read only when it succeeded.
+    /// The session rows there that need a person (a second copy, a board run gone quiet), from
+    /// the last read that worked; kept through one or two failed reads, so the item does not come
+    /// and go, and dropped once the machine stopped answering (`machine_unreachable` speaks).
     pub fn troubled_sessions(&self) -> Vec<&SessionRead> {
-        if self.reason.is_some() {
+        if self.unreachable() {
             return Vec::new();
         }
         self.sessions
@@ -266,10 +290,10 @@ impl MachineRead {
             .collect()
     }
     /// The health checks there that fail, and its owner when it is not running, from the last
-    /// read only when it succeeded. A warning (an account to sign in to, an error storm) is that
-    /// machine's own Needs attention.
+    /// read that worked, kept as `troubled_sessions` keeps its rows. A warning (an account to sign
+    /// in to, an error storm) is that machine's own Needs attention.
     pub fn failing_checks(&self) -> Vec<String> {
-        if self.reason.is_some() {
+        if self.unreachable() {
             return Vec::new();
         }
         self.health
@@ -286,8 +310,13 @@ pub fn due(state: &State, machine: &str, now: i64) -> bool {
     match state.machines.get(machine) {
         None => true,
         Some(r) => {
+            let older = r
+                .status_unknown_at
+                .is_some_and(|at| now >= at && now - at < STATUS_RETRY_SECONDS);
             let wait = if r.failures >= BACKOFF_AFTER {
                 BACKOFF_SECONDS
+            } else if older {
+                OLDER_EVERY_SECONDS
             } else {
                 EVERY_SECONDS
             };
@@ -296,13 +325,23 @@ pub fn due(state: &State, machine: &str, now: i64) -> bool {
     }
 }
 
-/// Whether `machine` is asked the one call this time (else the older calls).
-fn try_status(state: &State, machine: &str, now: i64) -> bool {
-    state
-        .machines
-        .get(machine)
-        .and_then(|r| r.status_unknown_at)
-        .is_none_or(|at| now < at || now - at >= STATUS_RETRY_SECONDS)
+/// What one read asks: the one call, and with the older calls whether `sessions --rows` too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ask {
+    pub status: bool,
+    pub sessions: bool,
+}
+
+/// What `machine` is asked this time: the one call unless its Switchboard answered it as unknown
+/// within the hour, and `sessions --rows` unless it answers through a restricted entry.
+fn ask(state: &State, machine: &str, now: i64) -> Ask {
+    let r = state.machines.get(machine);
+    Ask {
+        status: r
+            .and_then(|r| r.status_unknown_at)
+            .is_none_or(|at| now < at || now - at >= STATUS_RETRY_SECONDS),
+        sessions: !r.is_some_and(|r| r.restricted),
+    }
 }
 
 /// Whether the leases of the seats delegated to `machine` are due for an extension.
@@ -310,14 +349,21 @@ fn leases_due(state: &State, machine: &str, now: i64) -> bool {
     state
         .machines
         .get(machine)
-        .and_then(|r| r.leases_at)
-        .is_none_or(|at| now < at || now - at >= LEASE_EVERY_SECONDS)
+        .and_then(|r| r.leases_at.map(|at| (at, r.lease_failed)))
+        .is_none_or(|(at, failed)| {
+            let wait = if failed {
+                LEASE_RETRY_SECONDS
+            } else {
+                LEASE_EVERY_SECONDS
+            };
+            now < at || now - at >= wait
+        })
 }
 
 /// The code a failed read is kept with.
 pub fn reason_of(error: &str) -> &'static str {
     // A refused target or path is named first: its sentence may itself mention ssh.
-    if [TARGET_INVALID, REMOTE_INVALID, REMOTE_DATA_DIR_INVALID].contains(&error) {
+    if [TARGET_INVALID, REMOTE_INVALID, REMOTE_DATA_DIR_INVALID, READ_REFUSED].contains(&error) {
         "refused"
     } else if error == UNREACHABLE || error.contains("ssh") {
         "unreachable"
@@ -339,6 +385,8 @@ pub struct Remote {
     pub call: &'static str,
     /// The Switchboard there answered `remote-status` as unknown this time.
     pub status_unknown: bool,
+    /// That answer came from a restricted entry (`ssh-serve`).
+    pub restricted: bool,
 }
 
 /// Records one read of `machine`: on success its accounts here matched to their copies there by
@@ -383,12 +431,19 @@ pub fn record(
             entry.call = Some(remote.call.to_owned());
             if remote.status_unknown {
                 entry.status_unknown_at = Some(now);
+                entry.restricted = remote.restricted;
             } else if remote.call == "status" {
                 entry.status_unknown_at = None;
+                entry.restricted = false;
             }
             entry.as_of = Some(now);
             entry.reason = None;
             entry.failures = 0;
+            // When each condition started, as first seen by a read that worked.
+            entry.health_since = (!entry.failing_checks().is_empty())
+                .then(|| entry.health_since.unwrap_or(now));
+            entry.sessions_since = (!entry.troubled_sessions().is_empty())
+                .then(|| entry.sessions_since.unwrap_or(now));
         }
         Err(error) => {
             entry.reason = Some(reason_of(&error).to_owned());
@@ -442,22 +497,23 @@ fn restricted(error: &str) -> bool {
     error.contains("only for delegated seats")
 }
 
-/// SB-550: one read of a machine. With `status`, the one call `remote-status`; a Switchboard
+/// SB-550: one read of a machine. With `ask.status`, the one call `remote-status`; a Switchboard
 /// there that does not know it is read with the older calls in the same read: `accounts list`,
-/// then `sessions --rows` (not through a restricted entry, which refuses it).
+/// then `sessions --rows` unless it answers through a restricted entry, which refuses it (seen in
+/// this answer, or `ask.sessions` false from an earlier one).
 pub fn read_remote(
     target: &str,
     program: &Program<'_>,
     run: &Run<'_>,
-    status: bool,
+    ask: Ask,
 ) -> Result<Remote, String> {
     if !crate::account_send::target_valid(target) {
         return Err(TARGET_INVALID.into());
     }
     program.check()?;
     let mut status_unknown = false;
-    let mut skip_sessions = false;
-    if status {
+    let mut restricted_entry = !ask.sessions;
+    if ask.status {
         match run(
             &[
                 target.to_owned(),
@@ -476,17 +532,20 @@ pub fn read_remote(
                     health: object(&answer["health"]),
                     call: "status",
                     status_unknown: false,
+                    restricted: false,
                 });
             }
             Err(error) if unknown_call(&error) => {
                 status_unknown = true;
-                skip_sessions = restricted(&error);
+                restricted_entry = restricted(&error);
             }
+            // A refusal in the Switchboard's own words (`{"ok":false,...}`) is not a lost ssh.
+            Err(error) if error.trim_start().starts_with('{') => return Err(READ_REFUSED.into()),
             Err(_) => return Err(UNREACHABLE.into()),
         }
     }
     let accounts = read_accounts(target, program, run)?;
-    let sessions = if skip_sessions {
+    let sessions = if restricted_entry {
         None
     } else {
         run(
@@ -508,6 +567,7 @@ pub fn read_remote(
         health: None,
         call: "accounts",
         status_unknown,
+        restricted: restricted_entry,
     })
 }
 
@@ -625,8 +685,8 @@ pub fn extend_leases(
     (extended, failed)
 }
 
-/// One machine's read as `read_remote` answers it (a fake in tests); the flag asks the one call.
-pub type ReadOne<'a> = dyn Fn(&str, &Program<'_>, bool) -> Result<Remote, String> + 'a;
+/// One machine's read as `read_remote` answers it (a fake in tests), asked as `Ask` says.
+pub type ReadOne<'a> = dyn Fn(&str, &Program<'_>, Ask) -> Result<Remote, String> + 'a;
 /// Extends the leases of the seats delegated to a machine (`extend_leases`; a fake in tests).
 pub type Extend<'a> = dyn Fn(&str, &Program<'_>) -> (usize, usize) + 'a;
 
@@ -654,11 +714,7 @@ pub fn pass(
             path: &path,
             data_dir: data_dir.as_deref(),
         };
-        let result = read_one(
-            &machine.name,
-            &program,
-            try_status(&state, &machine.name, now),
-        );
+        let result = read_one(&machine.name, &program, ask(&state, &machine.name, now));
         tried += 1;
         let answered = result.is_ok();
         if !answered {
@@ -666,10 +722,13 @@ pub fn pass(
         }
         let lease = answered && leases_due(&state, &machine.name, now);
         record(&mut state, snapshot, &machine.name, result, now);
-        // SB-403 (DEC-0025): extended at most every 15 minutes; a failure is tried next minute.
-        if lease && extend(&machine.name, &program).1 == 0 {
+        // SB-403 (DEC-0025): extended at most every 15 minutes; a failure is tried again after
+        // five (review of PR #861, P2-2), never at every read.
+        if lease {
+            let failed = extend(&machine.name, &program).1 > 0;
             if let Some(entry) = state.machines.get_mut(&machine.name) {
                 entry.leases_at = Some(now);
+                entry.lease_failed = failed;
             }
         }
     }
@@ -716,7 +775,7 @@ pub fn tick(root: &Path, snapshot: &Snapshot, now: i64) {
                 &root,
                 &snapshot,
                 now,
-                &|target, program, status| read_remote(target, program, run, status),
+                &|target, program, ask| read_remote(target, program, run, ask),
                 &|target, program| extend_leases(&root, &snapshot, target, program, run),
             );
             crate::oplog::event(
@@ -739,6 +798,8 @@ pub fn view(state: &State, machine: &str, account: &str) -> Option<Value> {
     let r = state.machines.get(machine)?;
     let copy = r.accounts.iter().find(|a| a.id == account);
     Some(json!({
+        // Review of PR #861 (P2-4): whether its copy was in that machine's answer at all.
+        "listed": r.as_of.is_some() && copy.is_some(),
         "used_percent": copy.and_then(|c| c.used_percent),
         "observed_at": copy.and_then(|c| c.observed_at),
         "usage_status": copy.and_then(|c| c.usage_status.clone()),
@@ -759,6 +820,7 @@ pub fn machine_view(r: &MachineRead) -> Value {
         .collect();
     json!({
         "as_of": r.as_of, "tried_at": r.tried_at, "reason": r.reason, "failures": r.failures,
+        "health_since": r.health_since, "sessions_since": r.sessions_since,
         "call": r.call,
         "sessions": r.sessions.as_ref().map(|s| json!({"counts": s.counts, "troubled": troubled, "degraded": s.degraded})),
         "health": r.health.as_ref().map(|h| json!({"state": h.state, "failing": r.failing_checks()})),
@@ -894,6 +956,10 @@ mod tests {
     fn no_lease(_: &str, _: &Program<'_>) -> (usize, usize) {
         (0, 0)
     }
+    const FIRST: Ask = Ask {
+        status: true,
+        sessions: true,
+    };
 
     #[test]
     fn a_read_keeps_each_copy_there_and_a_failure_keeps_the_last_good_one() {
@@ -1013,14 +1079,14 @@ mod tests {
         let health = json!({"schema": "agent-health/1", "state": "fail", "checks": [
             {"id": "owner", "state": "warn"}, {"id": "crashes", "state": "fail"},
             {"id": "sign_in", "state": "warn"}, {"id": "errors_today", "state": "ok"}]});
-        let read_one = |_: &str, _: &Program<'_>, status: bool| {
-            assert!(status, "the one call is asked first");
+        let read_one = |_: &str, _: &Program<'_>, ask: Ask| {
+            assert!(ask.status, "the one call is asked first");
             Ok(Remote {
                 accounts: there(),
                 sessions: Some(digest.clone()),
                 health: Some(health.clone()),
                 call: "status",
-                status_unknown: false,
+                ..Remote::default()
             })
         };
         pass(root.path(), &s, 1000, &read_one, &no_lease);
@@ -1049,10 +1115,51 @@ mod tests {
             &|_, _, _| Err(UNREACHABLE.into()),
             &no_lease,
         );
+        // Review of PR #861: one or two failed reads keep the last good items, so they do not come
+        // and go; the time each condition started is kept.
         let studio = read(root.path()).machines["studio"].clone();
         assert!(studio.sessions.is_some());
+        assert_eq!(studio.troubled_sessions().len(), 1);
+        assert_eq!(studio.failing_checks(), vec!["crashes", "owner"]);
+        assert_eq!((studio.health_since, studio.sessions_since), (Some(1000), Some(1000)));
+        pass(
+            root.path(),
+            &s,
+            1000 + 2 * EVERY_SECONDS,
+            &read_one,
+            &no_lease,
+        );
+        let studio = read(root.path()).machines["studio"].clone();
+        assert_eq!(
+            (studio.health_since, studio.sessions_since),
+            (Some(1000), Some(1000)),
+            "a later read that sees the same trouble keeps when it started"
+        );
+        // Once the machine stopped answering, only `machine_unreachable` speaks.
+        for k in 3..6 {
+            pass(
+                root.path(),
+                &s,
+                1000 + k * BACKOFF_SECONDS,
+                &|_, _, _| Err(UNREACHABLE.into()),
+                &no_lease,
+            );
+        }
+        let studio = read(root.path()).machines["studio"].clone();
+        assert!(studio.unreachable());
         assert!(studio.troubled_sessions().is_empty());
         assert!(studio.failing_checks().is_empty());
+        // A read without the trouble clears when it started.
+        pass(
+            root.path(),
+            &s,
+            1000 + 10 * BACKOFF_SECONDS,
+            &|_, _, _| ok(there()),
+            &no_lease,
+        );
+        let studio = read(root.path()).machines["studio"].clone();
+        assert_eq!((studio.health_since, studio.sessions_since), (None, None));
+        assert!(!TROUBLE.contains(&"gone"), "a gone run is history there");
         // A restricted entry answers the group's rows only.
         let only = sessions_digest(&rows, Some("apps"));
         assert_eq!(only["rows"].as_array().unwrap().len(), 1);
@@ -1082,7 +1189,7 @@ mod tests {
                 Ok(json!({"ok": true, "data": {"accounts": there()}}).to_string())
             }
         };
-        let remote = read_remote("studio", &program, &older, true).unwrap();
+        let remote = read_remote("studio", &program, &older, FIRST).unwrap();
         assert!(remote.status_unknown);
         assert_eq!(remote.call, "accounts");
         assert_eq!(remote.accounts.len(), 3);
@@ -1096,23 +1203,27 @@ mod tests {
         // Within the hour it is not asked the one call again.
         let root = tempfile::tempdir().unwrap();
         let s = snapshot();
-        let asked = std::sync::Mutex::new(Vec::new());
-        let read_one = |_: &str, _: &Program<'_>, status: bool| {
-            asked.lock().unwrap().push(status);
-            Ok(Remote {
-                accounts: there(),
-                call: "accounts",
-                status_unknown: status,
-                ..Remote::default()
-            })
-        };
+        // Review of PR #861 (P2-3): through `pass` and `read_remote`, an older Switchboard is read
+        // at the old cadence (every 15 minutes), with the older calls, and asked the one call
+        // again after an hour.
+        calls.lock().unwrap().clear();
+        let read_one =
+            |target: &str, program: &Program<'_>, ask: Ask| read_remote(target, program, &older, ask);
         let mut now = 1000;
-        pass(root.path(), &s, now, &read_one, &no_lease);
-        now += EVERY_SECONDS;
-        pass(root.path(), &s, now, &read_one, &no_lease);
-        now = 1000 + STATUS_RETRY_SECONDS;
-        pass(root.path(), &s, now, &read_one, &no_lease);
-        assert_eq!(*asked.lock().unwrap(), vec![true, false, true]);
+        for _ in 0..16 {
+            pass(root.path(), &s, now, &read_one, &no_lease);
+            now += EVERY_SECONDS;
+        }
+        let made = calls.lock().unwrap().clone();
+        assert_eq!(
+            made.iter().filter(|c| c.contains("remote-status")).count(),
+            1,
+            "{made:?}"
+        );
+        assert_eq!(made.len(), 1 + 2 * 2, "two reads in 16 minutes, two calls each: {made:?}");
+        calls.lock().unwrap().clear();
+        pass(root.path(), &s, 1000 + STATUS_RETRY_SECONDS, &read_one, &no_lease);
+        assert!(calls.lock().unwrap()[0].contains("remote-status"), "asked again after the hour");
         // An older restricted entry (`ssh-serve`) refuses the one call by its own sentence.
         calls.lock().unwrap().clear();
         let entry = |args: &[String], _: Option<&[u8]>| -> Result<String, String> {
@@ -1123,9 +1234,24 @@ mod tests {
                 Ok(json!({"ok": true, "data": {"accounts": there()}}).to_string())
             }
         };
-        let remote = read_remote("studio", &program, &entry, true).unwrap();
-        assert!(remote.status_unknown && remote.sessions.is_none());
+        let remote = read_remote("studio", &program, &entry, FIRST).unwrap();
+        assert!(remote.status_unknown && remote.restricted && remote.sessions.is_none());
         assert_eq!(calls.lock().unwrap().len(), 2);
+        // Review of PR #861 (P2-1): the next reads know it is a restricted entry and never ask it
+        // `sessions --rows`, which it refuses.
+        let root = tempfile::tempdir().unwrap();
+        calls.lock().unwrap().clear();
+        let through_entry =
+            |target: &str, program: &Program<'_>, ask: Ask| read_remote(target, program, &entry, ask);
+        let mut now = 1000;
+        for _ in 0..3 {
+            pass(root.path(), &s, now, &through_entry, &no_lease);
+            now += OLDER_EVERY_SECONDS;
+        }
+        let made = calls.lock().unwrap().clone();
+        assert!(read(root.path()).machines["studio"].restricted);
+        assert!(!made.iter().any(|c| c.contains("'sessions'")), "{made:?}");
+        assert_eq!(made.len(), 1 + 3, "{made:?}");
         // A newer one answers everything in one call.
         let newer = |args: &[String], _: Option<&[u8]>| -> Result<String, String> {
             assert!(args[2].contains("'remote-status'"));
@@ -1136,7 +1262,7 @@ mod tests {
                 .to_string(),
             )
         };
-        let remote = read_remote("studio", &program, &newer, true).unwrap();
+        let remote = read_remote("studio", &program, &newer, FIRST).unwrap();
         assert_eq!((remote.call, remote.status_unknown), ("status", false));
         assert!(remote.sessions.is_some() && remote.health.is_some());
         // A machine that does not answer is unreachable, whatever the call.
@@ -1144,9 +1270,15 @@ mod tests {
             Err("ssh failed.".into())
         };
         assert_eq!(
-            read_remote("studio", &program, &down, true).unwrap_err(),
+            read_remote("studio", &program, &down, FIRST).unwrap_err(),
             UNREACHABLE
         );
+        // A newer one refusing in its own words is not a machine that did not answer.
+        let refuses = |_: &[String], _: Option<&[u8]>| -> Result<String, String> {
+            Err(r#"{"ok":false,"error":"Switchboard could not read its own state."}"#.into())
+        };
+        let error = read_remote("studio", &program, &refuses, FIRST).unwrap_err();
+        assert_eq!(reason_of(&error), "refused");
     }
 
     /// SB-550: reads every minute, but the leases of seats delegated there are extended every 15
@@ -1175,19 +1307,27 @@ mod tests {
         assert_eq!(extended.lock().unwrap().len(), 2);
         failing.store(true, Ordering::Relaxed);
         now = 1000 + 2 * LEASE_EVERY_SECONDS;
-        pass(root.path(), &s, now, &|_, _, _| ok(there()), &extend);
+        for k in 0..5 {
+            pass(
+                root.path(),
+                &s,
+                now + k * EVERY_SECONDS,
+                &|_, _, _| ok(there()),
+                &extend,
+            );
+        }
+        // Review of PR #861 (P2-2): a failed extension is not tried at every read...
+        assert_eq!(extended.lock().unwrap().len(), 3, "one try in five minutes");
+        // ...but again after five minutes.
         pass(
             root.path(),
             &s,
-            now + EVERY_SECONDS,
+            now + LEASE_RETRY_SECONDS,
             &|_, _, _| ok(there()),
             &extend,
         );
-        assert_eq!(
-            extended.lock().unwrap().len(),
-            4,
-            "a failure is tried again"
-        );
+        assert_eq!(extended.lock().unwrap().len(), 4, "a failure is tried again");
+        now += LEASE_RETRY_SECONDS;
         // A machine that did not answer gets no extension call.
         let calls = extended.lock().unwrap().len();
         pass(

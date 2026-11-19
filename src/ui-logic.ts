@@ -652,7 +652,7 @@ export function attentionReasonText(reason: AttentionReason): string {
     case 'refused_there': return t('The provider refused its copy on the other machine: it needs a sign-in there.');
     case 'machine_unreachable': return t("This machine's Switchboard has not answered three reads in a row. Check that the machine is on and reachable over ssh.");
     case 'machine_health': return t("This machine's Switchboard reports a failing health check. Open Other machines to see which.");
-    case 'machine_sessions': return t('Sessions on this machine need a look: a second copy, or a board run that is quiet or gone.');
+    case 'machine_sessions': return t('Sessions on this machine need a look: a second copy, or a board run that has gone quiet.');
     case 'key_outside_tokens': return t('This Claude API key is outside the pay-per-token group, so no daily ceiling holds it. Move it there.');
     case 'ceiling_question': return t('A spending ceiling was reached and waits for your answer.');
   }
@@ -2285,13 +2285,16 @@ export function remoteUsageLine(there: RemoteRead | null | undefined, machine: s
  */
 export interface RemoteUsageView { percent: number | null; at: number | null; tone: 'available' | 'low' | 'blocked' | 'failed' | 'stale' | 'unknown'; line: string; ownCheck: boolean }
 export function remoteUsageView(there: RemoteRead | null | undefined, own: { used: number | null; observedAt: number } | null, machine: string, nowSeconds: number): RemoteUsageView {
-  const shared = typeof there?.used_percent === 'number' && there.as_of !== null ? there : null;
-  if (shared) {
-    const percent = shared.used_percent as number;
-    const at = shared.observed_at ?? shared.as_of;
-    const tone = shared.usage_status === 'rejected' ? 'failed' : shared.reason ? 'stale' : percent >= 100 ? 'blocked' : percent >= LOW_AT_PERCENT ? 'low' : 'available';
-    if (shared.reason || shared.usage_status === 'rejected' || shared.enabled === false) return { percent, at, tone, line: remoteUsageLine(shared, machine, nowSeconds), ownCheck: false };
-    const read = nowSeconds - (shared.as_of as number);
+  // Review of PR #861 (P2-4): once that machine answered a read, the row speaks from it alone,
+  // with or without a figure: this computer's own older check is never its state.
+  if (there && there.as_of !== null) {
+    const percent = typeof there.used_percent === 'number' ? there.used_percent : null;
+    const at = percent !== null ? there.observed_at ?? there.as_of : null;
+    const tone = there.usage_status === 'rejected' ? 'failed' : there.reason ? 'stale' : percent === null ? 'unknown' : percent >= 100 ? 'blocked' : percent >= LOW_AT_PERCENT ? 'low' : 'available';
+    if (there.reason || there.usage_status === 'rejected' || there.enabled === false) return { percent, at, tone, line: remoteUsageLine(there, machine, nowSeconds), ownCheck: false };
+    if (there.listed === false) return { percent: null, at: null, tone: 'unknown', line: t('Not in the account list of {machine} at its last read', { machine }), ownCheck: false };
+    if (percent === null) return { percent: null, at: null, tone: 'unknown', line: t('{machine} has no usage figure for it yet', { machine }), ownCheck: false };
+    const read = nowSeconds - there.as_of;
     return { percent, at, tone, line: read < 60 ? t('On {machine}, read just now', { machine }) : t('On {machine}, read {age} ago', { machine, age: shortAge(read) }), ownCheck: false };
   }
   const line = remoteUsageLine(there, machine, nowSeconds);

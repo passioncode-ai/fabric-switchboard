@@ -141,7 +141,7 @@ Since SB-550 (DEC-0033) three items name another machine (as `label` and `machin
 names none), each with `action.tool` `switchboard_machines`: `machine_unreachable` (its Switchboard
 did not answer three reads a minute apart: `failures`, `code`), and from its last read that
 worked, `machine_health` (its failing health checks, or its owner not running: `checks`) and
-`machine_sessions` (sessions there that need a person, a second copy or a quiet or gone board run:
+`machine_sessions` (sessions there that need a person, a second copy or a board run gone quiet:
 `count`, `kinds`, `session_ids`; `action.window` `open_sessions`).
 ### `switchboard_anthropic_keys`: `name?` (string), `model?` (string)
 

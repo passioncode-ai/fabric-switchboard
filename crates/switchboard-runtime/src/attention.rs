@@ -84,10 +84,10 @@ pub const MACHINE_UNREACHABLE: &str =
     "Another machine's Switchboard has not answered three reads in a row. Check that the machine is on and reachable over ssh.";
 /// SB-550: that machine's Switchboard reports a failing health check, or that it is not running.
 pub const MACHINE_HEALTH: &str =
-    "Another machine's Switchboard reports a failing health check. Open that machine to see which.";
-/// SB-550: sessions on that machine need a person: a second copy, a quiet or gone board run.
+    "Another machine's Switchboard reports a failing health check. Open Other machines to see which.";
+/// SB-550: sessions on that machine need a person: a second copy, a board run gone quiet.
 pub const MACHINE_SESSIONS: &str =
-    "Sessions on another machine need a look: a second copy, or a board run that is quiet or gone.";
+    "Sessions on another machine need a look: a second copy, or a board run that has gone quiet.";
 
 /// SB-412: dispatches refused at this computer's session limit. SB-417: listed while they wait
 /// (since the pool last admitted a board start), with no one-hour cutoff.
@@ -366,7 +366,8 @@ pub fn build(inputs: &Inputs) -> Value {
             let mut listed = item(
                 "machine_health",
                 MACHINE_HEALTH,
-                read.as_of,
+                // When the failure was first seen by a read that worked (review of PR #861).
+                read.health_since.or(read.as_of),
                 "open_machines",
             );
             listed["checks"] = json!(failing);
@@ -374,7 +375,8 @@ pub fn build(inputs: &Inputs) -> Value {
         }
         let troubled = read.troubled_sessions();
         if !troubled.is_empty() {
-            let since = troubled.iter().filter_map(|s| s.since).min();
+            // When the trouble was first seen by a read that worked (review of PR #861).
+            let since = read.sessions_since.or(read.as_of);
             let mut listed = item("machine_sessions", MACHINE_SESSIONS, since, "open_sessions");
             listed["count"] = json!(troubled.len());
             let mut kinds: Vec<&str> = troubled.iter().map(|s| s.why.as_str()).collect();
@@ -865,10 +867,14 @@ mod tests {
         let healthy = MachineRead {
             tried_at: 9_900,
             as_of: Some(9_900),
+            health_since: Some(9_000),
+            sessions_since: Some(8_500),
             sessions: Some(SessionsRead {
                 rows: vec![
                     row("stuck", "needs_you", "s-1", 9_000),
-                    row("gone", "needs_you", "s-2", 8_000),
+                    row("duplicate", "needs_you", "s-2", 8_000),
+                    // A gone run is history there, never an item here.
+                    row("gone", "needs_you", "s-5", 7_000),
                     row("working", "running", "s-3", 9_500),
                     row("ready_to_continue", "needs_you", "s-4", 9_600),
                 ],
@@ -895,7 +901,7 @@ mod tests {
                 ..healthy.clone()
             },
         );
-        // Failed once only: its last read is stale, so nothing is named.
+        // Failed once only: its last good items stay, so they do not come and go.
         remote.machines.insert(
             "gamma".into(),
             MachineRead {
@@ -919,7 +925,13 @@ mod tests {
         });
         assert_eq!(
             reasons(&answer),
-            ["machine_unreachable", "machine_health", "machine_sessions"]
+            [
+                "machine_unreachable",
+                "machine_health",
+                "machine_health",
+                "machine_sessions",
+                "machine_sessions"
+            ]
         );
         let items = answer["items"].as_array().unwrap();
         assert_eq!(items[0]["label"], "beta");
@@ -927,11 +939,13 @@ mod tests {
         assert_eq!(items[0]["detail"], MACHINE_UNREACHABLE);
         assert_eq!(items[0]["action"]["window"], "open_machines");
         assert_eq!(items[1]["label"], "alpha");
+        assert_eq!(items[2]["label"], "gamma");
         assert_eq!(items[1]["checks"], json!(["crashes"]));
-        assert_eq!(items[2]["count"], 2);
-        assert_eq!(items[2]["kinds"], json!(["gone", "stuck"]));
-        assert_eq!(items[2]["since"], 8_000);
-        assert_eq!(items[2]["action"]["window"], "open_sessions");
+        assert_eq!(items[1]["since"], 9_000, "when the failure was first seen");
+        assert_eq!(items[3]["count"], 2);
+        assert_eq!(items[3]["kinds"], json!(["duplicate", "stuck"]));
+        assert_eq!(items[3]["since"], 8_500, "when the trouble was first seen");
+        assert_eq!(items[3]["action"]["window"], "open_sessions");
         for item in items {
             assert!(!item["detail"].as_str().unwrap().contains("alpha"));
             assert_eq!(item["action"]["tool"], "switchboard_machines");

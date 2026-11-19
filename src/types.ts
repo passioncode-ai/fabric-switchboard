@@ -63,7 +63,7 @@ export interface RemoteGroup { pool: string; name: string | null; organization: 
 /** SB-474: another machine's groups, read over ssh. */
 export interface RemoteStatus { target: string; groups: RemoteGroup[] }
 /** SB-366 (DEC-0017): the last background read of one account's copy on its machine. */
-export interface RemoteRead { used_percent: number | null; /** SB-550: when that machine observed it by its own check. */ observed_at?: number | null; usage_status: string | null; enabled: boolean | null; as_of: number | null; tried_at: number; reason: string | null }
+export interface RemoteRead { used_percent: number | null; /** SB-550: when that machine observed it by its own check. */ observed_at?: number | null; /** Review of PR #861: whether its copy was in that machine's last answer. */ listed?: boolean; usage_status: string | null; enabled: boolean | null; as_of: number | null; tried_at: number; reason: string | null }
 /** SB-550: a machine's sessions at its last read: rows per group, and the rows that need a person. */
 export interface MachineSessionsRead { counts: Record<string, number>; troubled: { why: string; session_id: string | null; launch_id: string | null; since: number | null }[]; degraded?: string[] }
 /** SB-550: the last background read of a machine (every minute), with its sessions and health. */

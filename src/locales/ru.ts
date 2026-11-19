@@ -4,10 +4,12 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
-  // SB-550 (DEC-0033, 2026-11-19): the other machines read every minute, with their sessions and health. Copylot en-US reports f4524725…79b729de; ru-RU e1b07239…4486543b.
+  // SB-550 (DEC-0033, 2026-11-19): the other machines read every minute, with their sessions and health. Copylot en-US reports f4524725…79b729de, review of PR #861 71b60267…8267b674; ru-RU e1b07239…4486543b, review d7eaf7ed…e2d595fb (docs/brand/strings.md).
   "This machine's Switchboard has not answered three reads in a row. Check that the machine is on and reachable over ssh.": "Switchboard на этой машине не ответил на три чтения подряд. Проверьте, что машина включена и доступна по ssh.",
-  "This machine's Switchboard reports a failing health check. Open Other machines to see which.": "Switchboard на этой машине сообщает о проваленной проверке здоровья. Откройте «Другие машины», чтобы увидеть какой.",
-  "Sessions on this machine need a look: a second copy, or a board run that is quiet or gone.": "Сессии на этой машине требуют внимания: вторая копия или запуск с доски, который затих или пропал.",
+  "This machine's Switchboard reports a failing health check. Open Other machines to see which.": "Switchboard на этой машине сообщает о проваленной проверке здоровья. Откройте «Другие машины», чтобы увидеть, какую.",
+  "Sessions on this machine need a look: a second copy, or a board run that has gone quiet.": "Сессии на этой машине требуют внимания: вторая копия или затихший запуск с доски.",
+  "Not in the account list of {machine} at its last read": "При последнем чтении машины {machine} его не было в её списке аккаунтов",
+  "{machine} has no usage figure for it yet": "У машины {machine} пока нет для него данных об использовании",
   "On {machine}, read just now": "На машине {machine}, прочитано только что",
   "On {machine}, read {age} ago": "На машине {machine}, прочитано {age} назад",
   "This computer's last check · {line}": "Последняя проверка на этом компьютере · {line}",
@@ -16,7 +18,7 @@ export const RU: Record<string, string> = {
   "Not answering: three reads in a row failed. Last answer {age} ago.": "Не отвечает: три чтения подряд не удались. Последний ответ {age} назад.",
   "Not answering: three reads in a row failed.": "Не отвечает: три чтения подряд не удались.",
   "Sessions: {running} running, {waiting} waiting, {needs} need you.": "Сессии: работают: {running}, ждут: {waiting}, ждут вас: {needs}.",
-  "Its Switchboard is older and does not report its sessions. Update it there.": "Switchboard там старее и не сообщает о своих сессиях. Обновите его там.",
+  "Its Switchboard is older and does not report its sessions. Update it there.": "Switchboard там устаревшей версии и не сообщает о своих сессиях. Обновите его там.",
   "Needs a look there: {checks}.": "Требует внимания там: {checks}.",
   "No failing health check there.": "Проваленных проверок здоровья там нет.",
   "Read just now.": "Прочитано только что.",
