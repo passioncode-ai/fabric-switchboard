@@ -28,6 +28,30 @@ pub struct Login {
 }
 /// SB-259: names the operator's own Claude folder in a session Switchboard launched.
 pub(crate) const SOURCE_DIR: &str = "SWITCHBOARD_CLAUDE_SOURCE_DIR";
+/// SB-452: a managed Claude home's own route (0600): the proxy's route of the launch's group,
+/// its token and the launch's group, passed as `--settings`, which Claude Code ranks above a
+/// folder's `.claude/settings.local.json` (and a worktree's, which it reads from the main
+/// checkout). Rewritten at each launch and repointed with `launch.command` when the proxy moves.
+pub(crate) const ROUTE_FILE: &str = "switchboard-route.json";
+/// SB-452: the argument that gives a Claude session its home's route file, last on its command
+/// line (a later `--settings` would replace it whole).
+pub(crate) fn route_arg(home: &Path) -> String {
+    format!("--settings={}", home.join(ROUTE_FILE).to_string_lossy())
+}
+/// SB-452: writes `home`'s route file for a managed Claude session of `pool` through `base`.
+fn write_route(home: &Path, base: &str, token: &str, pool: &str) -> Result<(), String> {
+    let route = json!({"env": {
+        "ANTHROPIC_BASE_URL": base,
+        "ANTHROPIC_AUTH_TOKEN": token,
+        "ANTHROPIC_API_KEY": "",
+        "ANTHROPIC_CUSTOM_HEADERS": format!("X-Switchboard-Launch-Group: {pool}"),
+    }});
+    private_write(
+        &home.join(ROUTE_FILE),
+        serde_json::to_string(&route).unwrap().as_bytes(),
+        false,
+    )
+}
 pub(crate) const CONFLICTS: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -317,14 +341,11 @@ fn script_with(
     working_directory: &Path,
 ) -> String {
     let mut result = format!("#!{SCRIPT_SHELL}\nset +x\nunset {}\n", CONFLICTS.join(" "));
-    // SB-455: the script is no login shell, so a session started outside one (the app, a
-    // console, a host) had no Homebrew on its PATH and every hook that runs `node` failed. The
-    // caller's PATH stays first; the folders a run the owner starts gets (the program's, the
-    // owner's PATH, `~/.local/bin`, Homebrew's) follow. `env` may still set one.
-    result.push_str(&format!(
-        "export PATH=\"${{PATH:+$PATH:}}\"{}\n",
-        quote(&headless_path(program).to_string_lossy())
-    ));
+    // SB-455: Terminal, a session host, `--in-place` and `launch --headless` run this script with
+    // the PATH of whatever started it (launchd's short one for the app and `serve`, a terminal's
+    // own for `--in-place`). That PATH stays first (a person's nvm, pyenv or mise shims win); the
+    // login PATH comes after it, so a hook finds `node` from Homebrew.
+    result.push_str(&path_export(program));
     for (key, value) in env {
         result.push_str(&format!("export {key}={}\n", quote(value)));
     }
@@ -519,6 +540,15 @@ pub enum Handed {
     Caller,
 }
 impl Handed {
+    /// SB-449: who runs an in-place continuation's script: the hand-over queue, where it may wait
+    /// for a console (`Terminal`'s hold), or the caller that asked for it (`Caller`).
+    pub fn for_continue(queued: bool) -> Self {
+        if queued {
+            Handed::Terminal
+        } else {
+            Handed::Caller
+        }
+    }
     fn as_str(self) -> &'static str {
         match self {
             Handed::Terminal => "terminal",
@@ -614,6 +644,14 @@ fn launcher_gone(pid: u32, token: Option<u64>, marker_age: Duration) -> bool {
 /// is still stale; a marker that holds goes back (a hard link, which never replaces a marker
 /// written meanwhile) and the home stays busy.
 fn clear_stale(home: &Path, now: SystemTime) -> Result<(), String> {
+    clear_stale_with(home, now, |from, to| fs::hard_link(from, to))
+}
+/// `clear_stale` with the link that puts a marker back (tests make it fail).
+fn clear_stale_with(
+    home: &Path,
+    now: SystemTime,
+    link: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), String> {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let path = home.join(".launch-pending");
     let aside = home.join(format!(
@@ -640,8 +678,21 @@ fn clear_stale(home: &Path, now: SystemTime) -> Result<(), String> {
             Ok(())
         }
         _ => {
-            let _ = fs::hard_link(&aside, &path);
-            let _ = fs::remove_file(&aside);
+            match link(&aside, &path) {
+                // Back in place; the copy aside goes.
+                Ok(()) => {
+                    let _ = fs::remove_file(&aside);
+                }
+                // Another marker took the name meanwhile and holds the home itself.
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let _ = fs::remove_file(&aside);
+                }
+                // SB-448: no link here (a file system without hard links, a refused link): the
+                // marker is moved back instead, never deleted while it holds.
+                Err(_) => {
+                    let _ = fs::rename(&aside, &path);
+                }
+            }
             Err(HOME_BUSY.into())
         }
     }
@@ -653,6 +704,10 @@ pub(crate) struct Reservation {
 }
 impl Reservation {
     pub(crate) fn new(home: &Path) -> Result<Self, String> {
+        // SB-448: only a new reservation clears a stale marker; every other check only reads.
+        if let Pending::Stale(_) = pending(home, SystemTime::now())? {
+            clear_stale(home, SystemTime::now())?;
+        }
         ensure_idle(home)?;
         let path = home.join(".launch-pending");
         let mut file = switchboard_core::private_fs::create_new(&path)
@@ -771,6 +826,7 @@ pub(crate) fn repoint_managed(
             ("launch.command", true),
             ("launch.ps1", true),
             ("config.toml", false),
+            (ROUTE_FILE, false),
         ] {
             let path = home.path().join(name);
             let Ok(bytes) = switchboard_core::private_fs::read_private(&path, 256 * 1024) else {
@@ -1093,9 +1149,9 @@ fn login_completed(home: &Path) -> bool {
     read_regular(&home.join(".completed")).is_ok_and(|v| v == "complete")
 }
 pub(crate) fn reservation_open(home: &Path) -> bool {
-    // SB-440: an unreadable home holds no reservation here, as before (a regular file only).
-    fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|m| m.file_type().is_file())
-        && pending(home, SystemTime::now()) == Ok(Pending::Held)
+    // SB-449: the same judgement as `ensure_idle`: a marker that is not a regular file holds here
+    // too (CONTRACTS); only a home whose marker cannot be looked at holds no reservation.
+    pending(home, SystemTime::now()) == Ok(Pending::Held)
 }
 /// A sign-in's journal, when it names a known provider and a valid label and pool.
 fn login_journal(home: &Path) -> Option<(Provider, String, String, i64)> {
@@ -1380,10 +1436,14 @@ fn process_started(pid: u32) -> Option<SystemTime> {
     // After the command name in parentheses, field 22 (`starttime`) is the 20th.
     let rest = &stat[stat.rfind(')')? + 1..];
     let ticks: u64 = rest.split_whitespace().nth(19)?.parse().ok()?;
-    let boot: u64 = fs::read_to_string("/proc/stat")
-        .ok()?
-        .lines()
-        .find_map(|line| line.strip_prefix("btime ")?.trim().parse().ok())?;
+    // SB-449: the boot time does not change while this process runs; read it once.
+    static BOOT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    let boot: u64 = (*BOOT.get_or_init(|| {
+        fs::read_to_string("/proc/stat")
+            .ok()?
+            .lines()
+            .find_map(|line| line.strip_prefix("btime ")?.trim().parse().ok())
+    }))?;
     // SAFETY: sysconf only reads a configuration value.
     let hz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) })
         .ok()
@@ -1422,15 +1482,16 @@ fn process_age_from_ps(pid: u32) -> Option<Duration> {
         .then(|| parse_elapsed(&String::from_utf8_lossy(&output.stdout)))
         .flatten()
 }
+/// Whether nothing holds `home`: no marker that still holds and no live session. Reads only
+/// (SB-448): a stale marker counts as idle, since nothing will run its script, and is left for
+/// the next `Reservation::new` to clear (SB-440: also when its launcher is gone, not only after
+/// ten minutes), so a check never removes a marker another launch writes meanwhile.
 pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
     match pending(home, SystemTime::now())? {
-        Pending::Absent => {}
+        Pending::Absent | Pending::Stale(_) => {}
         Pending::Held => {
             return Err("Close the existing session before changing its home.".into());
         }
-        // The script never ran and nothing will run it: releasing the abandoned marker frees
-        // the home (SB-440: also when its launcher is gone, not only after ten minutes).
-        Pending::Stale(_) => clear_stale(home, SystemTime::now())?,
     }
     if session_running(home)? {
         return Err("Close the existing session before changing its home.".into());
@@ -3212,6 +3273,7 @@ fn launch_core(
         );
         match account.provider {
             Provider::Claude => {
+                write_route(&home, &base, proxy.token(), &pool)?;
                 env.insert("ANTHROPIC_BASE_URL".into(), base);
                 env.insert("ANTHROPIC_AUTH_TOKEN".into(), proxy.token().into());
                 env.insert("ANTHROPIC_API_KEY".into(), String::new());
@@ -3285,8 +3347,13 @@ fn launch_core(
     // config file; a caller's own `--mcp-config` still adds to it (SB-94, measured on 2.1.296).
     let config = config.map(|path| format!("--mcp-config={path}"));
     // SB-247: a dispatched run starts no interactive session (`headless_args`).
+    // SB-452: a managed Claude session takes its route from its home's own file, whatever a
+    // folder's (or its main checkout's) local settings say.
+    let route =
+        (mode == "managed" && account.provider == Provider::Claude).then(|| route_arg(&home));
     if let Some(h) = headless {
-        let args = headless_args(account.provider, config.as_deref(), h);
+        let mut args = headless_args(account.provider, config.as_deref(), h);
+        args.extend(route.clone());
         let launch_id = crate::launches::new_id();
         env.insert(crate::launches::ENV.into(), launch_id.clone());
         env.insert(DISPATCH_ENV.into(), h.workflow.clone());
@@ -3346,6 +3413,12 @@ fn launch_core(
         args.push(first.as_str());
     }
     args.extend(extra.iter().map(String::as_str));
+    // SB-452: last, so a caller's own `--settings` cannot replace it; before a caller's `--`, after
+    // which it would be read as a prompt.
+    if let Some(route) = &route {
+        let at = args.iter().position(|a| *a == "--").unwrap_or(args.len());
+        args.insert(at, route.as_str());
+    }
     // SB-212: the session's own launch id, for the record and for what it launches.
     let launch_id = crate::launches::new_id();
     env.insert(crate::launches::ENV.into(), launch_id.clone());
@@ -3687,28 +3760,54 @@ pub const DISPATCH_FAILED: &str =
     "The dispatched session did not start: its program could not be run.";
 pub const DISPATCH_WOULD_NOT_STOP: &str =
     "The dispatched session did not stop. End its process by hand, then stop it again.";
-/// SB-247: the PATH a run started by the owner gets: the program's own folder first (a
-/// `#!/usr/bin/env node` launcher finds its `node` beside it), then the owner's, then the
-/// per-user and Homebrew folders the desktop app's PATH lacks.
+/// SB-247, SB-455: the PATH of a dispatched run (`spawn_headless`), which inherits none: the
+/// program's own folder first (a `#!/usr/bin/env node` launcher finds its `node` beside it), then
+/// the person's login PATH (`login_path::login_dirs`, asked by the process that builds the run),
+/// then this process's, then the per-user and Homebrew folders a launchd PATH lacks.
 pub(crate) fn headless_path(program: &Path) -> std::ffi::OsString {
-    let mut dirs: Vec<PathBuf> = program
-        .parent()
-        .map(Path::to_path_buf)
+    session_path(program, crate::login_path::login_dirs().as_deref())
+}
+/// SB-455: a session script's `PATH` line (a launch script, a resume script): the program's own
+/// folder, then the `PATH` the script was started with, then the rest of `headless_path` after it
+/// (a folder already in that `PATH` may appear twice; lookup takes the first). The inherited `PATH` stays ahead of the login one, so a terminal's
+/// version-manager shims are not shadowed by `/usr/bin`.
+pub(crate) fn path_export(program: &Path) -> String {
+    path_export_with(program, crate::login_path::login_dirs().as_deref())
+}
+/// `path_export` with the login folders given.
+pub(crate) fn path_export_with(program: &Path, login: Option<&[PathBuf]>) -> String {
+    use fabric_sessions_core::cli::quoted;
+    let first = program.parent().filter(|d| !d.as_os_str().is_empty());
+    let rest: Vec<PathBuf> = std::env::split_paths(&session_path(program, login))
+        .filter(|d| Some(d.as_path()) != first)
+        .collect();
+    let rest = std::env::join_paths(rest).unwrap_or_default();
+    let rest = rest.to_string_lossy();
+    let mut line = String::from("export PATH=");
+    match first {
+        Some(first) => {
+            line.push_str(&quoted(&first.to_string_lossy()));
+            line.push_str("\"${PATH:+:$PATH}\"");
+            if !rest.is_empty() {
+                line.push_str(&quoted(&format!(":{rest}")));
+            }
+        }
+        None if rest.is_empty() => line.push_str("\"${PATH:-}\""),
+        None => {
+            line.push_str("\"${PATH:+$PATH:}\"");
+            line.push_str(&quoted(&rest));
+        }
+    }
+    line.push('\n');
+    line
+}
+/// `headless_path` with the login folders given.
+pub(crate) fn session_path(program: &Path, login: Option<&[PathBuf]>) -> std::ffi::OsString {
+    let extra: Vec<PathBuf> = std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".local/bin"))
         .into_iter()
         .collect();
-    if let Some(path) = std::env::var_os("PATH") {
-        dirs.extend(std::env::split_paths(&path));
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(PathBuf::from(home).join(".local/bin"));
-    }
-    dirs.extend([
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-    ]);
-    let mut seen = std::collections::BTreeSet::new();
-    dirs.retain(|d| seen.insert(d.clone()));
-    std::env::join_paths(dirs).unwrap_or_default()
+    crate::login_path::merge(program.parent(), login, std::env::var_os("PATH"), &extra)
 }
 /// SB-247: starts a dispatched run from the owner's own process: no Terminal, no PowerShell. It
 /// leads its own process group (Unix) or a new process group with no window (Windows), reads
@@ -4731,8 +4830,25 @@ mod tests {
         );
         age(&root.path().join(".launch-pending"), 11 * 60);
         assert!(ensure_idle(root.path()).is_ok());
-        assert!(!root.path().join(".launch-pending").exists());
+        // SB-448: a check only reads; the next reservation clears the stale marker.
+        assert!(root.path().join(".launch-pending").exists());
         assert!(Reservation::new(root.path()).is_ok());
+    }
+    /// SB-448: takes a reservation on `home`, as the next launch does, and answers the reasons
+    /// of the stale markers it cleared; the reservation is dropped, so no marker is left.
+    fn reserve_clearing(home: &Path) -> Vec<&'static str> {
+        let (hold, events) = crate::oplog::capture_fields(|| Reservation::new(home));
+        drop(hold.expect("the next launch proceeds"));
+        assert!(!home.join(".launch-pending").exists());
+        events
+            .into_iter()
+            .filter(|(event, _)| *event == "launch_reservation")
+            .flat_map(|(_, fields)| fields)
+            .filter_map(|(name, field)| match (name, field) {
+                ("reason", crate::oplog::Field::Code(code)) => Some(code),
+                _ => None,
+            })
+            .collect()
     }
     /// SB-440: the marker's contents as `ensure_idle` reads them, with its time set back.
     fn marker(home: &Path, contents: &str, seconds: u64) {
@@ -4757,19 +4873,9 @@ mod tests {
         assert_eq!(home_state(root.path()).0, "ended");
         let (idle, events) = crate::oplog::capture_fields(|| ensure_idle(root.path()));
         idle.unwrap();
-        assert!(!root.path().join(".launch-pending").exists());
-        let cleared: Vec<_> = events
-            .iter()
-            .filter(|(event, _)| *event == "launch_reservation")
-            .collect();
-        assert_eq!(cleared.len(), 1, "{events:?}");
-        assert!(cleared[0]
-            .1
-            .contains(&("reason", crate::oplog::Field::Code("unclaimed"))));
-        assert!(
-            Reservation::new(root.path()).is_ok(),
-            "the next launch proceeds"
-        );
+        assert!(events.is_empty(), "a check clears nothing: {events:?}");
+        assert!(root.path().join(".launch-pending").exists());
+        assert_eq!(reserve_clearing(root.path()), ["unclaimed"]);
     }
     #[test]
     fn sb440_a_marker_handed_to_terminal_still_holds_for_ten_minutes() {
@@ -4793,13 +4899,8 @@ mod tests {
         let gone = child.id();
         child.wait().unwrap();
         marker(root.path(), &format!(r#"{{"pid":{gone}}}"#), 0);
-        let (idle, events) = crate::oplog::capture_fields(|| ensure_idle(root.path()));
-        idle.unwrap();
-        assert!(!root.path().join(".launch-pending").exists());
-        assert!(events
-            .iter()
-            .any(|(event, fields)| *event == "launch_reservation"
-                && fields.contains(&("reason", crate::oplog::Field::Code("launcher_gone")))));
+        assert!(ensure_idle(root.path()).is_ok());
+        assert_eq!(reserve_clearing(root.path()), ["launcher_gone"]);
         // A live preparing process (this one) still holds the home.
         marker(
             root.path(),
@@ -4827,13 +4928,8 @@ mod tests {
             &json!({"pid": me, "token": token + 1}).to_string(),
             0,
         );
-        let (idle, events) = crate::oplog::capture_fields(|| ensure_idle(root.path()));
-        idle.unwrap();
-        assert!(events
-            .iter()
-            .any(|(event, fields)| *event == "launch_reservation"
-                && fields.contains(&("reason", crate::oplog::Field::Code("launcher_gone")))));
-        assert!(!root.path().join(".launch-pending").exists());
+        assert!(ensure_idle(root.path()).is_ok());
+        assert_eq!(reserve_clearing(root.path()), ["launcher_gone"]);
     }
     #[cfg(target_os = "linux")]
     #[test]
@@ -4868,6 +4964,73 @@ mod tests {
         // Nothing is left aside either way, and a marker already gone is not an error.
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
         clear_stale(root.path(), SystemTime::now()).unwrap();
+    }
+    #[test]
+    fn sb448_a_marker_that_cannot_be_linked_back_is_moved_back_never_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        let fresh = json!({"pid": null, "by": "caller"}).to_string();
+        marker(root.path(), &fresh, 0);
+        let refused = |_: &Path, _: &Path| -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+        };
+        assert_eq!(
+            clear_stale_with(root.path(), SystemTime::now(), refused).unwrap_err(),
+            HOME_BUSY
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join(".launch-pending")).unwrap(),
+            fresh
+        );
+        assert_eq!(
+            fs::read_dir(root.path()).unwrap().count(),
+            1,
+            "nothing left aside"
+        );
+        // Another marker took the name meanwhile: it stays, and the copy aside goes.
+        let taken = |_: &Path, to: &Path| -> std::io::Result<()> {
+            fs::write(to, "other")?;
+            Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
+        };
+        assert!(clear_stale_with(root.path(), SystemTime::now(), taken).is_err());
+        assert_eq!(
+            fs::read_to_string(root.path().join(".launch-pending")).unwrap(),
+            "other"
+        );
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+    #[test]
+    fn sb448_read_only_checks_never_remove_a_marker() {
+        let f = tempfile::tempdir().unwrap();
+        let home = f.path().join("runtimes").join("claude-tokens");
+        private_dir(&f.path().join("runtimes")).unwrap();
+        private_dir(&home).unwrap();
+        marker(&home, r#"{"pid":null,"by":"caller"}"#, 6 * 60);
+        // Stale: nothing will run its script, so no session runs, and the marker stays.
+        assert!(!launched_session_running(f.path(), Provider::Claude, &[]));
+        assert!(!reservation_open(&home));
+        assert_eq!(home_state(&home).0, "ended");
+        assert!(ensure_idle(&home).is_ok());
+        assert!(home.join(".launch-pending").exists());
+        // A marker that holds is a running launch.
+        marker(&home, r#"{"pid":null,"by":"caller"}"#, 0);
+        assert!(launched_session_running(f.path(), Provider::Claude, &[]));
+        assert_eq!(home_state(&home).0, "starting");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn sb449_a_marker_that_is_not_a_regular_file_holds_everywhere() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".launch-pending")).unwrap();
+        assert!(ensure_idle(root.path()).is_err());
+        assert!(reservation_open(root.path()));
+        assert_eq!(home_state(root.path()).0, "starting");
+        assert!(Reservation::new(root.path()).is_err());
+        assert!(root.path().join(".launch-pending").is_dir());
+    }
+    #[test]
+    fn sb449_an_in_place_continue_is_the_callers_unless_queued() {
+        assert_eq!(Handed::for_continue(false), Handed::Caller);
+        assert_eq!(Handed::for_continue(true), Handed::Terminal);
     }
     #[test]
     fn sb440_a_reservation_names_its_preparer_then_who_runs_the_script() {
@@ -6541,16 +6704,6 @@ mod tests {
             text.contains("export SWITCHBOARD_SESSION="),
             "the same environment"
         );
-        // SB-455: a hook that runs `node` finds Homebrew's however the script was started.
-        let path_line = text
-            .lines()
-            .find(|l| l.starts_with("export PATH="))
-            .expect("the script sets PATH");
-        assert!(path_line.contains("/opt/homebrew/bin"), "{path_line}");
-        assert!(
-            text.find("export PATH=") < text.find("export SWITCHBOARD_SESSION="),
-            "set before the launch's own variables, which may still name one"
-        );
         assert!(
             text.contains(&format!(
                 " {} {}\n",
@@ -6940,6 +7093,8 @@ mod tests {
             "--dangerously-skip-permissions".to_string(),
         ];
         expected.extend(sent.iter().cloned());
+        // SB-452: the home's own route, last (Claude Code 2.1.327 takes it after the prompt too).
+        expected.push(route_arg(ours.parent().unwrap()));
         assert_eq!(args, expected);
         no_value_is_read_as_a_config(&args);
         for (key, value) in context {
@@ -7530,7 +7685,68 @@ mod tests {
                 "--mcp-config={}",
                 home.join("switchboard-mcp.json").to_string_lossy()
             ))));
+            // SB-452: the home's own route, last on the command line, so a folder's (or a
+            // worktree's main checkout's) local settings cannot send the session elsewhere.
+            let route = quote(&route_arg(&home));
+            let exec = text.lines().find(|l| l.starts_with("exec ")).unwrap();
+            assert!(exec.ends_with(&route), "{exec}");
         }
+        let file = home.join(ROUTE_FILE);
+        let route: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        assert_eq!(
+            route,
+            json!({"env": {
+                "ANTHROPIC_BASE_URL": format!("http://{}/claude/work", proxy.address()),
+                "ANTHROPIC_AUTH_TOKEN": proxy.token(),
+                "ANTHROPIC_API_KEY": "",
+                "ANTHROPIC_CUSTOM_HEADERS": "X-Switchboard-Launch-Group: work",
+            }})
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+    /// SB-452: a caller's own words come before the home's route, and a caller's `--` after it.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn the_launch_route_follows_a_callers_words_and_precedes_its_end_of_options() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "work", CLAUDE_OAUTH);
+        f.store.select(Provider::Claude, "work", &id).unwrap();
+        let (_, script) = launch_full(
+            &f.root,
+            &f.store,
+            &proxy,
+            &id,
+            "managed",
+            &f.project,
+            &TEST_HOST,
+            None,
+            &[
+                "--settings".into(),
+                "/theirs.json".into(),
+                "--".into(),
+                "-x".into(),
+            ],
+            true,
+        )
+        .unwrap();
+        let home = f.root.join("runtimes").join("claude-work");
+        let text = fs::read_to_string(script.unwrap()).unwrap();
+        let exec = text.lines().find(|l| l.starts_with("exec ")).unwrap();
+        assert!(
+            exec.ends_with(&format!(
+                "'--settings' '/theirs.json' {} '--' '-x'",
+                quote(&route_arg(&home))
+            )),
+            "{exec}"
+        );
     }
     #[cfg(not(windows))]
     #[tokio::test]
@@ -7729,6 +7945,140 @@ mod tests {
         let names: Vec<&str> = unset.split(' ').skip(1).collect();
         assert_eq!(names, CONFLICTS);
         assert!(text.find("unset ").unwrap() < text.find("export ").unwrap_or(usize::MAX));
+    }
+    /// SB-455: a launch script exports the program's folder, then the PATH it was started with,
+    /// then the login PATH for what that PATH lacks.
+    #[cfg(unix)]
+    #[test]
+    fn a_launch_script_exports_the_login_path() {
+        let brew = PathBuf::from("/synthetic/homebrew/bin");
+        let text = crate::login_path::with_login(vec![brew.clone(), "/usr/bin".into()], || {
+            script(
+                Path::new("/tmp/home"),
+                Path::new("/opt/agent/bin/claude"),
+                &[],
+                &BTreeMap::new(),
+                false,
+                Path::new("/tmp/project"),
+            )
+        });
+        let line = text
+            .lines()
+            .find(|l| l.starts_with("export PATH="))
+            .unwrap();
+        let prefix = format!(
+            "export PATH='/opt/agent/bin'\"${{PATH:+:$PATH}}\"':{}:/usr/bin:",
+            brew.display()
+        );
+        assert!(line.starts_with(&prefix), "{line}");
+        assert!(line.contains("/opt/homebrew/bin"));
+        // The program's folder is not repeated after the inherited PATH.
+        assert_eq!(line.matches("/opt/agent/bin").count(), 1);
+        // Exported after the scrub and before the session's own variables and its program.
+        assert!(text.find("unset ").unwrap() < text.find("export PATH=").unwrap());
+        assert!(text.find("export PATH=").unwrap() < text.find("exec ").unwrap());
+        // The resume script of the duty officer and Continue carries the same line.
+        let resume = crate::login_path::with_login(vec![brew.clone()], || {
+            crate::duty::resume_script_for(
+                Path::new("/tmp/config"),
+                "/tmp/project",
+                "s1",
+                Path::new("/opt/agent/bin/claude"),
+                &[],
+                None,
+            )
+        });
+        assert!(resume.contains(&format!(
+            "export PATH='/opt/agent/bin'\"${{PATH:+:$PATH}}\"':{}:",
+            brew.display()
+        )));
+    }
+    /// SB-455 (review round 1): the PATH a script was started with stays ahead of the login PATH,
+    /// so a terminal's shim folder wins over `/usr/bin`; with an empty PATH the session still gets
+    /// the program's folder and the login folders, and never an empty entry.
+    #[cfg(unix)]
+    #[test]
+    fn the_inherited_path_stays_ahead_of_the_login_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let shims = base.join("shims");
+        let brew = base.join("brew");
+        fs::create_dir_all(&shims).unwrap();
+        fs::create_dir_all(&brew).unwrap();
+        let line = path_export_with(
+            Path::new("/opt/agent/bin/claude"),
+            Some(&[brew.clone(), "/usr/bin".into()]),
+        );
+        let probe = format!("{line}printf '%s' \"$PATH\"");
+        let run = |path: String| {
+            let output = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(&probe)
+                .env_clear()
+                .env("PATH", path)
+                .output()
+                .unwrap();
+            String::from_utf8(output.stdout).unwrap()
+        };
+        let got = run(format!("{}:/usr/bin:/bin", shims.display()));
+        let dirs: Vec<PathBuf> = std::env::split_paths(&got).collect();
+        assert_eq!(dirs[0], PathBuf::from("/opt/agent/bin"));
+        assert_eq!(dirs[1], shims);
+        let at = |d: &Path| dirs.iter().position(|x| x == d).unwrap();
+        assert!(at(&shims) < at(&brew));
+        let got = run(String::new());
+        assert!(
+            got.starts_with(&format!("/opt/agent/bin:{}:", brew.display())),
+            "{got}"
+        );
+        assert!(!got.contains("::") && !got.ends_with(':'), "{got}");
+    }
+    /// SB-455: a hook the session runs through `/bin/sh` (as Claude Code runs its hooks) finds a
+    /// tool that only the login PATH names, although the script starts with a launchd PATH.
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_in_a_launched_session_finds_a_tool_on_the_login_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let brew = base.join("homebrew/bin");
+        fs::create_dir_all(&brew).unwrap();
+        private_write(
+            &brew.join("sb455-node"),
+            b"#!/bin/sh\necho synthetic-node\n",
+            true,
+        )
+        .unwrap();
+        let agent_dir = base.join("agent");
+        fs::create_dir(&agent_dir).unwrap();
+        let report = base.join("report");
+        let agent = agent_dir.join("claude");
+        private_write(
+            &agent,
+            format!(
+                "#!/bin/sh\n/bin/sh -c 'sb455-node' > {} 2>&1\n",
+                quote(&report.to_string_lossy())
+            )
+            .as_bytes(),
+            true,
+        )
+        .unwrap();
+        let home = base.join("home");
+        private_dir(&home).unwrap();
+        let project = base.join("project");
+        fs::create_dir(&project).unwrap();
+        let text = crate::login_path::with_login(vec![brew.clone()], || {
+            script(&home, &agent, &[], &BTreeMap::new(), false, &project)
+        });
+        let path = home.join("launch.command");
+        private_write(&path, text.as_bytes(), true).unwrap();
+        let status = Command::new(SCRIPT_SHELL)
+            .arg(&path)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(fs::read_to_string(report).unwrap(), "synthetic-node\n");
     }
     /// Runs the real generated script with zsh against hostile paths and a polluted
     /// environment. Terminal launches only exist on macOS, which is where zsh is guaranteed.

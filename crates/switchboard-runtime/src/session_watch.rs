@@ -246,6 +246,50 @@ static LAST_READ: std::sync::Mutex<Option<(i64, std::path::PathBuf, Read)>> =
     std::sync::Mutex::new(None);
 const READ_FRESH: i64 = 15;
 
+/// SB-500 (operator 2026-11-18: «дежурный работает неправильно»): per live session process, how many
+/// launches it started itself (`launched_by.caller_launch_id`, else `launched_by.parent`) run now.
+/// Such a launch runs in a session host of its own, never under the session's process, so the
+/// process tree does not show it; the duty officer counts it as the session's work.
+pub fn running_children(scan: &Value, records: &[Value]) -> HashMap<u32, usize> {
+    let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
+    let live: HashSet<&str> = rows
+        .iter()
+        .filter_map(|r| r["launch_id"].as_str())
+        .collect();
+    let mut per_launch: HashMap<&str, usize> = HashMap::new();
+    for r in records {
+        let Some(id) = r["launch_id"].as_str() else {
+            continue;
+        };
+        if !live.contains(id) {
+            continue;
+        }
+        let by = &r["launched_by"];
+        if let Some(caller) = by["caller_launch_id"]
+            .as_str()
+            .or_else(|| by["parent"].as_str())
+        {
+            if caller != id {
+                *per_launch.entry(caller).or_default() += 1;
+            }
+        }
+    }
+    rows.iter()
+        .filter_map(|row| {
+            let pid = u32::try_from(row["pid"].as_u64()?).ok()?;
+            let n = *per_launch.get(row["launch_id"].as_str()?)?;
+            Some((pid, n))
+        })
+        .collect()
+}
+
+/// SB-500: `running_children` from the watch's last read (at most `READ_FRESH` seconds old), and
+/// whether that read saw the process table.
+pub(crate) fn children_now(root: &Path, now: i64) -> (HashMap<u32, usize>, bool) {
+    let (scan, records, _) = read_cached(root, now);
+    (running_children(&scan, &records), table_read(&scan))
+}
+
 fn read_cached(root: &Path, now: i64) -> Read {
     if let Ok(last) = LAST_READ.lock() {
         if let Some((at, folder, read)) = last.as_ref() {
@@ -545,6 +589,28 @@ fn last_keys(root: &Path) -> HashSet<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_sessions_running_launches_of_its_own_are_counted_for_its_process() {
+        // SB-500: the audit (launch A, process 100) started B and C itself; B runs, C ended; D runs
+        // and continues A's earlier work, which is not a launch A started.
+        let scan = json!({"sessions": [
+            {"pid": 100, "launch_id": "A"}, {"pid": 200, "launch_id": "B"},
+            {"pid": 300, "launch_id": "D"}, {"pid": 400}
+        ]});
+        let records = vec![
+            json!({"launch_id": "A", "launched_by": {}}),
+            json!({"launch_id": "B", "launched_by": {"caller_launch_id": "A"}}),
+            json!({"launch_id": "C", "launched_by": {"caller_launch_id": "A"}, "ended": {"kind": "exited"}}),
+            json!({"launch_id": "D", "launched_by": {}, "continued_from": ["A"]}),
+            json!({"launch_id": "E", "launched_by": {"parent": "D"}}),
+        ];
+        let children = running_children(&scan, &records);
+        assert_eq!(children.get(&100), Some(&1));
+        assert_eq!(children.get(&300), None, "E does not run");
+        assert_eq!(children.get(&400), None);
+        assert_eq!(children.len(), 1);
+    }
+
     #[test]
     fn a_kept_read_answers_only_the_same_folder_for_fifteen_seconds() {
         let root = Path::new("/data/a");

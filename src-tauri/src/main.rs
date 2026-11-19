@@ -455,6 +455,30 @@ async fn recall_account(
         })
         .await
 }
+/// SB-473: every machine this computer knows (moves and runs), as `switchboard targets` lists them,
+/// for the move dialog's machine picker; with `probe`, each asked whether it answers.
+#[tauri::command]
+async fn targets(probe: bool, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Targets { probe })
+        .await
+}
+/// SB-474: another machine's groups, organizations and accounts, read over ssh as `switchboard
+/// remote status` reads them, for the move dialog's group picker.
+#[tauri::command]
+async fn remote_status(target: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::RemoteStatus {
+            target,
+            program: None,
+            remote_data_dir: None,
+        })
+        .await
+}
 /// SB-355: the machine groups with their accounts; with `live`, each machine read over ssh.
 #[tauri::command]
 async fn machines(live: bool, state: State<'_, Slot>) -> Result<Value, String> {
@@ -2168,6 +2192,8 @@ fn main() {
             send_account,
             recall_account,
             machines,
+            targets,
+            remote_status,
             attention,
             given_accounts,
             events,

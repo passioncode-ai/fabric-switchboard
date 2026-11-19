@@ -2,7 +2,7 @@
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { BalanceStatus, FeedEntry, FeedStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView, Placement } from './types';
 import type { SessionGroup, SessionRow, MachineReadStatus } from './types';
-import type { Machine, MachineCopy, RemoteRead, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
+import type { Machine, MachineCopy, RemoteRead, Target, RemoteStatus, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, UpdateOwner, DebNotice, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
 
@@ -558,20 +558,24 @@ function closeOffer(raw: unknown): AttentionItem['close'] {
 /**
  * SB-389: what a duplicate's item says and offers. A quiet copy is closed as before; when every
  * copy works, the older one waiting on a command of its own is offered by its pid, and the line
- * says that command ends with it; when every copy is answering nothing is offered.
+ * says that command ends with it. SB-472: when every copy is answering nothing can be closed
+ * without losing work, so the item offers no button (`label` null) and says when it will: a
+ * disabled button the person cannot press is never shown.
  */
-export function duplicateOffer(item: Pick<AttentionItem, 'session_id' | 'close'>): { line: string; label: string; pid: number | null; disabled: boolean } {
+export function duplicateOffer(item: Pick<AttentionItem, 'session_id' | 'close'>): { line: string; label: string | null; pid: number | null } {
   const close = item.close;
+  // Without its session id nothing here can close a copy: the line says what the person can do.
+  if (!item.session_id) return { line: t('Both copies of this session are working. Close one in its own window when it finishes.'), label: null, pid: null };
   if (close?.why === 'older') {
     const line = close.command_age !== null
       ? t('One session runs in two processes, and both are working. The older copy has been in one command for {age}; closing it ends that command.', { age: shortAge(close.command_age) })
       : t('One session runs in two processes, and both are working. Closing the older copy ends what it is doing.');
-    return { line, label: t('Close the older copy'), pid: close.pid, disabled: !item.session_id };
+    return { line, label: t('Close the older copy'), pid: close.pid };
   }
-  if (item.close === null && item.session_id) {
-    return { line: t('One session runs in two processes, and both are answering. Close one in its own window when it finishes.'), label: t('Close the quiet copy'), pid: null, disabled: true };
+  if (close === null) {
+    return { line: t('One session runs in two processes, and both are answering now. When one of them finishes its turn, this item offers to close it.'), label: null, pid: null };
   }
-  return { line: t('One session runs in two processes. Close the quiet copy so they do not work over each other.'), label: t('Close the quiet copy'), pid: null, disabled: !item.session_id };
+  return { line: t('One session runs in two processes. Close the quiet copy so they do not work over each other.'), label: t('Close the quiet copy'), pid: null };
 }
 /** WF-3: the accounts that need a person: those the list names, and those the monitor says must sign in again. */
 export function attentionAccounts(attention: Attention | null, signInRequired: readonly string[] = []): Set<string> {
@@ -2177,6 +2181,47 @@ export const MACHINE_POOL_PREFIX = 'machine_';
 /** SB-355: the machine group an account lives in, if any. */
 export function machineOf(snapshot: { machines?: Machine[] }, account: Pick<Account, 'pool'>): Machine | undefined {
   return account.pool.startsWith(MACHINE_POOL_PREFIX) ? snapshot.machines?.find((m) => m.pool === account.pool) : undefined;
+}
+/**
+ * SB-473: the machines a move can go to, chosen rather than typed: the machine groups and every
+ * machine `switchboard targets` knows (moves and runs), each once (a name or alias of either),
+ * newest first, without the machine the account is on now. `detail` says how it is known.
+ */
+export function machineChoices(machines: readonly Machine[], targets: readonly Target[], exclude: Machine | null = null): { name: string; detail: string }[] {
+  const names = (m: Machine) => [m.name, ...(m.aliases ?? [])];
+  const skip = new Set(exclude ? names(exclude) : []);
+  const out: { name: string; detail: string; at: number }[] = [];
+  const seen = new Set<string>();
+  const add = (name: string, aliases: readonly string[], detail: string, at: number) => {
+    const all = [name, ...aliases];
+    if (all.some((n) => skip.has(n) || seen.has(n))) return;
+    all.forEach((n) => seen.add(n)); out.push({ name, detail, at });
+  };
+  for (const tgt of targets) {
+    const group = machines.find((m) => names(m).includes(tgt.machine) || (tgt.aliases ?? []).some((a) => names(m).includes(a)));
+    const how = group ? t('accounts live there') : (tgt.known_by ?? []).includes('dispatch') ? t('runs started there') : t('accounts moved there before');
+    add(tgt.machine, [...(tgt.aliases ?? []), ...(group ? names(group) : [])], how, tgt.last_at ?? 0);
+  }
+  for (const m of machines) add(m.name, m.aliases ?? [], t('accounts live there'), m.created_at);
+  return out.sort((a, b) => b.at - a.at || a.name.localeCompare(b.name)).map(({ name, detail }) => ({ name, detail }));
+}
+/**
+ * SB-474: the groups a move can join on the other machine, read from it: the default group first,
+ * then its groups by name (machine groups there left out), each with its organization and account
+ * count. `chosen` is the account's own group id when that machine has it, else the default group.
+ */
+export function remoteGroupChoices(status: RemoteStatus, prefer: string | null): { choices: [string, string][]; chosen: string } {
+  const count = (n: number) => plural(n, { one: '{n} account', other: '{n} accounts' });
+  const groups = status.groups.filter((g) => g.pool !== 'default' && !g.pool.startsWith(MACHINE_POOL_PREFIX))
+    .sort((a, b) => (a.name ?? a.pool).localeCompare(b.name ?? b.pool));
+  const defaults = status.groups.find((g) => g.pool === 'default');
+  const choices: [string, string][] = [['default', defaults ? `${t('Default group')} · ${count(defaults.accounts)}` : t('Default group')]];
+  for (const g of groups) choices.push([g.pool, [g.name ?? g.pool, g.organization, count(g.accounts)].filter(Boolean).join(' · ')]);
+  return { choices, chosen: prefer && choices.some(([pool]) => pool === prefer) ? prefer : 'default' };
+}
+/** SB-476: the accounts a move can take: a subscription sign-in on this computer that is on, or one on another machine; never one already on `to`. */
+export function movableAccounts<A extends Pick<Account, 'id' | 'kind' | 'enabled' | 'pool'>>(snapshot: { accounts: A[]; elsewhere?: Record<string, number>; machines?: Machine[] }, to: Machine | null = null): A[] {
+  return snapshot.accounts.filter((a) => a.kind === 'oauth' && (to ? a.pool !== to.pool : true) && (machineOf(snapshot, a) !== undefined || (a.enabled && snapshot.elsewhere?.[a.id] === undefined)));
 }
 /** Q2 item 6: the groups that hold accounts but have no folders (no group record): no session uses those accounts, so the Groups page names them. */
 export function foldlessGroups<A extends Pick<Account, 'id' | 'pool'>>(snapshot: { accounts: A[]; projects?: { pool: string }[] }): { pool: string; accounts: A[] }[] {

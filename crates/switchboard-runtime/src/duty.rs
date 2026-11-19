@@ -11,8 +11,12 @@
 //! servers and helpers (`caffeinate`) are not work.
 //!
 //! What it does, at most once every five minutes and at most three times a check (DEC-0021):
-//! - `idle` (finished): its turn ended `idle_minutes` ago, and at least `WAKE_UP_FLOOR` ago, and
-//!   none of its commands still runs: closed; it can be resumed from Claude Code's history. The
+//! - `idle` (finished): its turn ended `idle_minutes` ago, and at least `WAKE_UP_FLOOR` ago, its
+//!   transcript and its background agents' transcripts were not written as long (SB-500), none of
+//!   its commands still runs, and no session it launched itself runs: closed; it can be resumed
+//!   from Claude Code's history. A transcript that cannot be found, or launch records not read,
+//!   leave it running, and a session the person took up again after such a close is kept for
+//!   good (SB-501). The
 //!   floor (SB-392 S-1): a session that set itself a wake-up (`ScheduleWakeup`, at most an hour)
 //!   reads `idle` while it waits and must not be closed in the minute before it wakes.
 //! - `stuck` (stalled): busy, its status unchanged and its transcript not written for
@@ -141,6 +145,10 @@ pub struct Seen {
     pub cpu: Option<f64>,
     /// Whether its tree used (almost) no CPU since the previous check; unknown on the first look.
     pub cpu_quiet: Option<bool>,
+    /// SB-500: launches this session started itself (`switchboard launch` from its own commands)
+    /// that run now, each in a session host of its own and so outside its process tree; `None`
+    /// when the launch records could not be read with the process table.
+    pub own_launches: Option<usize>,
 }
 
 /// The terminal host of a session from its ancestors' executable paths (DEC-0021: an Orca or
@@ -176,10 +184,28 @@ fn monitoring(root: &Path, s: &Seen, now: i64) -> bool {
     )
 }
 
+/// How long a session must have been idle, and its transcripts quiet, before it counts as finished:
+/// `idle_minutes`, never under `WAKE_UP_FLOOR`.
+fn idle_floor(set: &Settings) -> i64 {
+    (i64::from(set.idle_minutes) * 60).max(WAKE_UP_FLOOR)
+}
+
 /// SB-396 D1: no command of its own runs, as far as the process table was read; unknown is not
 /// none.
 fn no_commands(s: &Seen) -> bool {
     s.commands_known && s.commands == 0
+}
+
+/// SB-500: nothing it started still works: no launch of its own runs, as far as the records were
+/// read; unknown is not none.
+fn no_own_launches(s: &Seen) -> bool {
+    s.own_launches == Some(0)
+}
+
+/// SB-500: its transcript, its background agents' transcripts included, was last written at least
+/// `floor` seconds ago. A transcript that could not be found is not a quiet one.
+fn transcript_quiet(s: &Seen, now: i64, floor: i64) -> bool {
+    s.last_write.is_some_and(|w| now - w >= floor)
 }
 
 /// What to do with one session now, and why; none to leave it. `newer_copy`: another process
@@ -196,9 +222,14 @@ pub fn decide(s: &Seen, set: &Settings, now: i64, newer_copy: bool) -> Option<(A
     let stuck = i64::from(set.stuck_minutes) * 60;
     match s.status.as_str() {
         // Finished: the turn ended long ago and nothing it started still runs (a background task
-        // that will wake it is work, not a hang).
+        // that will wake it is work, not a hang). SB-500: a session waiting for its background
+        // agents reads `idle` while they write their own transcripts, and one waiting for sessions
+        // it launched itself reads `idle` while they run: both are work.
         "idle"
-            if since >= (i64::from(set.idle_minutes) * 60).max(WAKE_UP_FLOOR) && no_commands(s) =>
+            if since >= idle_floor(set)
+                && transcript_quiet(s, now, idle_floor(set))
+                && no_commands(s)
+                && no_own_launches(s) =>
         {
             Some((Act::Close, "idle"))
         }
@@ -255,6 +286,7 @@ pub fn observe(root: &Path) -> Vec<Seen> {
             command_age: None,
             cpu: None,
             cpu_quiet: None,
+            own_launches: None,
             config,
         });
     }
@@ -485,11 +517,16 @@ pub fn resume_script_for(
         crate::launch::CONFLICTS.join(" ")
     );
     let person = crate::person::claude_dir();
+    // SB-452: a managed home's own route, which outranks the folder's local settings.
+    let route = (person.as_deref() != Some(config)
+        && config.join(crate::launch::ROUTE_FILE).is_file())
+    .then(|| crate::launch::route_arg(config));
     if person.as_deref() != Some(config) {
         if let Ok(text) = std::fs::read_to_string(config.join("launch.command")) {
             for line in text.lines().filter(|l| l.starts_with("export ")) {
                 if !line.starts_with("export SWITCHBOARD_LAUNCH_ID=")
                     && !line.starts_with("export CLAUDE_CONFIG_DIR=")
+                    && !line.starts_with("export PATH=")
                 {
                     out.push_str(line);
                     out.push('\n');
@@ -501,19 +538,16 @@ pub fn resume_script_for(
             quote(&config.to_string_lossy())
         ));
     }
-    // A Terminal window runs the script without the person's login shell: the PATH a run started
-    // by the owner gets, so the session's hooks find `node` (operator 2026-11-15: every hook failed
-    // with "node: command not found").
-    out.push_str(&format!(
-        "export PATH={}\n",
-        quote(&crate::launch::headless_path(program).to_string_lossy())
-    ));
+    // A Terminal window runs the script with the PATH it was started with; the program's folder
+    // goes first and the person's login PATH fills what that PATH lacks (SB-455), so the session's
+    // hooks find `node` (operator 2026-11-15: every hook failed with "node: command not found").
+    out.push_str(&crate::launch::path_export(program));
     out.push_str(&format!(
         "cd {} || exit 1\n{}",
         quote(cwd),
         quote(&program.to_string_lossy())
     ));
-    for arg in bypass {
+    for arg in bypass.iter().copied().chain(route.as_deref()) {
         out.push(' ');
         out.push_str(&quote(arg));
     }
@@ -564,16 +598,68 @@ fn append(root: &Path, line: Value) {
 }
 
 /// Restarts of one session within the window, from the journal.
+/// SB-501 (operator 2026-11-18): the journal shows this session closed as finished before; it runs
+/// again now, so the person took it up again. 35 of 118 closes in three days were of sessions the
+/// person resumed, 33 of them closed again.
+fn closed_idle_before(lines: &[Value], session: &str) -> bool {
+    lines.iter().any(|l| {
+        l["session"] == session
+            && l["action"] == "close"
+            && l["reason"] == "idle"
+            && l["phase"] != "intent"
+            && l["outcome"]
+                .as_str()
+                .is_some_and(|o| o.starts_with("closed"))
+    })
+}
+
 fn restarts(lines: &[Value], session: &str, now: i64) -> usize {
-    lines
-        .iter()
+    outcomes(lines)
         .filter(|l| {
             l["session"] == session
                 && l["action"] == "restart"
-                && l["phase"] != "intent"
                 && l["at"].as_i64().is_some_and(|t| now - t < RESTART_WINDOW)
         })
         .count()
+}
+
+/// SB-505: whether `line` is the outcome of `intent`: the same session, act and process, whatever
+/// its stamp (before 0.7.121 the two stamps could differ by the check's duration). A person's
+/// close of a copy, or another check's act on the session, settles nothing.
+fn settles(line: &Value, intent: &Value) -> bool {
+    line.get("outcome").is_some()
+        && line["session"] == intent["session"]
+        && line["action"] == intent["action"]
+        && line["pid"] == intent["pid"]
+}
+
+/// The outcome lines that record an act once (SB-505). Before 0.7.121 an intent was stamped later
+/// than its outcome, so a check longer than a second left the pair unmatched and the next check
+/// wrote a second outcome (`finished_at`) for an act already done. Such a line, written when no
+/// intent of its session was open, is not a second act.
+fn outcomes(lines: &[Value]) -> impl Iterator<Item = &Value> {
+    let mut open: Vec<&Value> = Vec::new();
+    let mut kept = Vec::new();
+    for line in lines {
+        // A dispatched run's stop names no session or process; its lines are its pass's own.
+        if line["action"] == crate::dispatch::JOURNAL_ACTION {
+            if line["phase"] != "intent" {
+                kept.push(line);
+            }
+            continue;
+        }
+        if line["phase"] == "intent" {
+            open.retain(|o| o["session"] != line["session"]);
+            open.push(line);
+            continue;
+        }
+        let had = open.iter().any(|o| settles(line, o));
+        open.retain(|o| !settles(line, o));
+        if had || line.get("finished_at").is_none() {
+            kept.push(line);
+        }
+    }
+    kept.into_iter()
 }
 
 /// `switchboard duty`: the settings, the last actions and what a check would do now.
@@ -584,27 +670,27 @@ pub fn status(root: &Path, now: i64) -> Result<Value, String> {
     // theirs: only sessions in Switchboard's own homes are looked at.
     keep_ours(root, &mut seen, crate::own_sign_in::is_off(root));
     compare_cpu(&mut seen, now, false);
+    let (children, read) = crate::session_watch::children_now(root, now);
+    count_own_launches(&mut seen, &children, read);
     let copies = newer_copies(&seen, now);
     let stopped = crate::recovery::live_stop_sessions(root, now);
+    let lines = journal(root);
     let due: Vec<Value> = seen
         .iter()
         .filter(|s| !stopped.contains(&s.session) && !monitoring(root, s, now))
         .filter_map(|s| {
-            decide(s, &set, now, copies.contains(&s.pid)).map(|(act, reason)| {
+            decide(s, &set, now, copies.contains(&s.pid))
+                .filter(|(_, reason)| *reason != "idle" || !closed_idle_before(&lines, &s.session))
+                .map(|(act, reason)| {
                 json!({"pid": s.pid, "session": s.session, "folder": s.cwd, "reason": reason, "host": s.host,
                     "action": if act == Act::Close { "close" } else { "restart" }})
             })
         })
         .collect();
-    let lines = journal(root);
     // An intent line is bookkeeping for a cut act (SB-397 W0.1); the outcome line is the act.
-    let recent: Vec<Value> = lines
-        .iter()
-        .rev()
-        .filter(|l| l["phase"] != "intent")
-        .take(20)
-        .cloned()
-        .collect();
+    // SB-505: without the second outcome an older owner wrote for one act.
+    let kept: Vec<&Value> = outcomes(&lines).collect();
+    let recent: Vec<Value> = kept.into_iter().rev().take(20).cloned().collect();
     let watched: Vec<&Seen> = seen
         .iter()
         .filter(|s| s.kind == "interactive" && !s.dashboards)
@@ -613,7 +699,7 @@ pub fn status(root: &Path, now: i64) -> Result<Value, String> {
         "settings": set,
         "check_seconds": CHECK_SECONDS,
         // SB-392 S-1: when a finished session is closed, after the wake-up floor.
-        "idle_closes_after_minutes": (i64::from(set.idle_minutes) * 60).max(WAKE_UP_FLOOR) / 60,
+        "idle_closes_after_minutes": idle_floor(&set) / 60,
         "watched": watched.len(),
         "left_to_dashboards": seen.iter().filter(|s| s.dashboards).count(),
         "waiting_for_person": watched.iter().filter(|s| s.status == "waiting").count(),
@@ -638,6 +724,14 @@ pub fn tick(root: &Path, now: i64) {
     }
 }
 
+/// SB-500: each session's running launches of its own; unknown for all when the read that names
+/// them did not see the process table.
+fn count_own_launches(seen: &mut [Seen], children: &HashMap<u32, usize>, read: bool) {
+    for s in seen {
+        s.own_launches = read.then(|| children.get(&s.pid).copied().unwrap_or(0));
+    }
+}
+
 /// One check: what is due, done (or only listed with `dry_run`).
 pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
     // R3 review: an intent is stamped when it is written, not when the check began; a slow read and
@@ -650,6 +744,9 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
     keep_ours(root, &mut seen, crate::own_sign_in::is_off(root));
     // Only the five-minute checks keep their CPU samples: a stall is measured across them.
     compare_cpu(&mut seen, now, !dry_run);
+    // SB-500: what each session launched itself and still runs, from the watch's own read.
+    let (children, read) = crate::session_watch::children_now(root, now);
+    count_own_launches(&mut seen, &children, read);
     let copies = newer_copies(&seen, now);
     // SB-396 D2: a session stopped on a limit waits for an account; its host continues it.
     let stopped = crate::recovery::live_stop_sessions(root, now);
@@ -671,6 +768,11 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
         let Some((mut act, reason)) = decide(s, &set, now, copies.contains(&s.pid)) else {
             continue;
         };
+        // SB-501: the person took a session up again after it was closed as finished: it is theirs
+        // to keep open, and never closed as finished again.
+        if reason == "idle" && closed_idle_before(&lines, &s.session) {
+            continue;
+        }
         if matches!(act, Act::Restart { .. })
             && restarts(&lines, &s.session, now) >= RESTARTS_PER_WINDOW
         {
@@ -683,6 +785,8 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
             "restart"
         };
         let prompt = matches!(act, Act::Restart { prompt: true });
+        // SB-505: one stamp for the intent and its outcome, so the pair always matches.
+        let at = now + begun.elapsed().as_secs() as i64;
         let outcome = if dry_run {
             "planned"
         } else {
@@ -690,13 +794,13 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
             // when this one is cut by a quit (a close takes up to 10.5 s, the drain 8 s).
             append(
                 root,
-                json!({"at": now + begun.elapsed().as_secs() as i64, "phase": "intent", "action": action, "reason": reason,
+                json!({"at": at, "phase": "intent", "action": action, "reason": reason,
                     "session": s.session, "folder": s.cwd, "pid": s.pid, "host": s.host,
                     "config": s.config, "prompt": prompt}),
             );
             act_on(root, s, act)
         };
-        let line = json!({"at": now, "action": action, "reason": reason, "outcome": outcome,
+        let line = json!({"at": at, "action": action, "reason": reason, "outcome": outcome,
             "session": s.session, "folder": s.cwd, "pid": s.pid, "host": s.host});
         if !dry_run {
             append(root, line.clone());
@@ -705,7 +809,7 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
                 crate::resumable::record(
                     root,
                     json!({"session": s.session, "config": s.config, "cwd": s.cwd, "reason": reason,
-                        "at": now, "by": "duty"}),
+                        "at": at, "by": "duty"}),
                 );
             }
             crate::oplog::event(
@@ -793,12 +897,11 @@ pub fn interrupted(lines: &[Value], now: i64) -> Vec<Value> {
         .iter()
         .filter(|l| l["action"] != crate::dispatch::JOURNAL_ACTION)
     {
-        let key = (line["session"].clone(), line["at"].clone());
         if line["phase"] == "intent" {
             open.retain(|o| o["session"] != line["session"]);
             open.push(line.clone());
         } else {
-            open.retain(|o| (o["session"].clone(), o["at"].clone()) != key);
+            open.retain(|o| !settles(line, o));
         }
     }
     // An intent younger than `SETTLE_SECONDS` may belong to a check still running beside this one
@@ -1044,7 +1147,7 @@ mod tests {
     #[test]
     fn an_intent_without_its_outcome_is_an_act_cut_by_a_quit() {
         let intent = |session: &str, at: i64| json!({"at": at, "phase": "intent", "action": "close", "session": session, "pid": 1});
-        let outcome = |session: &str, at: i64| json!({"at": at, "action": "close", "outcome": "closed", "session": session});
+        let outcome = |session: &str, at: i64| json!({"at": at, "action": "close", "outcome": "closed", "session": session, "pid": 1});
         let lines = vec![
             intent("S1", 100),
             outcome("S1", 100),
@@ -1143,6 +1246,7 @@ mod tests {
             command_age: None,
             cpu: Some(10.0),
             cpu_quiet: Some(true),
+            own_launches: Some(0),
         }
     }
 
@@ -1237,9 +1341,9 @@ mod tests {
             decide(&seen("waiting", 600, 9, None), &set, now, false),
             None
         );
-        // Finished: idle long and nothing of its own runs.
+        // Finished: idle long, its transcripts quiet as long, and nothing of its own runs.
         assert_eq!(
-            decide(&seen("idle", 66, 1, None), &set, now, false),
+            decide(&seen("idle", 66, 1, Some(66)), &set, now, false),
             Some((Act::Close, "idle"))
         );
         // SB-392 S-1: idle past `idle_minutes` but inside the longest wake-up a session can set
@@ -1252,7 +1356,7 @@ mod tests {
         };
         assert_eq!(decide(&seen("idle", 30, 1, None), &short, now, false), None);
         assert_eq!(
-            decide(&seen("idle", 66, 1, None), &short, now, false),
+            decide(&seen("idle", 66, 1, Some(66)), &short, now, false),
             Some((Act::Close, "idle"))
         );
         // Idle with a background task that will wake it: not finished.
@@ -1278,6 +1382,99 @@ mod tests {
         let mut print = seen("busy", 90, 9, Some(90));
         print.kind = "print".into();
         assert_eq!(decide(&print, &set, now, false), None);
+    }
+
+    #[test]
+    fn an_idle_session_whose_agents_or_launches_still_work_is_never_closed() {
+        // SB-500 (operator 2026-11-18): the Sound Engine audit read `idle` for over an hour while
+        // its background agents wrote their transcripts and the sessions it launched ran, and was
+        // closed as finished.
+        let set = Settings::default();
+        let now = 1_000_000;
+        // Its background agents wrote ten minutes ago: working.
+        assert_eq!(
+            decide(&seen("idle", 120, 3, Some(10)), &set, now, false),
+            None
+        );
+        // Written 64 minutes ago, under the wake-up floor: not quiet long enough yet.
+        assert_eq!(
+            decide(&seen("idle", 120, 3, Some(64)), &set, now, false),
+            None
+        );
+        // No transcript found: unknown is not quiet.
+        assert_eq!(decide(&seen("idle", 600, 9, None), &set, now, false), None);
+        // Two sessions it launched itself still run: working.
+        let launcher = Seen {
+            own_launches: Some(2),
+            ..seen("idle", 600, 9, Some(600))
+        };
+        assert_eq!(decide(&launcher, &set, now, false), None);
+        // The launch records could not be read: unknown is not none.
+        let unread = Seen {
+            own_launches: None,
+            ..seen("idle", 600, 9, Some(600))
+        };
+        assert_eq!(decide(&unread, &set, now, false), None);
+        // All of it quiet and done: finished.
+        assert_eq!(
+            decide(&seen("idle", 600, 9, Some(600)), &set, now, false),
+            Some((Act::Close, "idle"))
+        );
+        // A setting under the floor still waits the floor (65 minutes).
+        let low = Settings {
+            idle_minutes: 10,
+            ..set
+        };
+        assert_eq!(
+            decide(&seen("idle", 64, 1, Some(64)), &low, now, false),
+            None
+        );
+    }
+
+    #[test]
+    fn a_session_taken_up_again_after_an_idle_close_is_not_closed_as_idle_again() {
+        let lines = vec![
+            json!({"phase": "intent", "action": "close", "reason": "idle", "session": "a"}),
+            json!({"action": "close", "reason": "idle", "outcome": "closed", "session": "b"}),
+            json!({"action": "close", "reason": "idle", "outcome": "still_running", "session": "c"}),
+            json!({"action": "close", "reason": "duplicate", "outcome": "closed", "session": "d"}),
+        ];
+        assert!(
+            !closed_idle_before(&lines, "a"),
+            "an intent alone is no close"
+        );
+        assert!(closed_idle_before(&lines, "b"));
+        assert!(
+            !closed_idle_before(&lines, "c"),
+            "a close that failed closed nothing"
+        );
+        assert!(
+            !closed_idle_before(&lines, "d"),
+            "a duplicate's close says nothing of the session"
+        );
+        assert!(!closed_idle_before(&lines, "e"));
+    }
+
+    #[test]
+    fn own_launches_are_counted_per_session_and_unknown_without_the_table() {
+        let mut seen = vec![
+            Seen {
+                pid: 1,
+                own_launches: None,
+                ..seen("idle", 1, 1, None)
+            },
+            Seen {
+                pid: 2,
+                own_launches: None,
+                ..seen("idle", 1, 1, None)
+            },
+        ];
+        count_own_launches(&mut seen, &HashMap::from([(1, 3)]), true);
+        assert_eq!(seen[0].own_launches, Some(3));
+        assert_eq!(seen[1].own_launches, Some(0));
+        count_own_launches(&mut seen, &HashMap::from([(1, 3)]), false);
+        assert_eq!(seen[0].own_launches, None);
+        assert_eq!(seen[1].own_launches, None);
     }
 
     #[test]
@@ -1464,7 +1661,7 @@ mod tests {
         // SB-396 D1: `ps` failed under load; nothing says the session runs no command.
         let set = Settings::default();
         let now = 1_000_000;
-        let mut unread = seen("idle", 180, 5, None);
+        let mut unread = seen("idle", 180, 5, Some(180));
         unread.commands_known = false;
         assert_eq!(decide(&unread, &set, now, false), None);
         let mut stalled = seen("busy", 300, 6, Some(300));
@@ -1561,10 +1758,90 @@ mod tests {
         assert!(quiet.contains("'/bin/claude' --resume 's-1'\nstatus=$?"));
         // The person's tools are found (hooks run `node`), and an end by a signal closes the
         // window (status 0 for the window settings), not `exec`.
-        assert!(quiet.contains("export PATH='/bin:"));
+        assert!(quiet.contains("export PATH='/bin'\"${PATH:+:$PATH}\"':"));
         assert!(quiet.contains("/opt/homebrew/bin"));
         assert!(!quiet.contains("exec "));
         assert!(quiet.trim_end().ends_with("exit \"$status\""));
+        // SB-452: a managed home's own route comes back with the session, before `--resume`.
+        assert!(!quiet.contains("--settings"), "no route file, no route");
+        std::fs::write(home.path().join(crate::launch::ROUTE_FILE), "{}").unwrap();
+        let routed = resume_script(home.path(), &s, Path::new("/bin/claude"), &[], false);
+        let arg = format!(
+            "--settings={}",
+            home.path()
+                .join(crate::launch::ROUTE_FILE)
+                .to_string_lossy()
+        );
+        assert!(
+            routed.contains(&format!(
+                "'/bin/claude' {} --resume 's-1'",
+                fabric_sessions_core::cli::quoted(&arg)
+            )),
+            "{routed}"
+        );
+    }
+
+    #[test]
+    fn an_outcome_settles_its_intent_whatever_its_stamp() {
+        // SB-505: before 0.7.121 the intent of a check that took longer than a second was
+        // stamped later than its outcome, and the next check finished the act a second time.
+        let lines = vec![
+            json!({"at": 1003, "phase": "intent", "action": "close", "session": "S1", "pid": 1}),
+            json!({"at": 1000, "action": "close", "outcome": "closed", "session": "S1", "pid": 1}),
+        ];
+        assert!(interrupted(&lines, 2000).is_empty(), "nothing is open");
+    }
+
+    #[test]
+    fn another_line_of_the_session_does_not_settle_a_cut_act() {
+        let lines = vec![
+            json!({"at": 1000, "phase": "intent", "action": "restart", "session": "S1", "pid": 7}),
+            // The person closed a copy of the same session meanwhile.
+            json!({"at": 1001, "session": "S1", "pid": 8, "by": "person"}),
+            // Another check's close of another process of it.
+            json!({"at": 1002, "action": "close", "outcome": "closed", "session": "S1", "pid": 9}),
+        ];
+        let open = interrupted(&lines, 2000);
+        assert_eq!(open.len(), 1, "the cut restart is still finished");
+        assert_eq!(open[0]["pid"], 7);
+    }
+
+    #[test]
+    fn a_second_outcome_of_one_act_is_not_counted_as_another_restart() {
+        let lines = vec![
+            json!({"at": 103, "phase": "intent", "action": "restart", "session": "s-1", "pid": 1}),
+            json!({"at": 100, "action": "restart", "outcome": "restarted", "session": "s-1", "pid": 1}),
+            // The phantom a later check wrote before SB-505.
+            json!({"at": 103, "action": "restart", "outcome": "restarted", "session": "s-1",
+                "pid": 1, "finished_at": 200}),
+            // An act a quit really cut, finished by the next owner: counted.
+            json!({"at": 300, "phase": "intent", "action": "restart", "session": "s-1", "pid": 2}),
+            json!({"at": 300, "action": "restart", "outcome": "restarted", "session": "s-1",
+                "pid": 2, "finished_at": 400}),
+        ];
+        assert_eq!(restarts(&lines, "s-1", 500), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_act_whose_check_took_seconds_is_finished_by_no_later_check() {
+        let root = tempfile::tempdir().unwrap();
+        append(
+            root.path(),
+            json!({"at": 1004, "phase": "intent", "action": "close", "reason": "idle",
+                "session": "S1", "folder": "/w/a", "pid": 999_999_999u64, "host": "terminal",
+                "config": "/h/.claude", "prompt": false}),
+        );
+        append(
+            root.path(),
+            json!({"at": 1000, "action": "close", "reason": "idle", "outcome": "closed",
+                "session": "S1", "folder": "/w/a", "pid": 999_999_999u64, "host": "terminal"}),
+        );
+        assert!(finish_interrupted(root.path(), 1200).is_empty());
+        assert!(
+            crate::resumable::recent(root.path(), 0).is_empty(),
+            "no second resumable line"
+        );
     }
 
     #[test]
