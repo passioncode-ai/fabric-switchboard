@@ -734,10 +734,9 @@ mod tests {
     fn a_called_back_seat_stays_off_and_a_give_back_restores_how_it_was() {
         let (root, _f, store) = store_with_group();
         let schema = || {
-            let disk: serde_json::Value = serde_json::from_slice(
-                &std::fs::read(root.path().join("accounts.json")).unwrap(),
-            )
-            .unwrap();
+            let disk: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(root.path().join("accounts.json")).unwrap())
+                    .unwrap();
             disk["schema_version"].as_u64().unwrap()
         };
         let a = store
@@ -755,7 +754,11 @@ mod tests {
         let d = store.snapshot().unwrap().delegated[&a.id].clone();
         assert!(d.surrendered_at.is_some());
         assert_eq!(d.enabled_before, Some(true));
-        assert_eq!(schema(), 17, "written at 17 only while a call back is recorded");
+        assert_eq!(
+            schema(),
+            17,
+            "written at 17 only while a call back is recorded"
+        );
         assert_eq!(
             store.update_fields(&a.id, None, Some(true)).unwrap_err(),
             SURRENDERED,
