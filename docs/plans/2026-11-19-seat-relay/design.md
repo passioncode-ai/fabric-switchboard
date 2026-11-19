@@ -104,11 +104,16 @@ read as `not_registered`).
 ## 5. Pinning the other side's key
 
 Vesta lists the devices of an organization's members with their public keys, and issues signed
-membership: a statement of organization, person, role, the device's key fingerprints and an expiry,
-signed by Vesta's published key. Each side checks the other's membership statement (fetched from
-Vesta, and attached to the first envelope of a thread) offline against Vesta's key, so the seat
-mailbox cannot invent a member or an administrator. A list from a server is still a claim, so each
-side also pins:
+membership: an `org-membership/2` statement (organization, person, role, `status`, revision,
+expiry of at most 24 hours) carrying the extension `org.passioncode.ai/device` with `deviceId`,
+`sign` (Ed25519) and `enc` (X25519), signed under the organization's key set, which chains to the
+organization root. Each Switchboard pins that root at first use from Vesta
+(`GET {issuer}/fabric/membership/v1/{orgId}/root`) and refuses a changed root until the person
+confirms it. Each device presents its statement to the seat mailbox (`PUT /v1/mailbox/membership`)
+and refreshes it before it expires; the other side reads it there
+(`GET /v1/mailbox/devices/{deviceId}?org=`) and checks it offline under its own pinned root, so the
+seat mailbox cannot invent a member, an administrator or a key. Envelopes carry no statement. A
+statement from a server is still a claim about a person's device, so each side also pins:
 
 - The recipient pins the sender's device signing key at the first offer it accepts. The accept
   step shows the key's short fingerprint (eight groups of four hex digits) and the organization and
@@ -144,8 +149,8 @@ One JSON object per message, at most 64 KiB encoded (open question M3).
 
 - `kind` is one of five (section 7). The seat mailbox needs `org`, `from`, `to`, `kind`, `thread`,
   `id` and `expires_at` in clear to route, authorize and expire; everything about the seat is in
-  `ct`. The first envelope of a thread from each side also carries that side's membership
-  statement (section 5) in clear: it is signed by Vesta and holds no secret.
+  `ct`. No membership statement travels in an envelope: each side reads the other's from the
+  mailbox (section 5).
 - Encryption: HPKE (RFC 9180) base mode, DHKEM(X25519, HKDF-SHA256), HKDF-SHA256,
   ChaCha20-Poly1305, to the recipient's X25519 key. The associated data is the canonical encoding
   (RFC 8785) of every header field except `ct` and `sig`, so a header changed in transit fails to
@@ -209,8 +214,11 @@ The seat on the recipient is a DEC-0025 guest, with `sender_device` in place of 
   never moved on, handed over, given to an agent, lent, shared, marked elsewhere, made the ordinary
   sign-in or carried in a backup; only a message from the pinned sender device on its thread calls
   it back or removes it.
-- The sender submits `lease.extend` every 15 minutes, to 48 hours ahead by default (1 to 720 at
-  the offer). Past the lease, once the recipient's owner has run 15 minutes past both the lease and
+- The sender submits `lease.extend` every 15 minutes, to 48 hours ahead by default (1 to 168 at
+  the offer for a relayed seat: the mailbox drops a thread with no envelope for 7 days, so no
+  relayed lease may outlive its thread; ssh delegation between the operator's own machines keeps
+  1 to 720). Each `lease.extend` and `usage.report` expires after 1 hour unread, the mailbox's
+  maximum for them: a computer that was off reads the next one, never a stale one. Past the lease, once the recipient's owner has run 15 minutes past both the lease and
   its own start, the seat is switched off and its homes cleaned; its credential is kept; the next
   `lease.extend` turns it on again. Thirty days after the lease ended the credential is removed.
 - The recipient submits `usage.report` every 5 minutes while the seat is `active`, and at once when
@@ -263,9 +271,11 @@ program on the other computer, so nothing in this design depends on where it is 
   published, so a crash between fetch and apply fetches it again and the `id` check makes the
   second apply a no-op.
 - The fetch runs in a spawned task outside the owner transaction (as the Vesta read does today),
-  never once the drain began, and only while PassionCode.ai is connected. Vesta's device list and
-  membership statements are read at most every 6 hours (as today's organization read), at a thread's
-  first envelope, and when a check fails. The idle budget gains one
+  never once the drain began, and only while PassionCode.ai is connected. The device takes the next
+  revision of its own statement from Vesta and presents it to the mailbox 15 minutes before the one
+  in force expires (statements live at most 24 hours; the mailbox takes 12 presentations an hour);
+  the other side's statement is read from the mailbox at a thread's first envelope, before each
+  offer or recall, and when a check fails. The idle budget gains one
   HTTPS request every 15 minutes on a computer with a registered device and no thread.
 - Long-poll or server-sent events would cut the minute's delay; this design works without them
   (open question M5).
@@ -291,8 +301,19 @@ time is dropped; one whose answer was lost stays off and is never used until a `
 its thread arrives, and without one it lapses with the offer's lease and its credential is removed,
 so the sender's copy stays the only one in use.
 
-Device: the registration states of section 4; membership: `valid`, `expired`, `not_member`,
-`unknown` (Vesta not read). Inbox: `ok`, `empty` only after a fetch that worked,
+Device: the registration states of section 4; membership: `valid`, `expired`, `ended`,
+`not_member`, `unknown` (Vesta or the mailbox not read). The mailbox's refusals are kept as typed
+codes, never as an empty answer (ADR-0011 of passioncode-platform: `unknown_device`, `stale`,
+`replayed`, `invalid`, `sender_not_member`, `recipient_not_member`,
+`recipient_membership_expired`, `not_administrator`, `thread_exists`, `thread_unknown`,
+`thread_direction`, `envelope_expiry`, `envelope_signature`, `envelope_conflict`, `inbox_full`,
+`rate_limited`, `payload_too_large`). A `seat.recall` refused because the recipient's statement
+expired (the computer is off) is `recall_waiting` and tried again every 15 minutes; the lease is
+no longer extended, so the seat there lapses by itself.
+
+An administrator who loses the role can no longer extend or recall the seats it offered (the
+mailbox checks the role at every submit); those seats lapse by their lease, and the teammate can
+still give them back. Another administrator offers a new seat on a new thread. Inbox: `ok`, `empty` only after a fetch that worked,
 `unknown` after one that failed. A failed fetch never clears a seat, never ends a lease early and
 never reads as "no offers".
 
@@ -389,7 +410,16 @@ Envelopes travel through a store-and-forward channel that is not Vesta. Two cand
 | Receipts | to be built (stored, fetched, acknowledged) | submit receipts; read marks per Project |
 | Fit with DEC-0037 | an organization service outside the operator's estate | would bring a teammate's computer into the operator's estate, the kind of access DEC-0037 refuses |
 
-**Recommendation: passioncode-platform.** The board hub is the operator's agents' channel inside
+**Chosen: passioncode-platform.** It took the ask (thread 54858223, messages 870bf008 and
+9e65a34e) as its ADR-0011 "The device mailbox" (proposed, PLAT-182, passioncode-ai/passioncode-platform
+PR #248, commit e8c7c85): a device signature per request (`PC-Device`, `PC-Timestamp`, `PC-Nonce`,
+`PC-Signature` over `pc-device-request/1`, 300 s window, nonces kept 10 minutes), membership from
+Vesta's `org-membership/2` with the device extension, API v1 under `/v1/mailbox/` (`membership`,
+`devices/{id}`, `envelopes`, `inbox`, `acks`, `receipts`, `audit`), envelope `sig` checked over the
+canonical header, `ct` and `enc` never parsed, 64 KiB an envelope, 256 per inbox, 30 submits and 6
+fetches a minute per device, expiry at most 7 days (offer, recall, surrender) or 1 hour (extend,
+report), envelopes kept at most 7 days, audit 90 days, fetch only in v1 with long-poll planned.
+Why it was the recommendation: The board hub is the operator's agents' channel inside
 one estate; admitting a teammate's device there repeats, at a smaller scale, the exposure DEC-0037
 removed, and its units (Projects, threads kept as history) fit neither device-level authorization
 nor deletion at acknowledgement. The hosting backend serves organizations and their members by
@@ -425,22 +455,23 @@ For Vesta:
 
 - V1. The exact fields of the X25519 and Ed25519 write, and the scope the `switchboard` app token
   needs for it; whether one consent covers it.
-- V2. The format of the signed membership statement, its lifetime, Vesta's published verification
-  key and how that key rotates.
-- V3. Does a membership statement end, or get refused, as soon as a member leaves the organization,
-  and is a device revoked at the same time?
+- V2. The `org.passioncode.ai/device` extension on `org-membership/2` with `{deviceId, sign, enc}`,
+  addressed to `https://api.passioncode.ai`: the one thing the seat mailbox asks of Vesta (ADR-0011
+  D-2), and what this design needs (confirmed to Vesta on thread 14da4917).
+- V3. Does a statement turn `ended` as soon as a member leaves the organization, and is the device
+  revoked at the same time?
 - V4. Can the device directory be an append-only, verifiable log, so a swapped key is detectable
   beyond first-use pinning?
 
-For the seat mailbox (passioncode-platform):
+For the seat mailbox (answered by ADR-0011; the two changes this design asks are in the reply on
+thread 54858223):
 
-- M1. Request authentication: a signature by the device key per request, or a token derived from
-  Vesta's statement; how it checks Vesta's statements.
-- M2. The API (submit, fetch from a cursor, acknowledge, receipts), versioning and the error
-  vocabulary.
-- M3. The limits: envelope size, inbox size, rates.
-- M4. Audit row retention and who reads it.
-- M5. Fetch only, long-poll or server-sent events.
+- M1 to M5 are answered (D-1 to D-7). Asked changes: (a) a member device may read, through
+  `GET /v1/mailbox/devices/{deviceId}?org=`, the statement of the device that opened a thread to it,
+  not only a sender reading its recipient, since envelopes carry no statement and the recipient
+  needs the sender's `sign` and `enc` keys; (b) a `seat.recall` to a recipient whose statement
+  expired but did not end is stored and waits in its inbox (within the 7-day expiry), so a call
+  back reaches a computer that was off.
 
 ## 16. Migration from ssh delegation
 
@@ -481,7 +512,9 @@ For the seat mailbox (passioncode-platform):
 - Keys: private keys are written only through the vault (a test that greps the data folder after
   registration finds no key bytes); a changed key in the device list stops sending and receiving
   until trusted.
-- Flow against an in-process fake Vesta (directory and statements) and a fake seat mailbox: offer, accept into a chosen group, usage report, lease
+- Flow against an in-process fake Vesta (directory and statements) and a fake seat mailbox that
+  answers ADR-0011's routes and refusals (signed requests, membership presentation, 24-hour
+  statements, 1-hour extend and report expiry, thread drop after 7 days): offer, accept into a chosen group, usage report, lease
   extended, recall, surrender with the credential, provider check, account home; decline; an
   unanswered offer expires and the account comes home; a lease that lapses switches the seat off
   and the next extension turns it on; 30 days later the credential is removed.

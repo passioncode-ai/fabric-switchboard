@@ -1096,8 +1096,8 @@ research notes); the ones still in force that the board cites are seeded below w
 
 - **Date:** 2026-11-19
 - **Status:** Accepted (design: [seat relay](plans/2026-11-19-seat-relay/design.md); the build,
-  SB-575, waits on Vesta's key fields and signed membership, thread 14da4917, and on the seat
-  mailbox asked of passioncode-platform, thread 54858223)
+  SB-575, waits on Vesta's device extension on signed membership, thread 14da4917, and on the seat
+  mailbox, taken by passioncode-platform as its ADR-0011, proposed, PLAT-182, thread 54858223)
 - **Context:** DEC-0025 delegates a subscription to a teammate's computer over ssh: the operator's
   machine must reach the teammate's, so the teammate turns on Remote Login, adds a forced
   `switchboard ssh-serve` line to their `authorized_keys`, and both machines share a network, in
@@ -1129,7 +1129,8 @@ research notes); the ones still in force that the board cites are seeded below w
     (relayed in announcement de0ba93c, 2026-11-19).
   - Everything DEC-0025 promised about the seat holds over the relay: a guest in one group the
     teammate chose, never moved on, handed over, given to an agent, lent, shared or made the
-    ordinary sign-in, never in a backup; a lease of 48 hours by default (1 to 720) extended every 15
+    ordinary sign-in, never in a backup; a lease of 48 hours by default (1 to 168, within the seat
+    mailbox's 7-day thread life) extended every 15
     minutes by its sender; past it switched off with its credential kept 30 days, then removed;
     called back only by its sender, the credential coming back as the one live copy; the
     revocation against an uncooperative teammate is signing the subscription out at the provider.
