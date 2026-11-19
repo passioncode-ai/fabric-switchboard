@@ -181,7 +181,7 @@ struct Payload {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     delegated_out: BTreeMap<String, crate::DelegatedOut>,
     /// W1.2 (DEC-0027): accounts the person turned off (old account id → since when and by
-    /// whom). Kept beside `accounts` (whose rows carry no `off`) so a 0.7.117 or older reader,
+    /// whom). Kept beside `accounts` (whose rows carry no `off`) so a 0.7.123 or older reader,
     /// which refuses an unknown field inside an account, still restores them, off as before.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     off: BTreeMap<String, crate::TurnedOff>,

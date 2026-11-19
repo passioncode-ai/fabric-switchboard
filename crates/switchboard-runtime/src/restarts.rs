@@ -121,7 +121,8 @@ pub struct Facts {
     pub waiting: HashSet<String>,
     /// Session id to (launch id, what its host answered about restarting in place).
     pub hosted: HashMap<String, (String, HostOffer)>,
-    /// Sessions that cannot be resumed (folder, transcript, `claude` or home missing).
+    /// Sessions that cannot be resumed (folder, transcript, `claude` or home missing, or the home
+    /// of an account the person turned off).
     pub cannot_resume: HashSet<String>,
     pub caller: Option<String>,
 }
@@ -492,6 +493,9 @@ fn gather(root: &Path, caller_pid: Option<u32>, now: i64) -> (Vec<crate::duty::S
             program.is_none()
                 || !Path::new(&s.cwd).is_dir()
                 || !crate::resumable::transcript(&s.config, &s.cwd, &s.session).is_file()
+                // 2026-11-19 audit M5-02 (DEC-0027): never resumed in the home of an account
+                // the person turned off.
+                || crate::resumable::turned_off_home(root, &s.config).is_some()
                 || (person.as_deref() != Some(s.config.as_path())
                     && !s.config.join("launch.command").is_file())
         })

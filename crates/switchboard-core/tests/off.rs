@@ -234,3 +234,23 @@ fn turning_on_an_account_off_and_used_elsewhere_keeps_its_mark() {
     store.mark_elsewhere(&id, false, 20).unwrap();
     assert!(account(&store, &id).usable());
 }
+
+/// 2026-11-19 audit M5-03: a store with an account turned off is written at version 17, which a
+/// 0.7.123 or older reader (one that knows versions up to 16) refuses. The refusal names the
+/// version, never "corrupt", so the person reads that a newer Switchboard wrote it; shown here as
+/// this reader refuses the version after its own. The way back is restoring a backup there.
+#[test]
+fn a_reader_refuses_a_store_of_a_later_version_by_its_version() {
+    let (root, _vault, store, id) = setup();
+    store.update_fields(&id, None, Some(false)).unwrap();
+    drop(store);
+    let path = root.path().join("accounts.json");
+    let mut disk: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(disk["schema_version"], 17);
+    disk["schema_version"] = 18.into();
+    fs::write(&path, serde_json::to_vec(&disk).unwrap()).unwrap();
+    let refused = Store::open(root.path().into(), Arc::new(MemoryVault::default()))
+        .err()
+        .expect("a later version is refused");
+    assert_eq!(refused, "Unsupported account metadata version");
+}

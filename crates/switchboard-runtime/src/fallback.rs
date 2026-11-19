@@ -2221,6 +2221,70 @@ mod tests {
             vec![off("claude-code")]
         );
     }
+    /// 2026-11-19 audit M5-06: the automatic walk that SB-481 lets hand a bypassed Claude Code
+    /// workflow to Kimi Code (unattended, the executor's floor `none`) never picks a Kimi Code
+    /// account the person turned off, even the least used one, and passes over a step left with
+    /// only off accounts.
+    #[test]
+    fn an_off_kimi_account_is_never_the_unattended_walks_candidate() {
+        let kimi_account = |id: &str, off: bool| switchboard_core::kimi_accounts::KimiAccount {
+            id: id.into(),
+            label: id.into(),
+            region: "global".into(),
+            added_at: 1,
+            nickname: None,
+            tier: None,
+            off: off.then(|| switchboard_core::TurnedOff::by_person(5)),
+        };
+        let mut snapshot = Snapshot {
+            kimi_accounts: vec![kimi_account("kimi-a", true), kimi_account("kimi-b", false)],
+            ..Default::default()
+        };
+        let all = |_: &str| true;
+        // Both observed; the one turned off is the least used.
+        let used = |id: &str| if id == "kimi-a" { 5.0 } else { 60.0 };
+        let floor = executor_floor(&json!({ "provider": "claude-code" }), true);
+        assert_eq!(floor, crate::agent_catalog::Containment::None);
+        let kimi = KimiChoice {
+            ids: vec!["kimi-a".into(), "kimi-b".into()],
+            usable: &all,
+            used: &used,
+            hermes_ready: false,
+            opencode_ready: false,
+            disabled: HashSet::new(),
+            missing: HashSet::new(),
+            unattended: true,
+            floor,
+        };
+        let none = HashSet::new();
+        let walk = |snapshot: &Snapshot| {
+            resolve_with(
+                snapshot,
+                &chain(&[("kimi-code", None)]),
+                None,
+                &none,
+                &none,
+                None,
+                &kimi,
+            )
+        };
+        assert_eq!(
+            walk(&snapshot),
+            vec![Step::Run {
+                agent: "kimi-code".into(),
+                account_id: "kimi-b".into()
+            }]
+        );
+        snapshot.kimi_accounts[1].off = Some(switchboard_core::TurnedOff::by_person(6));
+        assert_eq!(
+            walk(&snapshot),
+            vec![Step::Skip {
+                agent: "kimi-code".into(),
+                reason: ACCOUNT_OFF
+            }]
+        );
+    }
+
     #[test]
     fn a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used() {
         // SB-99: no Kimi account saved reads as no usable account; then the pin, then the choice.

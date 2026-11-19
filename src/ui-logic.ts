@@ -612,6 +612,7 @@ export function dutyOutcomeText(outcome: string | undefined): string | null {
     case 'closed_no_folder': return t('closed, not reopened: its folder is gone');
     case 'closed_no_claude': return t('closed, not reopened: Claude Code was not found');
     case 'closed_not_restarted': return t('closed, not reopened: the Terminal window did not open');
+    case 'closed_account_off': return t('closed, not reopened: its account is turned off');
     default: return outcome;
   }
 }

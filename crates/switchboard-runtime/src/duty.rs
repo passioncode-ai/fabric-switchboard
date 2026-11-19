@@ -926,6 +926,11 @@ fn act_on(root: &Path, s: &Seen, act: Act) -> &'static str {
 /// The second half of a restart: the stopped session resumed as itself in a Terminal window.
 #[cfg(unix)]
 fn resume(root: &Path, session: &str, config: &Path, cwd: &str, prompt: bool) -> &'static str {
+    // 2026-11-19 audit M5-02 (DEC-0027): a session in the home of an account the person turned
+    // off is closed and never resumed there.
+    if crate::resumable::turned_off_home(root, config).is_some() {
+        return "closed_account_off";
+    }
     // Another process may hold the session by now (a host continued it): never a second copy.
     if crate::machine_sessions::live_sessions(root).contains_key(session) {
         return "closed_held_elsewhere";
@@ -1260,6 +1265,43 @@ pub(crate) fn stop(pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 2026-11-19 audit M5-02 (DEC-0027): the duty officer's restart closes a stalled session in
+    /// the home of an account the person turned off and never resumes it there.
+    #[cfg(unix)]
+    #[test]
+    fn a_restart_never_resumes_a_session_in_the_home_of_an_account_turned_off() {
+        use switchboard_core::{AuthKind, Credential, MemoryVault, Provider, Store};
+        let root = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let store = Store::open(
+            root.path().to_owned(),
+            std::sync::Arc::new(MemoryVault::default()),
+        )
+        .unwrap();
+        let account = store
+            .add(
+                "one".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                Credential::parse(
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    r#"{"claudeAiOauth":{"accessToken":"a-1","refreshToken":"r-1"}}"#,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        store.update_fields(&account.id, None, Some(false)).unwrap();
+        let home = root.path().join("homes").join(&account.id);
+        let cwd = work.path().to_string_lossy().into_owned();
+        assert_eq!(
+            resume(root.path(), "S1", &home, &cwd, true),
+            "closed_account_off"
+        );
+        assert!(!root.path().join("duty").join("S1.command").exists());
+    }
 
     #[test]
     fn an_intent_without_its_outcome_is_an_act_cut_by_a_quit() {

@@ -1914,7 +1914,7 @@ check(() => {
   }
   assert.equal(logic.dutyReasonText('martian'), 'martian', 'an unknown reason shows its code');
   for (const outcome of [undefined, 'restarted', 'closed', 'planned']) assert.equal(logic.dutyOutcomeText(outcome), null, String(outcome));
-  for (const outcome of ['still_running', 'closed_held_elsewhere', 'closed_no_folder', 'closed_no_claude', 'closed_not_restarted']) assert.ok(logic.dutyOutcomeText(outcome)?.length, outcome);
+  for (const outcome of ['still_running', 'closed_held_elsewhere', 'closed_no_folder', 'closed_no_claude', 'closed_not_restarted', 'closed_account_off']) assert.ok(logic.dutyOutcomeText(outcome)?.length, outcome);
   i18nForShell.setLocale('ru');
   assert.equal(logic.dutyReasonText('idle'), 'закончила работу и простаивала');
   i18nForShell.setLocale('en');

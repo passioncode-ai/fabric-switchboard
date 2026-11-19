@@ -2917,6 +2917,83 @@ mod usage_view_tests {
 mod views {
     use super::*;
 
+    /// 2026-11-19 audit M5-05: `availability` over the snapshot's JSON (the CLI and MCP) and
+    /// `switchboard_core::off::availability` over the snapshot answer the same for every reason,
+    /// so the two cannot drift apart unseen.
+    #[test]
+    fn availability_over_the_json_agrees_with_the_core_for_every_reason() {
+        use switchboard_core::{
+            Account, AuthKind, Delegation, Event, Provider, Snapshot, TurnedOff,
+        };
+        let account = |id: &str, enabled: bool| Account {
+            id: id.into(),
+            label: id.into(),
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            pool: "default".into(),
+            enabled,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: None,
+            off: None,
+        };
+        let seat = |ended_at: Option<i64>, surrendered_at: Option<i64>| Delegation {
+            sender_key: "key".into(),
+            from: None,
+            pool: "default".into(),
+            granted_at: 1,
+            lease_until: 2,
+            ended_at,
+            purged_at: None,
+            surrendered_at,
+        };
+        let mut s = Snapshot::default();
+        s.accounts = vec![
+            account("on", true),
+            Account {
+                off: Some(TurnedOff::by_person(5)),
+                ..account("off", false)
+            },
+            account("away", false),
+            account("lease", false),
+            account("back", false),
+            account("back-before", false),
+            account("plain", false),
+        ];
+        s.elsewhere.insert("away".into(), 3);
+        s.delegated.insert("lease".into(), seat(Some(4), None));
+        s.delegated.insert("back".into(), seat(None, Some(4)));
+        s.delegated.insert("back-before".into(), seat(None, None));
+        s.events.push(Event {
+            at: 6,
+            action: "delegation".into(),
+            account_id: Some("back-before".into()),
+            detail: "surrendered".into(),
+        });
+        let json = serde_json::to_value(&s).unwrap();
+        let mut seen: Vec<&str> = Vec::new();
+        for (a, row) in s.accounts.iter().zip(json["accounts"].as_array().unwrap()) {
+            let core = switchboard_core::off::availability(&s, a);
+            assert_eq!(availability(&json, row), core, "{}", a.id);
+            seen.push(core);
+        }
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(
+            seen,
+            [
+                "called_back",
+                "disabled",
+                "elsewhere",
+                "lease_ended",
+                "off",
+                "on"
+            ]
+        );
+    }
+
     /// SB-339: a group lists the accounts it shares from another group after its own, and a group
     /// of several organizations names its first, not personal.
     #[test]

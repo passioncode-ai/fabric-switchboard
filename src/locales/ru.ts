@@ -274,6 +274,7 @@ export const RU: Record<string, string> = {
   "closed, not reopened: another process holds it": "закрыта, не открыта заново: её держит другой процесс",
   "closed, not reopened: its folder is gone": "закрыта, не открыта заново: её папки больше нет",
   "closed, not reopened: Claude Code was not found": "закрыта, не открыта заново: Claude Code не найден",
+  "closed, not reopened: its account is turned off": "закрыта, не открыта заново: её аккаунт выключен",
   "closed, not reopened: the Terminal window did not open": "закрыта, не открыта заново: окно Terminal не открылось",
   "The duty officer is off.": "Дежурный выключен.",
   "The duty officer is on.": "Дежурный включён.",
