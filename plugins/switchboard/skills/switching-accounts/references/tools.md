@@ -13,7 +13,8 @@ names and fields call rotation. Say group and automatic switching to the person.
 
 `switchboard mcp --read-only` lists the 39 tools that only read (every tool under
 [Read tools](#read-tools)) and, since SB-517, the 13 write tools that also have a read form:
-`switchboard_capacity`, `switchboard_own_sign_in`, `switchboard_duty` (a dry run included),
+`switchboard_capacity`, `switchboard_own_sign_in`, `switchboard_boot_resume` (without `on`),
+`switchboard_duty` (a dry run included),
 `switchboard_app` (`updates` and `login_item` without `enabled`), `switchboard_analytics`,
 `switchboard_balance`, `switchboard_feed`, `switchboard_anthropic_keys`,
 `switchboard_codex_route`, `switchboard_project_sources`, `switchboard_machine_set` (`keys`, and

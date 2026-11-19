@@ -947,6 +947,7 @@ switchboard-runtime lib:switchboard_runtime headless_login::tests::a_refused_cod
 switchboard-runtime lib:switchboard_runtime headless_login::tests::stopping_ends_the_cli_and_its_group
 switchboard-runtime lib:switchboard_runtime headless_login::tests::the_manual_url_is_the_one_that_sends_the_code_to_platform_claude_com
 switchboard-runtime lib:switchboard_runtime health::tests::a_quiet_machine_is_ok_and_unknown_errors_are_never_ok
+switchboard-runtime lib:switchboard_runtime health::tests::every_area_the_report_emits_is_in_the_contracts_list
 switchboard-runtime lib:switchboard_runtime health::tests::needs_attention_crashes_and_an_error_storm_set_the_worst_state
 switchboard-runtime lib:switchboard_runtime health::tests::our_report_reads_as_valid_by_the_contracts_rules
 switchboard-runtime lib:switchboard_runtime health::tests::the_worst_state_is_the_contracts_worst

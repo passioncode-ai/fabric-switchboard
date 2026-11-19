@@ -12,6 +12,16 @@
 
 **Exact next task.** Review the `boot-resume` pull request and merge it once its gate reads EXIT 0 on the merged head; after the release, reply on thread a9844103 with DEC-0030's rule so Fabric Dashboards removes `ai.passioncode.resume-after-boot`.
 
+## 2026-11-19: release 0.7.122 (SB-549, SB-550, SB-517) and the seat for a teammate's Mac
+
+- **Objective.** The operator's orders of 2026-11-19: stale Keychain warnings in Needs attention (screenshot), one figure per account on another machine with a minute ping of each machine through its own Switchboard (screenshot), and a Claude Code seat (claude12) for a teammate's Mac, coordinated through the Appvillis PM agent and set up through Claude Code over MCP.
+- **Done (merged to main):** SB-517 MCP schema checks and read forms (#855); SB-549 Keychain refusals of an older version dropped at owner start (#860); SB-550 remote reads every minute through `remote-status`, one source per account row, Needs attention and the `machines` health check (area `connection`), DEC-0033 (#861); SB-535 and SB-547 (#859, #858, another session).
+- **Open PRs:** #836 SB-450/451/507 boot resume (round 5 found a Linux start-time P2, being fixed), then #852 SB-508/510 merges #836 and takes its `boot_resume::boot_time`; #856 SB-518 smart usage checks; #832, #829, #821.
+- **The teammate's seat:** board request a13b1d58 (thread 04f5833c) to the Appvillis PM agent; the sender is the sshlg space on the Mac Studio (signer `buTLyaEh...`, ssh key `~/.ssh/sshlg-sb-jaypr0` there). Waits on the teammate's tailnet `user@host` and Switchboard group id; then move claude12 to `studio-sshlg`, add an ssh Host alias with that key and `IdentitiesOnly`, and send it `--delegate --lease-hours 48` (docs/ORGANIZATION.md, "A teammate's computer").
+- **Decisions:** DEC-0033 (machines read every minute; a too-old remote every 15 minutes; leases every 15 minutes, a failed one after 5).
+- **Checks run:** `CARGO_BUILD_JOBS=4 ./scripts/check.sh` on the Mac Studio for each merged head; two consecutive clean review rounds per PR; the release's Nightly on the tag.
+- **Exact next task:** land #836, then #852 and #856, release 0.7.123; check `switchboard machines list` reads `call: status` for every machine once 0.7.122 runs on both sides; then W10.4 to W10.8 and SB-548, SB-519.
+
 ## 2026-11-19: SB-550, other machines read every minute through their own Switchboard, with sessions and health (DEC-0033), on branch `sb-550-remote-minute`
 
 - **Asked.** Operator, 2026-11-19, a screenshot of Accounts with a remote machine group: the bar and figure differ from the line under them, the line was drawn over the bar, tell when something does not work, and ping the remote sessions every minute through Switchboard (never the sessions themselves), on a teammate's Switchboard inside the organization too.
