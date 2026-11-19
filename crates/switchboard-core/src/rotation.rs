@@ -750,8 +750,8 @@ fn no_window_reset(account: &Account, now: i64) -> bool {
     windows.iter().all(|w| w.resets_at.is_some_and(|t| t > now))
 }
 /// The best guess at an account's usage when nothing fresh is known (SB-98): its last
-/// account-wide figure, 0 when every window it names has since reset, and 99 — last in line,
-/// still below a full account — when it was never measured.
+/// account-wide figure, 0 when every window it names has since reset, and 99 (last in line,
+/// still below a full account) when it was never measured.
 fn last_known_usage(account: &Account, now: i64) -> f64 {
     let Some(usage) = account.usage.as_ref() else {
         return 99.0;
