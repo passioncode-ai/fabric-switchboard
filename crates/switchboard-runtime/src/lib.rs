@@ -5953,12 +5953,11 @@ async fn execute(
             // SB-573: kept so a grant taken back stays listable (DEC-0187 AG-5). A failed write
             // costs the record, never the act.
             let after = store.snapshot()?.assigned_to.get(&id).cloned();
-            if after != before && (after.is_some() || before.is_some()) {
-                if access_grants::record_assignment(root, monitor::now(), &id, after.as_deref())
+            if after != before
+                && access_grants::record_assignment(root, monitor::now(), &id, after.as_deref())
                     .is_err()
-                {
-                    oplog::event("assignment_record", &[("failed", oplog::Field::Flag(true))]);
-                }
+            {
+                oplog::event("assignment_record", &[("failed", oplog::Field::Flag(true))]);
             }
             Ok(Value::Null)
         }

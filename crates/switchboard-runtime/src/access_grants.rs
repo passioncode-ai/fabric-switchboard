@@ -109,9 +109,10 @@ fn cursor_at(offset: usize) -> String {
 }
 fn offset_of(cursor: &str) -> Option<usize> {
     let digits = cursor.strip_prefix("offset:")?;
-    (digits.len() >= 8 && digits.bytes().all(|b| b.is_ascii_digit()))
-        .then(|| digits.parse().ok())
-        .flatten()
+    if digits.len() < 8 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 /// One line of `assignments.jsonl`: an account given to an agent (`assigned`, with the name the
