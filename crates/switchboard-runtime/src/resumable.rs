@@ -164,7 +164,8 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
         return Err(NO_TRANSCRIPT.into());
     }
     let program = crate::launch::find_program("claude").ok_or(NO_CLAUDE)?;
-    let bypass = crate::launch::bypass_args(root, switchboard_core::Provider::Claude, &[]);
+    // SB-515: the permission choice as Fabric Sessions asks it (D-7), the one answer it reads.
+    let bypass = crate::session_accounts::resume_flags(root);
     let mut script = crate::duty::resume_script_for(
         &config,
         &cwd,
