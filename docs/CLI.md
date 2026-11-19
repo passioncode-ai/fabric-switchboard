@@ -678,6 +678,7 @@ switchboard sessions --all    # also the ended ones (each home keeps its last la
 switchboard --json sessions   # {sessions: [...]}
 switchboard sessions --history          # every launch of the last 90 days, newest first (SB-212)
 switchboard sessions --history --limit 50 --before 1794700000   # one page; next_before starts the next
+switchboard sessions --history --launch <id> --launch <id>   # only these launches (at most 64); missing names the ids with no record (SB-423)
 switchboard sessions show LAUNCH_ID     # one launch, who launched it and where its work went
 switchboard sessions --machine          # every Claude Code and Codex process of this user, Switchboard's or not (SB-353)
 ```
@@ -965,6 +966,7 @@ an instruction to resume from arbitrary transcript text.
 
 ```sh
 switchboard recovery --json
+switchboard recovery --open --json   # SB-423: only the stops still open (waiting or claimed)
 switchboard recovery register limit-1 --session session-1 --account <id> --directory /work/project
 switchboard recovery claim limit-1 --account <candidate-id>
 switchboard recovery finish limit-1 resumed
@@ -976,7 +978,10 @@ Status separates `limited_accounts`, `waiting_sessions`, `ready_sessions` and
 `claimed_sessions`. `coverage: registered_sessions_only` and
 `source: host_reported` are part of the contract: zero registered waits is not
 proof that no external session is stopped. `limits` includes hidden-limit evidence.
-Each ready row carries its stable stop event and compatible candidates. The host
+Each ready row carries its stable stop event and compatible candidates. Each open
+stop also names its `launch_id` and that launch's `continued_as` (where its work
+went, or null). `--open` keeps only the stops still open; the counts stay those
+of every stop (SB-423). The host
 polls status, notifies the session owner, claims immediately before acting, and
 reports resumed only after observing that session continue. Child-agent state
 belongs to the host's checkpoint. No command here sends a prompt or restarts a client.

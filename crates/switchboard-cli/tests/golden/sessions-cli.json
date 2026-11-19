@@ -91,6 +91,14 @@
     },
     "stdout": null
   },
+  "recovery --open": {
+    "exit": 1,
+    "stderr": {
+      "error": "Start the desktop app or 'switchboard serve' before login or launch.",
+      "ok": false
+    },
+    "stdout": null
+  },
   "sessions": {
     "exit": 0,
     "stderr": "",
@@ -134,6 +142,48 @@
             "working_directory": "<scratch>/home/work/app"
           }
         ]
+      },
+      "ok": true
+    }
+  },
+  "sessions --history --launch": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": {
+      "data": {
+        "launches": [
+          {
+            "agent": "claude-code",
+            "context_name": null,
+            "ended": {
+              "at": "<at>",
+              "exit_code": 0,
+              "kind": "exited"
+            },
+            "ended_at": "<ended_at>",
+            "home_dir": null,
+            "home_path": null,
+            "hosted": true,
+            "in_place": true,
+            "label": null,
+            "launch_id": "golden-resume-ended",
+            "launched_at": "<launched_at>",
+            "launched_by": {
+              "surface": "dashboards"
+            },
+            "mode": "resume",
+            "provider": "claude",
+            "provider_session_id": "resumed-session",
+            "started_at": null,
+            "state": "ended",
+            "working_directory": "<scratch>/home/work/app"
+          }
+        ],
+        "missing": [
+          "no-such-launch"
+        ],
+        "next_before": null,
+        "total": 1
       },
       "ok": true
     }

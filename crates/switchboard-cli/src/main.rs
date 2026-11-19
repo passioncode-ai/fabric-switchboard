@@ -251,6 +251,11 @@ enum Command {
         /// `next_before` of the previous page.
         #[arg(long, requires = "history")]
         before: Option<i64>,
+        /// With --history: only these launches (repeat it, 1 to 64 ids), each read by its id and
+        /// no other record (no chain); an id with no record is named in `missing`.
+        #[arg(long = "launch", value_name = "LAUNCH_ID", requires = "history",
+              conflicts_with_all = ["limit", "before"])]
+        launch: Vec<String>,
         /// Every Claude Code and Codex process running for this user, Switchboard's or not: its
         /// folder, age, the launch it belongs to (or none) and how long its folder's transcripts
         /// have been quiet. Read from the process table here, without the owner.
@@ -546,7 +551,11 @@ enum Command {
         command: KimiCommand,
     },
     /// Stopped sessions and accounts ready to continue their work.
+    #[command(args_conflicts_with_subcommands = true)]
     Recovery {
+        /// Only the stops still open (waiting or claimed); the counts stay those of every stop.
+        #[arg(long)]
+        open: bool,
         #[command(subcommand)]
         command: Option<RecoveryCommand>,
     },
@@ -2546,6 +2555,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         if names_launch && !words.last().is_some_and(|id| launches::valid_id(id)) {
             return Err(launches::NO_SUCH_LAUNCH.into());
         }
+        // SB-423: the ids of `sessions --history --launch` too, and their number.
+        if let Command::Sessions { launch, .. } = &cli.command {
+            if !launch.is_empty() {
+                launches_travel(launch)?;
+            }
+        }
         let (program, data_dir) =
             switchboard_runtime::targets::program_for(&root, &target, remote, remote_data_dir);
         let ssh_args = switchboard_runtime::targets::command_ssh(
@@ -3334,7 +3349,13 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             launch_id: Some(launch_id.clone()),
             limit: None,
             before: None,
+            launch_ids: None,
         },
+        Command::Sessions {
+            history: true,
+            launch,
+            ..
+        } if !launch.is_empty() => return launches_by_id(&root, launch).await,
         Command::Sessions {
             history: true,
             limit,
@@ -3344,6 +3365,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             launch_id: None,
             limit: limit.map(usize::from),
             before: *before,
+            launch_ids: None,
         },
         Command::Sessions { all, .. } => Operation::Sessions { all: *all },
         Command::Provenance {
@@ -3588,7 +3610,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             in_place,
             ..
         } => return continue_workflow(&root, workflow_id, account, *mode, dir, *in_place).await,
-        Command::Recovery { command } => match command {
+        Command::Recovery { open, command } => match command {
+            None if *open => return Ok(open_stops(call(&root, Operation::Recovery).await?)),
             None => Operation::Recovery,
             Some(RecoveryCommand::Register {
                 event,
@@ -4318,6 +4341,72 @@ fn run_hosted(
 ) -> Result<Value, String> {
     Err("A session host runs on macOS and Linux for now.".into())
 }
+/// FD-316 (fabric-dashboards, 2026-11-17): `recovery --open` and MCP `switchboard_recovery`
+/// with `open`: only the stops still open (waiting or claimed). The answer's counts are left as
+/// the owner gave them, over every stop. Filtered here, after the owner answered, so it works with
+/// an owner of any version (`Operation` refuses fields it does not know).
+pub(crate) fn open_stops(mut status: Value) -> Value {
+    if let Some(rows) = status.get_mut("sessions").and_then(Value::as_array_mut) {
+        rows.retain(|r| matches!(r["stop"]["state"].as_str(), Some("waiting" | "claimed")));
+    }
+    status
+}
+/// SB-423 (FD-316, fabric-dashboards, 2026-11-17): `sessions --history --launch ID...` and MCP
+/// `switchboard_sessions` `{history: true, launch_ids}`: only the named launches, in the order
+/// given (a repeated id once), shaped like a history page (`launches`, `total`, `next_before`
+/// null) plus `missing`, the ids with no record. The owner reads each named record and no other
+/// (`launches::by_ids`). An owner from before `launch_ids` refuses the field
+/// (`CONTROL_OWNER_OLDER`, nothing done); it is then asked one id at a time, as `sessions show`
+/// asks it, which each reads every record for a chain, until it is restarted on this version.
+pub(crate) async fn launches_by_id(
+    root: &std::path::Path,
+    ids: &[String],
+) -> Result<Value, String> {
+    let wanted = switchboard_runtime::launches::wanted_ids(ids)?;
+    match call(
+        root,
+        Operation::Launches {
+            launch_id: None,
+            limit: None,
+            before: None,
+            launch_ids: Some(wanted.clone()),
+        },
+    )
+    .await
+    {
+        Err(e) if e == switchboard_runtime::control::CONTROL_OWNER_OLDER => {}
+        answer => return answer,
+    }
+    let (mut found, mut missing) = (Vec::new(), Vec::new());
+    for id in wanted {
+        match call(
+            root,
+            Operation::Launches {
+                launch_id: Some(id.clone()),
+                limit: None,
+                before: None,
+                launch_ids: None,
+            },
+        )
+        .await
+        {
+            Ok(mut shown) => found.push(shown["launch"].take()),
+            Err(e) if e == switchboard_runtime::launches::LAUNCH_NOT_FOUND => missing.push(id),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(json!({"launches": found, "total": found.len(), "next_before": null, "missing": missing}))
+}
+/// SB-423: the ids `sessions --history --launch --target` sends over ssh: 1 to 64, each one a
+/// launch id's characters, checked here before they reach the other machine.
+fn launches_travel(ids: &[String]) -> Result<(), String> {
+    launches::wanted_ids(ids)?;
+    if ids.iter().all(|id| launches::valid_id(id)) {
+        Ok(())
+    } else {
+        Err(launches::LAUNCH_NOT_FOUND.into())
+    }
+}
 /// SB-380: the command to run on another machine for `sessions`, `sessions end` and `attach`
 /// given `--target`: the machine, its program and data folder, the words, and whether it needs a
 /// terminal. A launch id is checked here, before it reaches the other machine.
@@ -4332,6 +4421,7 @@ fn there(command: &Command) -> Option<There> {
             history,
             limit,
             before,
+            launch,
             machine,
             tree,
             rows,
@@ -4354,6 +4444,9 @@ fn there(command: &Command) -> Option<There> {
             }
             if let Some(t) = before {
                 words.extend(["--before".to_owned(), t.to_string()]);
+            }
+            for id in launch {
+                words.extend(["--launch".to_owned(), id.clone()]);
             }
             Some((
                 target.clone(),
@@ -5335,11 +5428,21 @@ fn print_result(value: &Value, cli: &Cli) {
         }
         Command::Sessions { history: true, .. } => {
             let launches = value["launches"].as_array().cloned().unwrap_or_default();
-            if launches.is_empty() {
+            // SB-423: with --launch, the ids that have no record.
+            let missing: Vec<&str> = value["missing"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            if launches.is_empty() && missing.is_empty() {
                 println!("No launch is recorded yet.");
             }
             for l in &launches {
                 println!("{}", launch_line(l));
+            }
+            if !missing.is_empty() {
+                println!("No launch is recorded with id {}.", missing.join(", "));
             }
             let total = value["total"].as_u64().unwrap_or(0);
             if total as usize > launches.len() {
@@ -7241,5 +7344,143 @@ mod there_tests {
             .is_err(),
             "--remote needs --target"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_stops_keeps_waiting_and_claimed_and_the_counts() {
+        let status = json!({"waiting_sessions": 1, "ready_sessions": 1, "claimed_sessions": 1,
+        "sessions": [
+            {"stop": {"event": "a", "state": "waiting"}, "continued_as": null},
+            {"stop": {"event": "b", "state": "claimed"}},
+            {"stop": {"event": "c", "state": "resumed"}},
+            {"stop": {"event": "d", "state": "cancelled"}},
+        ]});
+        let open = open_stops(status);
+        let events: Vec<_> = open["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["stop"]["event"].as_str().unwrap())
+            .collect();
+        assert_eq!(events, ["a", "b"]);
+        assert_eq!(open["waiting_sessions"], 1);
+        assert_eq!(open["claimed_sessions"], 1);
+        // An answer with no list (an error shape) passes through untouched.
+        assert_eq!(open_stops(json!({"x": 1})), json!({"x": 1}));
+    }
+
+    #[test]
+    fn sessions_history_takes_repeated_launch_ids_and_refuses_them_without_history() {
+        let cli = Cli::try_parse_from([
+            "switchboard",
+            "sessions",
+            "--history",
+            "--launch",
+            "l-1",
+            "--launch",
+            "l-2",
+        ])
+        .unwrap();
+        let Command::Sessions {
+            history, launch, ..
+        } = &cli.command
+        else {
+            panic!("not sessions");
+        };
+        assert!(*history);
+        assert_eq!(launch, &["l-1", "l-2"]);
+        assert!(Cli::try_parse_from(["switchboard", "sessions", "--launch", "l-1"]).is_err());
+        assert!(Cli::try_parse_from([
+            "switchboard",
+            "sessions",
+            "--history",
+            "--launch",
+            "l-1",
+            "--limit",
+            "5",
+        ])
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn launches_by_id_refuses_none_and_too_many() {
+        let root = std::env::temp_dir().join(format!("sb-423-{}", std::process::id()));
+        assert_eq!(
+            launches_by_id(&root, &[]).await.unwrap_err(),
+            launches::LAUNCH_IDS_INVALID
+        );
+        let many: Vec<String> = (0..=launches::MAX_LAUNCH_IDS)
+            .map(|i| format!("l-{i}"))
+            .collect();
+        assert_eq!(
+            launches_by_id(&root, &many).await.unwrap_err(),
+            launches::LAUNCH_IDS_INVALID
+        );
+    }
+
+    #[test]
+    fn launch_ids_are_checked_before_they_travel() {
+        assert!(launches_travel(&["5b7f2c1e-0000-4000-8000-000000000001".into()]).is_ok());
+        assert_eq!(
+            launches_travel(&["l-1".into(), "x;rm -rf ~".into()]).unwrap_err(),
+            launches::LAUNCH_NOT_FOUND
+        );
+        let many: Vec<String> = (0..=launches::MAX_LAUNCH_IDS)
+            .map(|i| format!("l-{i}"))
+            .collect();
+        assert_eq!(
+            launches_travel(&many).unwrap_err(),
+            launches::LAUNCH_IDS_INVALID
+        );
+    }
+
+    #[test]
+    fn recovery_open_is_refused_beside_a_subcommand() {
+        assert!(Cli::try_parse_from([
+            "switchboard",
+            "recovery",
+            "--open",
+            "claim",
+            "e1",
+            "--account",
+            "a"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "switchboard",
+            "recovery",
+            "claim",
+            "e1",
+            "--account",
+            "a",
+            "--open"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn recovery_takes_open_and_its_subcommands_still_parse() {
+        let cli = Cli::try_parse_from(["switchboard", "recovery", "--open"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Recovery {
+                open: true,
+                command: None
+            }
+        ));
+        let cli = Cli::try_parse_from(["switchboard", "recovery", "claim", "e1", "--account", "a"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Recovery {
+                open: false,
+                command: Some(RecoveryCommand::Claim { .. })
+            }
+        ));
     }
 }
