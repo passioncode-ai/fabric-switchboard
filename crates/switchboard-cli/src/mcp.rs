@@ -2984,7 +2984,7 @@ mod checks {
             Err(("on".into(), "on must be true or false.".into()))
         );
         assert_eq!(
-            check(json!({"on": true, "extra": null})).unwrap_err().field,
+            check(json!({"on": true, "extra": null})).unwrap_err().0,
             "extra"
         );
         assert_eq!(
