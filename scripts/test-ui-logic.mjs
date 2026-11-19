@@ -1865,6 +1865,17 @@ check(() => {
   assert.ok(logic.attentionReasonText('keychain_too_large').startsWith("Claude Code's sign-in is too large to write to the Keychain safely"));
   assert.ok(!logic.attentionReasonText('keychain_too_large').includes('\u2014'));
   assert.ok(!logic.attentionReasonText('session_gone').includes('\u2014'));
+  // SB-510: a watchdog finding keeps its code; one this window does not know is left out.
+  const watched = logic.attentionView({ items: [
+    { reason: 'watchdog', code: 'act_unfinished', count: 2, since: 7000, action: { tool: 'switchboard_duty', window: 'open_sessions' } },
+    { reason: 'watchdog', code: 'something_new', action: { tool: 'switchboard_watchdog', window: 'open_sessions' } },
+  ] }).items;
+  assert.equal(watched.length, 1); assert.equal(watched[0].code, 'act_unfinished'); assert.equal(watched[0].since, 7000);
+  assert.equal(logic.watchdogLine('act_unfinished'), "An act of the duty officer or a board run's stop was left half done more than 10 minutes ago.");
+  assert.equal(logic.watchdogLine(undefined), logic.attentionReasonText('watchdog'));
+  for (const code of ['owner_down', 'owner_not_answering', 'owner_stopped', 'act_unfinished', 'board_run_gone', 'duplicate_session']) {
+    assert.ok(!logic.watchdogLine(code).includes('\u2014'), code);
+  }
   assert.equal(logic.dispatchStopNotice('stopped'), 'Stopped the board run.');
   assert.equal(logic.dispatchStopNotice('already_ended'), 'The board run had already ended. Its end is recorded now.');
   assert.equal(logic.dispatchStopLineText({ reason: 'deadline', folder: '/w/app' }, 'app'), 'Stopped a board run in app: it reached its deadline.');

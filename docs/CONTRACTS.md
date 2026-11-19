@@ -3632,8 +3632,8 @@ launch_id, reason: host_idle, at, by: host}`) and a restart wave's end in a Term
 (`{session, config, cwd, reason: restart, at, by: wave}`, then `reason: restart_back` once it is back). `Operation::SessionContinue {session_id}` (CLI
 `sessions continue <id>`, MCP `switchboard_session_continue`, the window's `session_continue`)
 locates the session (`resumable::locate`: the newest line with its config folder, else the launch
-record naming it as `provider_session_id`, its home or the person's Claude folder, else a limit stop
-in the person's folder) and resumes it as itself: `duty::resume_script_for` writes
+record naming it as `provider_session_id`, its home or the person's Claude folder, else the ledger of
+live sessions (SB-508, below), else a limit stop in the person's folder) and resumes it as itself: `duty::resume_script_for` writes
 `<data>/duty/continue-<id>.command` (`claude --resume <id>` in its folder, `CLAUDE_CONFIG_DIR` its
 config folder when it is not the person's, the prompt `resumable::CONTINUE_PROMPT`) and opens it in a
 Terminal window. SB-400: `--in-place` (CLI only) writes the same script and runs it in the calling
@@ -3813,6 +3813,97 @@ the item offered *Close the quiet copy* and the press was refused. Tests
 quiet copy* on the item). Tests `duty::tests::a_person_closes_the_copy_quiet_longest_and_never_a_working_one`,
 `session_watch::tests::a_copy_of_a_live_session_a_quiet_board_run_and_a_vanished_launch_are_found`,
 `attention::tests::a_copy_of_a_live_session_and_a_quiet_board_run_come_first`.
+
+## Live sessions and the watchdog (SB-508, SB-510, plan 10 §B)
+
+**The ledger of live sessions (SB-508).** A session the person started in a terminal or an editor
+has no resumable line, launch record or limit stop, so after a reboot or a crash nothing said where
+to resume it. The owner's one-minute session watch (`session_watch::tick`, its own thread) now
+keeps `<data>/live-sessions.json` (0600, `live_ledger.rs`): `{version: 1, sessions: {<session id>:
+{config, cwd, host, pid, first_seen, last_seen}}}`, one entry per Claude Code session whose
+`sessions/<pid>.json` names a live Claude Code process of the scan (`live_ledger::observed`: a valid
+session id, an absolute folder), `host` from the process's ancestors (`duty::host_of`, asked only for
+a session new to the ledger or on a new process). Written only when an entry appears or changes
+process or folder, an hour has passed since its `last_seen` (`REFRESH_SECONDS`), or an entry ages
+out: an entry is kept 7 days after it was last seen (`resumable::WINDOW_SECONDS`), at most 500
+(`KEEP`, the most recently seen). A scan that did not read the process table changes nothing; with
+the person's own sign-in off (SB-403) only sessions in Switchboard's own homes are kept. Ids, paths,
+a host word, a pid and times only: never a transcript line, a prompt or a credential.
+`resumable::locate` reads it after the resumable lines and the launch records and before a limit
+stop, so `sessions continue <id>` (and every continuation that goes through `locate`) resumes such
+a session as itself; `continue_as`'s refusals are unchanged (a live process, a folder or a transcript
+gone). Tests `live_ledger::tests::*`,
+`resumable::tests::a_session_nobody_closed_or_launched_is_found_in_the_live_ledger`.
+
+**First sighting of a watch finding.** Each finding the watch keeps in `session-watch.json` carries
+`first_seen` (Unix seconds), carried from the kept file by its key, else the pass's time
+(`session_watch::stamp_first_seen`); the answers of `sessions --tree` and Needs attention are
+unchanged. Test `session_watch::tests::a_finding_keeps_its_first_sighting_and_only_claude_code_pids_are_live_sessions`.
+
+**The watchdog (SB-510).** `switchboard watchdog --once` (`watchdog::once`) needs no owner and takes
+no store lock. It reads `owner-run.json` (`bugs::last_run`) and probes the owner
+(`control::probe`: `control.json`, its pid, then the identity exchange of `/v1/hello` only, all
+within `control::PROBE_SECONDS`, 5; never an operation): `owner` is `answers`, `starting` (its run
+record is not clean, its process runs, it started under 2 minutes ago and has no port yet),
+`stopped` (it ended through its drain, or never wrote a run record), `down` (not clean, its process
+gone: a crash) or `not_answering` (its process runs or its port took the connection, and it did not
+prove itself in time; also an unreadable descriptor). It reads `duty.jsonl` (`duty::journal`): an
+intent with no outcome at least 10 minutes (`ACT_SECONDS`) and less than a day old is an act left
+half done (`watchdog::unfinished_acts`: the duty officer's by session, settled as `duty::settles`
+settles them, a dispatched run's stop by `launch_id`; a newer intent of the same session or launch
+stands for the older one). While the owner answers it also reads `session-watch.json`: a dispatched
+run `gone` for 30 minutes (`GONE_SECONDS`) and a `duplicate` for 15 (`DUPLICATE_SECONDS`), each by
+its `first_seen`, else the file's `at`; a gone launch that is not a dispatched run is history, as in
+Needs attention, and is not counted. The answer is written to `<data>/watchdog.json` (0600, each
+run): `{version: 1, checked_at, checked_by, owner, owner_version, findings: [{code, severity, count,
+ids, first_seen}]}`, codes `owner_down` and `owner_not_answering` (`severity: fail`),
+`owner_stopped`, `act_unfinished`, `board_run_gone`, `duplicate_session` (`warn`); an owner
+finding keeps the `first_seen` of the previous report. Off (`<data>/watchdog` holds `off`), or over
+a data folder with neither `owner-run.json` nor `control.json`, a run writes nothing and answers
+`{checked: false, reason: off | no_owner_record}`. It never acts and sends nothing: an agent relays
+what it says.
+
+**Readers.** `watchdog::current(root, now, owner_running)` answers the findings of a report no older
+than 15 minutes (`STALE_SECONDS`), without the owner codes when the reader is the running owner;
+`None` when the watchdog is off, never ran or is stale. Needs attention (`attention::Inputs.watchdog`)
+lists one item per finding, first, `reason: watchdog` with `code`, `count`, `ids`, `since` (its
+`first_seen`), `severity` and a fixed sentence (`WATCHDOG_*` in `attention.rs`); `action` is
+`switchboard_status`/`none` for the owner codes (seen only offline), `switchboard_duty`/`open_sessions`
+for an act and `switchboard_sessions`/`open_sessions` for a gone run or a duplicate. The window keeps
+an item only for a code it knows (`ui-logic.ts` `WATCHDOG_CODES`, `watchdogLine`). The
+`agent-health/1` report adds the check `watchdog` (area `lifecycle`): `unknown` when `current` is
+`None`, `ok` with no findings, `fail` when one has `severity: fail`, else `warn`; `count` the
+findings, `fix` `switchboard_watchdog`; no id leaves. Tests `watchdog::tests::*`,
+`control::tests::the_watchdogs_probe_tells_an_answering_owner_from_a_gone_or_silent_one`,
+`attention::tests::the_watchdogs_findings_come_first_one_item_per_code`,
+`health::tests::the_watchdogs_findings_set_its_check_and_no_report_is_unknown`.
+
+**The switch and the job.** `Operation::Watchdog {on?, run}` (answered outside the store
+transaction; CLI `watchdog`, `watchdog on|off`; MCP `switchboard_watchdog {on?, run?}`) sets
+`<data>/watchdog` (0600) and answers `watchdog::status`: `{on, job, interval_seconds, report,
+current, job_change}`; `run: true` (MCP only) also runs one check and answers it as `run`. The job is
+`watchdog_job.rs`: on macOS the LaunchAgent `~/Library/LaunchAgents/ai.passioncode.fabric-switchboard.watchdog.plist`
+(label `ai.passioncode.fabric-switchboard.watchdog`, `ProgramArguments` the CLI, `watchdog`,
+`--once`, `StartInterval` 300, `RunAtLoad`, `ProcessType Background`, output to `/dev/null`),
+loaded with `launchctl bootstrap gui/<uid>` after a `bootout` of an earlier copy; on Linux the
+systemd user units `~/.config/systemd/user/fabric-switchboard-watchdog.service` (oneshot, the CLI
+quoted for systemd) and `.timer` (`OnBootSec` and `OnUnitActiveSec` 300 s), `daemon-reload` and
+`enable --now`. Unchanged files that are loaded (`launchctl print`, `systemctl --user is-active`)
+are left alone. Windows has no job yet (`unsupported`, backlog SB-531). Only the installed app's owner
+puts it in place, at its start (`Runtime::enable_watchdog`: the app's own data folder
+(`shell::install::is_default_root`), an app in `/Applications` or `~/Applications` on macOS, the CLI
+`shell::install::hook_cli` finds), and only from an installed build (`src-tauri/src/main.rs`, as
+the terminal hook); never `serve`, a development build, another `--data-dir` or a test (tests pass a
+`watchdog_job::Host` with a temporary home and a recording runner). With the switch off the same
+start takes the job out; `watchdog off` takes it out at once (through the owner's host, else, for the
+app's own data folder, this process's home); `watchdog on` without an installed owner answers
+`job_change: not_installed_here` and the app's next start installs it. `switchboard uninstall`
+removes it for the app's own data folder (`Places.remove_watchdog`) and lists `watchdog`,
+`watchdog.json` and `live-sessions.json` among its own entries. Log event `watchdog_job` (`outcome`:
+`installed`, `unchanged`, `removed`, `absent`, `failed`, `unsupported`, `no_program`,
+`not_installed_here`) and `watchdog` (`on`). Tests `watchdog_job::tests::*`,
+`owner_tests::the_watchdog_job_is_never_installed_from_another_data_folder`,
+`uninstall::tests::the_watchdogs_job_and_files_go_and_a_failure_is_reported_not_fatal`.
 
 ## Pay-per-token group (SB-401, DEC-0023)
 

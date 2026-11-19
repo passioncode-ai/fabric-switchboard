@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A session you started yourself in a terminal or an editor can now be continued as itself after a reboot or a crash (SB-508). Switchboard keeps a ledger of every live Claude Code session it sees, with its Claude folder and working folder, for a week, and `switchboard sessions continue <id>` reads it when no other record names the session. The ledger holds ids, folders and times, never what a session wrote.
+- A watchdog apart from Switchboard now checks on it every five minutes (SB-510): that Switchboard answers, that no act of the duty officer was left half done for 10 minutes, that no board run has been gone for 30 and no session has run in two processes for 15. It only reports, in Needs attention and in the health report (check `watchdog`); it never acts and sends nothing. The installed app puts it in place on macOS (a LaunchAgent, Switchboard's first own launchd label) and on Linux (a systemd user timer); `switchboard watchdog off` takes it out, and `switchboard uninstall` removes it. Windows gets it later.
 - The session duty officer now records each act once (SB-505). Before, when its check took longer than a second, the next check finished the same act again: it wrote a second close, offered a closed session twice in Continue, counted a restart twice, and could open a second resume window for a restarted session.
 
 ## 0.7.120
