@@ -89,6 +89,8 @@ export const nativeAdapter: Adapter = {
   sessionAttach: (launchId, target) => invoke('session_attach', { launchId, target: target ?? null }),
   sessionEnd: (launchId, target) => invoke('session_end', { launchId, target: target ?? null }),
   sessionContinue: (sessionId) => invoke('session_continue', { sessionId }),
+  sessionTerminal: (folder, target) => invoke('session_terminal', { folder, target: target ?? null }),
+  fabricLink: (kind, options) => invoke('fabric_link', { kind, folder: options.folder ?? null, runner: options.runner ?? null, session: options.session ?? null }),
   sessionsRestartPlan: () => readWithDeadline(invoke('sessions_restart_plan')),
   sessionsRestartApply: (digest, reason) => invoke('sessions_restart_apply', { digest, reason }),
   sessionsRestartStatus: () => readWithDeadline(invoke('sessions_restart_status')),
@@ -341,6 +343,13 @@ const safeErrors = new Set([
   'PassionCode.ai is already waiting for your browser.',
   'The PassionCode.ai connection could not be read. Disconnect and connect again.',
   'The browser could not be opened.',
+  // SB-580: the Sessions page hands sessions to Fabric and opens a terminal in their folder.
+  "This folder's name cannot name a Fabric project: use letters, digits, dots, dashes, underscores or colons.",
+  'This session has no id Fabric can open.',
+  'That agent is not one Fabric can start.',
+  'The session\'s folder is not known, so no terminal can open in it.',
+  'Fabric could not be opened. Check that Fabric is installed.',
+  "Opening a terminal in a session's folder works on macOS and Linux for now.",
   // A group's organization (SB-109). DEC-0022 (SB-403): an organization refuses no placement.
   'Name organizations to add with also, or every context with organization or organizations, not both.',
   "This account is in use on another machine. Use one of this machine's accounts, or clear the mark if it moved here.",

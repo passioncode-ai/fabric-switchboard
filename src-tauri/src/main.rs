@@ -1056,6 +1056,43 @@ async fn session_attach(
         .execute(Operation::SessionAttach { launch_id, target })
         .await
 }
+/// SB-580: *Open terminal* on a session's row: a shell in its folder, here or on `target`.
+#[tauri::command]
+async fn session_terminal(
+    folder: String,
+    target: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SessionTerminal { folder, target })
+        .await
+}
+/// SB-580: *New session*, *Open in Fabric* and the session's view in Fabric, through
+/// `fabric-session-links/1`: the link is built and checked here, never in the window, and Fabric
+/// asks the person before it starts or moves anything.
+#[tauri::command]
+fn fabric_link(
+    kind: switchboard_runtime::fabric_links::Kind,
+    folder: Option<String>,
+    runner: Option<String>,
+    session: Option<String>,
+) -> Result<Value, String> {
+    use switchboard_runtime::fabric_links as links;
+    let project = folder.as_deref().and_then(links::project_of);
+    if folder.is_some() && project.is_none() {
+        return Err(links::PROJECT_INVALID.into());
+    }
+    let url = links::link(
+        kind,
+        project.as_deref(),
+        runner.as_deref(),
+        session.as_deref(),
+    )?;
+    links::open(&url)?;
+    Ok(json!({ "opened": url }))
+}
 /// SB-396: *Continue* a session that ended, as that same session.
 #[tauri::command]
 async fn session_continue(session_id: String, state: State<'_, Slot>) -> Result<Value, String> {
@@ -2283,6 +2320,8 @@ fn main() {
             session_tree,
             session_rows,
             session_attach,
+            session_terminal,
+            fabric_link,
             session_end,
             session_continue,
             sessions_restart_plan,

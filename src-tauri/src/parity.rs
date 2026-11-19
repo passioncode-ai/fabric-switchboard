@@ -139,6 +139,17 @@ const PARITY: &[(&str, Over)] = &[
         // session's output itself (`switchboard attach`, `sessions --rows`).
         Not("the window opens a Terminal for the person to watch a session; an agent has nothing to look at"),
     ),
+    (
+        "session_terminal",
+        // SB-580: a Terminal window for the person to type in; an agent runs its commands itself.
+        Not("the window opens a Terminal in a session's folder for the person to type in; an agent runs its own commands"),
+    ),
+    (
+        "fabric_link",
+        // SB-580: a fabric:// link opens a view in Fabric for the person to press; an agent starts
+        // or moves a session through Fabric's own tools (fabric-session-links/1, point 5).
+        Not("a fabric:// link opens a view in Fabric for the person to press; an agent uses Fabric's own session tools"),
+    ),
     ("session_close_copy", Tool("switchboard_session_close_copy")),
     ("dispatch_stop", Tool("switchboard_dispatch_stop")),
     ("report_problem", Not(UI_ONLY)),

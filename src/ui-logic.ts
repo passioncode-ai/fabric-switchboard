@@ -2410,6 +2410,15 @@ export function machineReadText(status: MachineReadStatus): string {
 
 /** SB-395: a row's state colour follows its own state, not its group: working is ok, a stop or a
  * second copy asks for a look, a process gone without an end is a fault, the rest is quiet. */
+/** SB-580 (`fabric-session-links/1`): what a session row offers besides Switchboard's own acts.
+ * *Open terminal* needs the row's folder (here, or over ssh on its machine). Fabric reads this
+ * computer's Claude Code sessions only, so *Open* (Fabric's view of it, for a session no host of
+ * Switchboard holds) and *Open in Fabric* (continue there) are offered for a Claude Code session
+ * here that has an id; a hosted one opens here instead. */
+export function sessionLinkActs(row: { agent: string | null; folder: string | null; session_id: string | null; acts: readonly string[] }, target: string | null): { open: boolean; terminal: boolean; fabric: boolean } {
+  const fabric = !target && row.agent === 'claude-code' && !!row.session_id && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(row.session_id);
+  return { open: fabric && !row.acts.includes('attach'), terminal: !!row.folder && row.folder.startsWith('/'), fabric };
+}
 export function sessionTone(why: string): 'ok' | 'warn' | 'danger' | 'muted' {
   switch (why) {
     case 'working': return 'ok';

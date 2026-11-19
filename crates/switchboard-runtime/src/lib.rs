@@ -31,6 +31,7 @@ pub mod errors;
 pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
+pub mod fabric_links;
 mod fallback;
 pub(crate) mod feed;
 pub mod github;
@@ -70,6 +71,7 @@ pub mod remote_usage;
 pub mod restarts;
 pub mod resumable;
 pub mod roots;
+mod rows_share;
 pub mod seats;
 pub mod self_update;
 pub mod serve_update;
@@ -477,6 +479,13 @@ pub enum Operation {
     /// SB-395: opens a hosted session in a Terminal window of its own, here or on `target`.
     SessionAttach {
         launch_id: String,
+        #[serde(default)]
+        target: Option<String>,
+    },
+    /// SB-580: *Open terminal* on a session's row: a Terminal window with the person's login
+    /// shell in `folder`, here or on `target` through `ssh -t`.
+    SessionTerminal {
+        folder: String,
         #[serde(default)]
         target: Option<String>,
     },
@@ -1754,6 +1763,7 @@ impl Runtime {
                 // SB-395: the same, plus one ssh read per other machine.
                 | Operation::SessionRowsEverywhere
                 | Operation::SessionAttach { .. }
+                | Operation::SessionTerminal { .. }
                 | Operation::SessionEnd { .. }
                 | Operation::SessionContinue { .. }
                 // SB-397 R1: the process table, session files and its own small records.
@@ -5056,6 +5066,9 @@ fn take_turn_wait() -> std::time::Duration {
 /// The refusal of an operation that needs the owner when none runs.
 pub const NEEDS_OWNER: &str =
     "Start the desktop app or 'switchboard serve' before login or launch.";
+/// SB-580: *Open terminal* writes a shell script for Terminal; Windows has none yet.
+pub const TERMINAL_UNSUPPORTED: &str =
+    "Opening a terminal in a session's folder works on macOS and Linux for now.";
 /// A restart wave is run by the owner's session watch; without one nothing would act on it.
 pub const RESTART_NEEDS_OWNER: &str =
     "Start the desktop app or 'switchboard serve' first: the restart wave runs in it.";
@@ -6693,6 +6706,8 @@ async fn execute(
             Ok(json!({"launch_id": launch_id, "recorded": recorded}))
         }
         Operation::DispatchStop { launch_id, if_gone } => {
+            // SB-580: the Sessions list read before this act no longer holds.
+            rows_share::changed();
             let analytics = runtime.and_then(Runtime::analytics);
             if if_gone {
                 return dispatch::record_gone(
@@ -7240,11 +7255,33 @@ async fn execute(
             blocking::run(move || launch::open_terminal(&folder, &script))?;
             Ok(json!({"opened": launch_id, "target": target}))
         }
+        Operation::SessionTerminal { folder, target } => {
+            if cfg!(windows) {
+                return Err(TERMINAL_UNSUPPORTED.into());
+            }
+            if target
+                .as_deref()
+                .is_some_and(|t| !account_send::target_valid(t))
+            {
+                return Err(account_send::TARGET_INVALID.into());
+            }
+            // Here, a folder that is gone opens nothing; another machine's folder is its own.
+            if target.is_none() && !std::path::Path::new(&folder).is_dir() {
+                return Err(fabric_links::FOLDER_INVALID.into());
+            }
+            let script = fabric_links::terminal_script(&folder, target.as_deref())?;
+            let home = root.join("open");
+            std::fs::create_dir_all(&home).map_err(|_| session_rows::NO_CLI)?;
+            blocking::run(move || launch::open_terminal(&home, &script))?;
+            Ok(json!({"opened": folder, "target": target}))
+        }
         Operation::SessionContinue {
             session_id,
             in_place,
             hosted,
         } => {
+            // SB-580: the Sessions list read before this act no longer holds.
+            rows_share::changed();
             let root = root.to_owned();
             // Read here: the task's launch scope does not reach the blocking thread.
             let by = launches::current_by();
@@ -7264,6 +7301,8 @@ async fn execute(
             reason,
             caller_pid,
         } => {
+            // SB-580: the Sessions list read before this act no longer holds.
+            rows_share::changed();
             // Only the owner's one-minute watch moves a wave on: offline, a wave written now
             // would restart nothing and keep the duty officer off its sessions for a day
             // (review of 2026-11-16, defect 7). Planning, status and cancel stay offline.
@@ -7278,10 +7317,14 @@ async fn execute(
             blocking::run(move || restarts::status(&root, wave.as_deref(), monitor::now()))
         }
         Operation::SessionsRestartCancel { wave } => {
+            // SB-580: the Sessions list read before this act no longer holds.
+            rows_share::changed();
             let root = root.to_owned();
             blocking::run(move || restarts::cancel(&root, &wave, monitor::now()))
         }
         Operation::SessionEnd { launch_id, target } => {
+            // SB-580: the Sessions list read before this act no longer holds.
+            rows_share::changed();
             if !launches::valid_id(&launch_id) {
                 return Err(launches::LAUNCH_NOT_FOUND.into());
             }
@@ -7318,76 +7361,83 @@ async fn execute(
             })
         }
         Operation::SessionRows => {
-            let snapshot = store.snapshot()?;
-            let recovery = Box::pin(execute(store.clone(), root, runtime, Operation::Recovery))
-                .await
-                .unwrap_or(Value::Null);
-            let labels: HashMap<String, String> = snapshot
-                .accounts
-                .iter()
-                .map(|a| (a.id.clone(), a.label.clone()))
-                .chain(
-                    snapshot
-                        .kimi_accounts
-                        .iter()
-                        .map(|k| (k.id.clone(), k.label.clone())),
-                )
-                .collect();
-            let root = root.to_owned();
-            Ok(blocking::run(move || {
-                let tree = session_watch::tree(&root, session_watch::now());
-                let mut attachable: HashSet<String> = launch::sessions(&root, false)
-                    .into_iter()
-                    .filter(|s| s["attachable"] == true)
-                    .filter_map(|s| s["launch_id"].as_str().map(str::to_owned))
+            rows_share::shared(root, async {
+                let snapshot = store.snapshot()?;
+                let recovery = Box::pin(execute(store.clone(), root, runtime, Operation::Recovery))
+                    .await
+                    .unwrap_or(Value::Null);
+                let labels: HashMap<String, String> = snapshot
+                    .accounts
+                    .iter()
+                    .map(|a| (a.id.clone(), a.label.clone()))
+                    .chain(
+                        snapshot
+                            .kimi_accounts
+                            .iter()
+                            .map(|k| (k.id.clone(), k.label.clone())),
+                    )
                     .collect();
-                // SB-400: a hosted continue has no home; its host says it runs (R4 review).
-                #[cfg(unix)]
-                attachable.extend(
-                    session_host::live_hosts(&root)
+                let root = root.to_owned();
+                Ok(blocking::run(move || {
+                    let tree = session_watch::tree(&root, session_watch::now());
+                    let mut attachable: HashSet<String> = launch::sessions(&root, false)
                         .into_iter()
-                        .map(|(id, _)| id),
-                );
-                let now = session_watch::now();
-                let mut resumable = resumable::recent(&root, now - resumable::WINDOW_SECONDS);
-                // SB-508: a session the person started that ended outside Switchboard in the
-                // last day, from the ledger; only when the process table was read, so a live
-                // session is never listed as ended (review round 3 of PR #852). One Switchboard
-                // closed on purpose keeps its own line. The newest line of a session wins.
-                if session_watch::table_read(&tree) {
-                    let since = now - session_watch::WINDOW_SECONDS;
-                    let closed =
-                        session_watch::closed_on_purpose(&resumable, &duty::journal(&root), since);
-                    // A session a Switchboard launch or boot resume names has its own line and
-                    // its own continuation (SB-509, SB-450).
-                    let mut launched: HashSet<String> = tree["launches"]
+                        .filter(|s| s["attachable"] == true)
+                        .filter_map(|s| s["launch_id"].as_str().map(str::to_owned))
+                        .collect();
+                    // SB-400: a hosted continue has no home; its host says it runs (R4 review).
+                    #[cfg(unix)]
+                    attachable.extend(
+                        session_host::live_hosts(&root)
+                            .into_iter()
+                            .map(|(id, _)| id),
+                    );
+                    let now = session_watch::now();
+                    let mut resumable = resumable::recent(&root, now - resumable::WINDOW_SECONDS);
+                    // SB-508: a session the person started that ended outside Switchboard in the
+                    // last day, from the ledger; only when the process table was read, so a live
+                    // session is never listed as ended (review round 3 of PR #852). One Switchboard
+                    // closed on purpose keeps its own line. The newest line of a session wins.
+                    if session_watch::table_read(&tree) {
+                        let since = now - session_watch::WINDOW_SECONDS;
+                        let closed = session_watch::closed_on_purpose(
+                            &resumable,
+                            &duty::journal(&root),
+                            since,
+                        );
+                        // A session a Switchboard launch or boot resume names has its own line and
+                        // its own continuation (SB-509, SB-450).
+                        let mut launched: HashSet<String> = tree["launches"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|l| l["session_id"].as_str().map(str::to_owned))
+                            .collect();
+                        launched.extend(boot_resume::named_this_boot(&root));
+                        resumable.extend(live_ledger::ended_rows(&root, now, &closed, &launched));
+                        resumable.sort_by_key(|r| std::cmp::Reverse(r["at"].as_i64().unwrap_or(0)));
+                    }
+                    let monitors: HashMap<String, Value> = tree["live"]
                         .as_array()
                         .into_iter()
                         .flatten()
-                        .filter_map(|l| l["session_id"].as_str().map(str::to_owned))
+                        .filter_map(|l| l["session_id"].as_str())
+                        .filter_map(|id| {
+                            monitors::shown(&monitors::read(&root, id), now)
+                                .map(|w| (id.to_owned(), w))
+                        })
                         .collect();
-                    launched.extend(boot_resume::named_this_boot(&root));
-                    resumable.extend(live_ledger::ended_rows(&root, now, &closed, &launched));
-                    resumable.sort_by_key(|r| std::cmp::Reverse(r["at"].as_i64().unwrap_or(0)));
-                }
-                let monitors: HashMap<String, Value> = tree["live"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|l| l["session_id"].as_str())
-                    .filter_map(|id| {
-                        monitors::shown(&monitors::read(&root, id), now).map(|w| (id.to_owned(), w))
+                    session_rows::build(&session_rows::Sources {
+                        tree: &tree,
+                        recovery: &recovery,
+                        labels: &labels,
+                        attachable: &attachable,
+                        resumable: &resumable,
+                        monitors: &monitors,
                     })
-                    .collect();
-                session_rows::build(&session_rows::Sources {
-                    tree: &tree,
-                    recovery: &recovery,
-                    labels: &labels,
-                    attachable: &attachable,
-                    resumable: &resumable,
-                    monitors: &monitors,
-                })
-            }))
+                }))
+            })
+            .await
         }
         Operation::Capacity {
             cap,
@@ -7472,6 +7522,8 @@ async fn execute(
             })
         }
         Operation::SessionCloseCopy { session_id, pid } => {
+            // SB-580: the Sessions list read before this act no longer holds.
+            rows_share::changed();
             let root = root.to_owned();
             blocking::run(move || duty::close_copy(&root, &session_id, pid, session_watch::now()))
         }
