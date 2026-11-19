@@ -790,9 +790,13 @@ fn launch_with(
     private_dir(&session)?;
     // SB-99: one `kimi` per account folder — a second one would share its rotating login.
     let mut reservation = Reservation::new(&session).map_err(|_| KIMI_SESSION_RUNNING)?;
+    // SB-515: Kimi runs in its Never Ask mode unless the person chose `ask`.
+    let mut args: Vec<String> = Vec::new();
+    crate::launch::with_full_access(root, "kimi-code", &mut args, &mut env);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let path = write_launch_script(
         &session,
-        &script(&session, program, &[], &env, false, &folder),
+        &script(&session, program, &args, &env, false, &folder),
     )?;
     let record = json!({
         "account_id": id, "provider": "kimi", "pool": "default", "context": context,
@@ -879,8 +883,8 @@ fn continuation_preflight_with(
 
 /// Continues an Observatory workflow on a saved Kimi account (SB-99, operator decision
 /// 2026-10-12): Terminal runs the first turn as `kimi -p <prompt>` — it accepts the handoff and
-/// works, and Kimi 2.1.1 asks for no approval in that mode (measured) — then `kimi -c` resumes the
-/// same session interactively in the same folder.
+/// works — then `kimi -c` resumes the same session interactively in the same folder. Both run
+/// with `--auto` (Never Ask) unless the person chose `ask` (SB-515).
 pub fn launch_continuation(
     root: &Path,
     store: &Store,
@@ -944,16 +948,16 @@ fn launch_continuation_with(
         let launch_id = crate::launches::new_id();
         env.insert(crate::launches::ENV.into(), launch_id.clone());
         let first = crate::continuation::prompt(continuation);
+        // SB-515: both turns run in Kimi's Never Ask mode unless the person chose `ask`.
+        let mut access: Vec<String> = Vec::new();
+        crate::launch::with_full_access(root, "kimi-code", &mut access, &mut env);
+        let mut first_turn = vec!["-p", first.as_str()];
+        let mut then = vec!["-c"];
+        first_turn.extend(access.iter().map(String::as_str));
+        then.extend(access.iter().map(String::as_str));
         let path = write_launch_script(
             &session,
-            &crate::launch::script_then(
-                &session,
-                program,
-                &["-p", first.as_str()],
-                &["-c"],
-                &env,
-                &folder,
-            ),
+            &crate::launch::script_then(&session, program, &first_turn, &then, &env, &folder),
         )?;
         let record = json!({
             "account_id": id, "provider": "kimi", "pool": "default", "context": context,
@@ -1544,6 +1548,82 @@ mod tests {
             fs::read_to_string(home.join("mcp.json")).unwrap(),
             "not json"
         );
+    }
+
+    /// SB-515: Kimi Code runs in its Never Ask mode (`--auto`), an interactive launch and both
+    /// turns of a hand-over alike, unless the person chose `ask`.
+    #[cfg(unix)]
+    #[test]
+    fn kimi_runs_with_full_access_unless_the_person_chose_ask() {
+        let resumed = crate::continuation::Continuation {
+            workflow_id: "wf_0123456789abcdef".into(),
+            handoff_id: "hf_0123456789abcdef".into(),
+            observatory: crate::continuation::McpServer {
+                command: "/usr/bin/python3".into(),
+                args: vec!["/opt/observatory/mcp/server.py".into()],
+            },
+            previous_provider: Some("claude".into()),
+        };
+        for ask in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("data");
+            fs::create_dir(&root).unwrap();
+            if ask {
+                crate::agent_settings::set_permissions(&root, crate::agent_settings::ASK).unwrap();
+            }
+            let store = store(&root);
+            let folder = tempfile::tempdir().unwrap();
+            let (a, b) = (Uuid::new_v4().to_string(), Uuid::new_v4().to_string());
+            for id in [&a, &b] {
+                store
+                    .add_kimi_account(id, "Work", "mainland-cn", None, None)
+                    .unwrap();
+                let home = home(&root, id).unwrap();
+                fs::create_dir_all(&home).unwrap();
+                signed_in(&home, "kimi-code.json", "synthetic-access", NOW);
+            }
+            let program = Path::new("/opt/kimi");
+            launch_with(&root, &store, &a, folder.path(), program, started).unwrap();
+            launch_continuation_with(
+                &root,
+                &store,
+                &b,
+                folder.path(),
+                &resumed,
+                program,
+                started,
+                Handed::Caller,
+            )
+            .unwrap();
+            let read = |id: &str| {
+                fs::read_to_string(
+                    homes(&root)
+                        .join("sessions")
+                        .join(id)
+                        .join("launch.command"),
+                )
+                .unwrap()
+            };
+            let (interactive, continued) = (read(&a), read(&b));
+            if ask {
+                assert!(!interactive.contains("--auto"), "{interactive}");
+                assert!(!continued.contains("--auto"), "{continued}");
+                assert!(
+                    interactive.contains("\nexec '/opt/kimi'\n"),
+                    "{interactive}"
+                );
+            } else {
+                assert!(
+                    interactive.contains("\nexec '/opt/kimi' '--auto'\n"),
+                    "{interactive}"
+                );
+                assert!(continued.contains("' '--auto'; then"), "{continued}");
+                assert!(
+                    continued.contains("\nexec '/opt/kimi' '-c' '--auto'\n"),
+                    "{continued}"
+                );
+            }
+        }
     }
 
     #[cfg(unix)]
