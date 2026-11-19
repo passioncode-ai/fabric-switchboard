@@ -2,6 +2,14 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-19: release 0.7.124 (carries 0.7.123; SB-558 Windows stack) and the lifecycle, remote and access audit
+
+- **Why.** v0.7.123's release stopped at its guard: nightly 44533106888 failed on Windows on Arm when `owner_tests::an_account_moves_between_projects_and_back_to_default` overflowed its 2 MiB test thread. The tag stays; 0.7.124 carries its changes.
+- **Done.** SB-558 (#864): the app builds its async runtime with 16 MiB threads and links its Windows main thread at 16 MiB, as the CLI; the Windows test steps of nightly and release set `RUST_MIN_STACK=16777216`. Follow-ups on SB-362.
+- **Audit (PR #865).** [docs/reports/2026-11-19-lifecycle-remote-access-audit](reports/2026-11-19-lifecycle-remote-access-audit/README.md): five modules, spec and plan of waves W11.0 to W11.8 ([plan](plans/2026-11-19-lifecycle-remote-access/plan.md)), rows SB-559 to SB-567.
+- **Checks run.** The Mac Studio gate on #864's final head (EXIT 0), three review rounds (the last two clean); this release PR's gate; the tag's Nightly before the release run.
+- **Exact next task:** confirm 0.7.124 on the feed and update the app on both machines (`switchboard_app restart_to_update`), check `switchboard machines list` reads `call: status`; then the W11 waves in plan order: W11.1 (#867, #870, #872), W11.2 (#871), W11.4 (#868), W11.7 (#821, #829, #832, #873), SB-573 (#874), SB-575 (#876, seats through PassionCode.ai, DEC-0037); #865 (audit) and #866 (SB-559 hygiene) are merged; the teammate's seat goes through SB-575 (no tailnet access for teammates, operator 2026-11-19), once Vesta adds device encryption keys (thread 14da4917).
+
 ## 2026-11-18: SB-450 sessions continued after a restart, SB-451 launch records name their process's session, on branch `boot-resume`
 
 - **Asked.** Fabric Dashboards' board request 737b04e6 (thread a9844103): after the Mac rebooted nothing continued the sessions (SB-450); launch 38e41114 recorded another session's id and a transcript that never existed (SB-451). The coordinator added SB-455 (no login `PATH` in launch scripts, a likely cause of SB-451); it landed separately in #838, and this branch's own one-line PATH change was dropped when main was merged (2026-11-19).
