@@ -45,6 +45,7 @@ switchboard accounts receive handover.json --signer KEY [--apply] [--headless]  
 switchboard accounts recall ACCOUNT_UUID --from member@vm   # SB-292: take a moved sign-in back; its copy there is removed and proved gone (Claude and Codex)
 switchboard accounts send ACCOUNT_UUID --to user@studio.local --remote /usr/local/bin/switchboard --remote-data-dir /srv/switchboard   # SB-315: a Switchboard there that runs with --data-dir; a recall uses the same by default
 switchboard accounts seats [--limit 50]                     # SB-312: the moves, hand-overs and call backs recorded here, with the id there
+switchboard --json access grants [--include-revoked] [--holder frame-agent.default] [--limit 500] [--cursor C]   # SB-573 (DEC-0187): who holds the access issued here, as access-grants/1: seats on other machines (holder machine, an opaque ref) and accounts given to an agent; no credential, label, e-mail or ssh name
 switchboard agents anthropic set team-a --key-stdin --model claude-sonnet-5-5   # SB-390: an Anthropic API key under a name (piped, never echoed); list | model | remove | key NAME --to-pipe
 switchboard agents launch hermes --anthropic personal --dir /abs/folder     # SB-390: Hermes on the Anthropic key saved as personal
 switchboard agents launch-keys hermes --folder /abs/folder   # SB-392: the keys this agent can start on, by name: the folder's OpenRouter key first, then the others and the Anthropic keys

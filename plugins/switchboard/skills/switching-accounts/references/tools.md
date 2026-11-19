@@ -785,6 +785,22 @@ Reads only. The newest lines of `seats.jsonl` (default 50, at most 1000), newest
 token), `ordered_by` and the operator's `decision`. Read it before `switchboard_account_recall` to
 find what is on another machine.
 
+### `switchboard_access_grants`: `holder?`, `subject?`, `includeRevoked?`, `cursor?`, `limit?`
+
+Reads only. The capability `access.grants.list` (fabric-agent-contract DEC-0187): who holds the
+access this Switchboard issued, as `access-grants/1` with issuer `fabric-switchboard.default`.
+Each grant is a seat moved (`seat`), delegated (`seat.delegated`, with `expiresAt` from its lease),
+handed over (`seat.handed_over`) or whose move lost its answer (`seat.outcome_unknown`) to another
+machine, revoked when it was called back; or an account given to an agent (`account.assigned`),
+revoked when taken back or given to another. The holder is a machine by an opaque `ref`
+(`m-` and 16 hex), never its ssh name, or the agent's service key when the name the person gave is
+one, else `unresolved` with that name hidden when it may be a person's. `subject` is the account
+by its id here and its provider (`anthropic` or `openai`). `issued` and `revoked` say when and
+whose decision (`operator` when the operator's words were recorded, else `agent`); the calling
+agent is not recorded (`unrecorded-caller.unknown`). No ceiling or spend: Switchboard meters no
+money per grant. Without `includeRevoked` only grants that admit now; `holder` keeps one agent's;
+`nextCursor` pages; `degraded` names what was left out. No `doors` yet (SB-574).
+
 ### `switchboard_account_hand_over`: `account_id`, `to`, `decision?`
 
 Only when the operator asks. Answers a signed record of the account without its credential and

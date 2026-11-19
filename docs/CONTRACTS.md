@@ -3759,6 +3759,60 @@ Vesta's board request `a7325ed3` (G2, plan fabric-workspace `docs/plans/2026-11-
 - **The sender's side.** `Operation::SendAccount { delegate, lease_hours }` (CLI `accounts send --delegate [--lease-hours N]`, MCP `switchboard_account_send` `delegate`, `lease_hours`, the window's box *Delegate to a teammate*) needs a group there (`DELEGATE_INTO_GROUP`), names this machine's settings signing key and the lease in the remote `accounts add`; a failed check there removes the copy under that key (`as_sender`); when the removal fails too, the seat is recorded in `delegated_out` and a granted `seats.jsonl` line with its account there, lease and key, the account stays marked used there but is not placed in the machine's group (its lease is not extended), and the answer is `LEFT_THERE_DELEGATED`, which says to call it back with `accounts recall` (review round 2, P2-B). The seat line is written from the move's own answer (`account_send::send_with`, `SendError::left`) whether or not the store took its record, and both carry `sent`, the print of the token sent, so a call back keeps a sign-in renewed here since aside instead of replacing it with the spent copy there; the adoption pass (`machines::plan`) never places such a seat in the machine's group; and using the account here again (`mark_elsewhere` off, whatever its group) clears its `delegated_out` record, which a call back that gives the sign-in back puts back, outside the machine's group when it was outside (review round 3; tests `a_delegated_move_that_fails_its_check_removes_the_copy_there_under_its_key`, `a_delegated_copy_left_there_is_recorded_so_it_can_be_called_back`, `a_copy_left_there_after_a_renewal_here_is_called_back_keeping_the_live_sign_in`, `the_record_of_a_seat_left_outside_a_machine_group_goes_when_the_account_is_used_here`); the move records `lease_hours` and `sender_key` on its `seats.jsonl` line and, once the account joined its machine group, a `Snapshot::delegated_out` record (`DelegatedOut {remote_id, lease_hours, sender_key, sent?}`, cleared when the account comes home or is removed, carried by backups and restores), and answers `delegated: {lease_hours}`; `--lease-hours` without `--delegate` is refused (`SEND_LEASE_WITHOUT_DELEGATE`). `RecallAccount` names the key from that record (else the seat line) in `surrender`, `surrender --undo` and `remove` there. A seat whose credential was removed there answers `{credential: null, lease_ended: true}`: the mark here is cleared and the sign-in kept here since the move is asked; if it answers, the call back finishes as usual; if not, the row there is removed, the call back is recorded, and the account stays here with `LEASE_ENDED_SIGN_IN`. Tests `a_delegated_seat_goes_there_as_a_guest_and_comes_back_only_to_its_sender`, `a_delegated_move_that_fails_its_check_removes_the_copy_there_under_its_key`, `a_call_back_after_the_lease_ran_out_keeps_the_sign_in_kept_here`, `the_stores_record_of_a_delegated_seat_outlives_seats_jsonl`.
 - **Own sign-in off** (`<data>/own-sign-in`, `on` or `off`, absent on; CLI `own-sign-in on|off`, MCP `switchboard_own_sign_in`, Settings → *Your own sign-in*, `Operation::OwnSignIn`). While off, `own_sign_in::mask` hands the runtime ordinary-sign-in sources that read and write nothing (`current`, `fresh`, `activate`, `live`, Claude Swap; `OFF_LIMITS`), both in the owner (`Runtime::native()`) and offline (`execute`, `projects::apply`); the folder bindings treat the ordinary Claude Code as signed out (`Runtime::claude_signed_out`), so a group's folders get the placeholder token for a teammate who signs in only in Claude Desktop; `mcp-homes` and a launch's MCP sign-in copy leave the ordinary home out (`mcp_homes::ordinary_for`; a launch skips the copy altogether); the session duty officer looks only at sessions whose Claude home is under Switchboard's data folder (`duty::keep_ours`). Session transcripts for limits, Codex's routing file and the shell homes' carried settings are unchanged. No source names Claude Desktop's bundle, data folder or Keychain item (`own_sign_in::tests::no_code_names_claude_desktop`). Tests `own_sign_in::tests::*`, `launch::tests::with_own_sign_in_off_a_launch_carries_no_mcp_sign_in`, `duty::tests::with_own_sign_in_off_only_switchboards_own_sessions_are_looked_at`, `mcp_homes::tests::with_own_sign_in_off_the_ordinary_home_is_left_out`.
 
+## Who holds the access Switchboard issued: access-grants/1 (SB-573, DEC-0034, 2026-11-19)
+
+fabric-agent-contract DEC-0187 (`main` `320c7ab9`, `docs/specification/service.md#access-grants-dec-0187`, AG-1 to
+AG-7, schema `schemas/access-grants.schema.json`) asks every product that issues access to answer the capability
+`access.grants.list` as one `access-grants/1` document, so Fabric Dashboards (FD-351, board request `d4a3e8ac`)
+joins the answers by holder. Code: [access_grants.rs](../crates/switchboard-runtime/src/access_grants.rs).
+
+- **Doors.** `Operation::AccessGrants { input }` (read-only, outside the owner transaction: the snapshot,
+  `seats.jsonl`, `assignments.jsonl` and `remote-usage.json`), CLI `access grants [--holder KEY] [--subject KEY]
+  [--include-revoked] [--cursor C] [--limit N]` (`--json` wraps it in `data`), MCP `switchboard_access_grants`
+  (a read, listed by the read-only server too). The input is `$defs/listInput` with the contract's own names
+  (`holder`, `subject`, `includeRevoked`, `cursor`, `limit`), unknown fields refused; `holder` and `subject` must be
+  a service key (`HOLDER_INVALID`), `limit` 1 to 500 (`LIMIT_INVALID`), `cursor` one this answer gave
+  (`CURSOR_INVALID`). The MCP tool's name is Switchboard's (`switchboard_*`): the contract's capability name serves
+  a compact surface's search, which Switchboard does not have yet (SB-478), and a search over one operation would
+  break CM-3 (search answers every capability the surface serves).
+- **Answer.** `{protocol: "access-grants/1", issuer: "fabric-switchboard.default", generatedAt, grants[],
+  nextCursor?, degraded?}`, grants sorted by issue time then id, at most `limit` (default 500) a page, `nextCursor`
+  (`offset:NNNNNNNN`) while more match. Without `includeRevoked`, only grants that admit now (not revoked, not past
+  `expiresAt`). `doors` is absent: no operation here takes `$defs/revokeInput` and none has a dotted operation name
+  (SB-574).
+- **A seat on another machine.** Each `granted`, `handed_over` or `unknown` line of `seats.jsonl` (the newest
+  1000) is a grant `seat:<account>:<at>` with scope `seat`, `seat.delegated` (a line with `lease_hours`),
+  `seat.handed_over` or `seat.outcome_unknown` (a move whose answer was lost; a later `granted` line of the same
+  account to the same machine replaces it). Its holder is `{kind: machine, ref}`, `ref` being `m-` and 16 hex of
+  the SHA-256 of the machine's name as its machine group names it (an alias reads as its machine), lowercased, else
+  as ssh named it: never the name, a user or a host. A `recalled` line revokes the open grants of that account to
+  that machine (else of that account), reason `Called back to this machine.`. A delegated seat's `expiresAt` is its
+  lease from the last extension (`remote_usage` `leases_at`, else the move), `degraded` saying so when the last
+  extension failed. An open grant stands only while its account is away (marked used elsewhere, in a machine's
+  group or delegated out), and only the newest of an account; one that came back with no `recalled` line, or whose
+  account is no longer here, is left out and counted in `degraded`.
+- **An account given to an agent.** `Operation::Assign` appends a line to `<data>/assignments.jsonl` (0600, the
+  newest 1000, `{at, event: assigned|taken_back, account, to?}`, `to` the name as `assigned_to` holds it) whenever
+  `assigned_to` changed; a line that cannot be written is the log event `assignment_record` and does not undo the
+  act. Each `assigned` line is a grant `assign:<account>:<at>` with scope `account.assigned`, revoked by the next
+  `taken_back` (`Taken back.`) or `assigned` (`Given to another holder.`) of that account. An account given before
+  the file was kept is the grant `assign:<account>:before-record`, issued at the journal's `assignment assigned`
+  event when it still holds one, else when the account was added (the earliest it can be), `degraded` saying so.
+  Holder (AG-2): the name the person gave when it is a service key (`frame-agent.default`); otherwise
+  `{kind: unresolved, label}`, the name as written only when it holds an agent's word (`agent`, `bot`, `service`,
+  `foundry`, `hermes`, ...) and no `@`, else `agent named in words that may name a person (hidden)`.
+- **Every grant.** `subject` is `{kind: account, provider, ref}`: `anthropic` for a Claude account, `openai` for
+  Codex, `ref` the account's id here. No `limitUsd` and no `spentDayUsd`: Switchboard meters no money per grant (a
+  seat's spend is the other machine's, a given account's the agent's; the pay-per-token group's daily ceiling is the
+  group's, not a holder's), so both are absent (AG-4). `issued` and `revoked` (DEC-0034): `by: operator` when the
+  operator's words were recorded with the act (`seats.jsonl` `ordered_by: operator`), else `by: agent`;
+  `via: agent` with `agent: unrecorded-caller.unknown`, since no act records which agent called (FAC-SEM-185 asks a
+  service key whenever `via` is `agent`). Never a credential, label, e-mail, ssh name or session id (AG-7).
+- **Cost.** One read each of `seats.jsonl` and `assignments.jsonl` (at most 2 MiB) and `remote-usage.json`, and the
+  snapshot; nothing is written.
+- Tests: `access_grants::tests::*`, `an_account_given_to_an_agent_is_switched_to_only_anyway`
+  (`lib.rs`), `an_account_is_given_to_an_agent_and_taken_back_from_the_cli`.
+
 ## Sessions page (SB-395)
 
 One list of this computer's coding sessions in four groups, the order Fabric Dashboards' Sessions
