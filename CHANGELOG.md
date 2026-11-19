@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - Statistics now give each organization's daily usage as data its own agents can read: per day, seat and coding agent, the requests, how they ended and the tokens, with no group, folder, label or account id (`usage`, schema `org-usage/1`, in `switchboard --json stats` and MCP `switchboard_statistics`). The seat ids match the organization's seats list, so the two can be joined; a seat's history follows the organization it belongs to when the report is read (SB-568).
+- The app's threads get the 16 MiB stack the command line has run on since 0.6.61 (SB-558): the threads of its async runtime on every system, and its main thread on Windows, where it was 1 MiB. The Windows test steps give each test thread the same. The nightly checks of 0.7.123 failed on Windows on Arm when one test overflowed its 2 MiB thread.
 
 ## 0.7.123
 
