@@ -214,7 +214,7 @@ pub fn ended_rows(root: &Path, now: i64) -> Vec<Value> {
             )
         })
         .collect();
-    rows.sort_by(|a, b| b.0.cmp(&a.0));
+    rows.sort_by_key(|a| std::cmp::Reverse(a.0));
     rows.into_iter().map(|(_, v)| v).collect()
 }
 
