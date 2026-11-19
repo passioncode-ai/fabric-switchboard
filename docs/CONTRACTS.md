@@ -309,7 +309,8 @@ Account list order is display-only; it never selects/activates. Within provider/
   (`Store::endpoint_seen`, memory only): `next_check_at = max(existing, min(observed + 180,
   endpoint + 1800))`, near the limit `observed + HEADER_FRESH_SECONDS` (60) instead of 180. A
   partial header, a header before the endpoint's first answer, one for a new credential
-  generation (its usage health cleared) and one past the ceiling keep
+  generation (its usage health cleared, which forgets the endpoint's time) until the endpoint
+  answered it and one past the ceiling keep
   `max(existing, observed)` as before
   (`a_complete_header_observation_postpones_the_next_check_up_to_the_ceiling`). The merged usage
   keeps the oldest age of the windows it holds, as before
@@ -337,7 +338,7 @@ Account list order is display-only; it never selects/activates. Within provider/
   min(900 · 2^(n-1), 3600))` for the n-th 429 in a row (a 429 more than the last hold's length
   after it ended counts as the first; a 429 while the hold still runs, from a check in flight
   beside the one refused, doubles nothing), never shortening a longer hold; a success clears it
-  unless the hold was recorded after that check started (`UsageBudget::succeeded_since`) (`a_429_holds_the_whole_provider_and_doubles_on_repeats_up_to_an_hour`). While held,
+  unless the hold was recorded after that check's request was sent (`UsageBudget::succeeded_since`) (`a_429_holds_the_whole_provider_and_doubles_on_repeats_up_to_an_hour`). While held,
   `due_now_at` leaves every account of the provider out and `check_as` answers
   `USAGE_RATE_LIMITED` before any renewal or credential read, logging `usage_check`
   `provider_held` (`a_429_on_one_accounts_check_holds_every_account_of_the_provider`), and asks

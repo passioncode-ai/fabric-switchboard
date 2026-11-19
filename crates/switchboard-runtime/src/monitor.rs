@@ -807,7 +807,7 @@ pub(crate) async fn probe(
             "usage_check",
             &[("outcome", crate::oplog::Field::Code("provider_held"))],
         );
-        return Err(switchboard_proxy::USAGE_RATE_LIMITED.into());
+        return Err(UNSENT.into());
     }
     let sent = now();
     // The hold below binds to this credential: the one the provider actually answered.
@@ -879,6 +879,11 @@ pub(crate) async fn probe(
         }
     }
 }
+
+/// SB-518: `probe`'s refusal when a provider hold began before its request went out. Nothing was
+/// sent, so no verdict is lifted and no 401 count is reset; `check_as` answers it as the
+/// provider's wait (`USAGE_RATE_LIMITED`).
+const UNSENT: &str = "usage request not sent: provider held";
 
 /// A quota check that first keeps an inactive Claude account's token alive and retries once
 /// after a refresh when the provider rejects the token (Claude Swap's shape, PLAN-0.5 D-2).
@@ -1020,6 +1025,7 @@ async fn check_as(
             let mut seen = None;
             return match probe(store.clone(), id, gate, &mut seen).await {
                 Err(error) if error == switchboard_proxy::REJECTED => dead(),
+                Err(error) if error == UNSENT => Err(error),
                 other => {
                     refresh.lift_verdict(id);
                     other
@@ -1036,6 +1042,7 @@ async fn check_as(
         }
         let mut seen = None;
         match probe(store.clone(), id, gate, &mut seen).await {
+            Err(error) if error == UNSENT => Err(error),
             Err(error) if error == switchboard_proxy::REJECTED => match refreshed(true).await {
                 crate::refresh::Outcome::Refreshed => {
                     let mut again = None;
@@ -1087,6 +1094,13 @@ async fn check_as(
                 "Usage unavailable. Check sign-in or try again after the next scheduled check."
                     .into(),
             )
+        })
+        .map_err(|error| {
+            if error == UNSENT {
+                switchboard_proxy::USAGE_RATE_LIMITED.into()
+            } else {
+                error
+            }
         })
 }
 use crate::refresh::SIGN_IN;

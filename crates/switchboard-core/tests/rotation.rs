@@ -2473,6 +2473,16 @@ fn a_complete_header_observation_postpones_the_next_check_up_to_the_ceiling() {
         .observe(&id, header_usage(16., fresh + 20, &both))
         .unwrap();
     assert_eq!(next_check(&store, &id), fresh + 20);
+    // Nor its second, until the endpoint answered the new generation.
+    store
+        .observe(&id, header_usage(16., fresh + 25, &both))
+        .unwrap();
+    assert_eq!(next_check(&store, &id), fresh + 25);
+    store.observe(&id, endpoint_usage(16., fresh + 30)).unwrap();
+    store
+        .observe(&id, header_usage(16., fresh + 40, &both))
+        .unwrap();
+    assert_eq!(next_check(&store, &id), fresh + 40 + CHECK_ACTIVE_SECONDS);
 }
 
 #[test]

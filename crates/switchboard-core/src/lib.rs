@@ -2813,6 +2813,17 @@ impl Store {
                 .iter()
                 .all(|name| usage.windows.iter().any(|w| w.name == *name));
         let observed = usage.observed_at;
+        // An endpoint answer always leaves usage health behind, so none means a new credential
+        // generation (or a cleared record): what the endpoint said of the one before is no anchor,
+        // and the header times go with it, until the endpoint answers this one.
+        if a.usage_health.is_none() {
+            if let Ok(mut seen) = self.endpoint_seen.lock() {
+                seen.remove(id);
+            }
+            if let Ok(mut seen) = self.header_seen.lock() {
+                seen.remove(id);
+            }
+        }
         let anchor = self
             .endpoint_seen
             .lock()
@@ -2821,12 +2832,8 @@ impl Store {
         // While the endpoint answered within the ceiling, a header is as fresh as a check. The
         // `timer` mode keeps the fixed cadence of 0.7.121: no header postpones anything.
         let smart = self.usage_mode() != UsageMode::Timer;
-        // A new credential generation (its usage health cleared) is never postponed by a header:
-        // the endpoint answered the previous one.
-        let passive = smart
-            && complete
-            && a.usage_health.is_some()
-            && anchor.is_some_and(|at| observed < at + PASSIVE_CEILING_SECONDS);
+        let passive =
+            smart && complete && anchor.is_some_and(|at| observed < at + PASSIVE_CEILING_SECONDS);
         let in_use = self
             .in_use
             .lock()
