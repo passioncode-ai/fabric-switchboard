@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- The session duty officer now records each act once (SB-505). Before, when its check took longer than a second, the next check finished the same act again: it wrote a second close, offered a closed session twice in Continue, counted a restart twice, and could open a second resume window for a restarted session.
+
 ## 0.7.120
 
 - A session Switchboard launched in a Git worktree is now served by its own group (SB-452). Before this fix, Claude Code read the worktree's local settings from its main checkout, so a launch in a worktree of another group than its main checkout's ran on the main checkout's group: on 2026-11-18 a launch for the pay-per-token group ran on another group's subscriptions, its key was never used and its ceiling never counted anything. Every managed Claude launch now passes its home's own route file (`switchboard-route.json`) as `--settings`, last on its command line, which Claude Code ranks above a folder's local settings; a session the duty officer, a restart wave or *Continue* resumes keeps it. The proxy refuses a request whose launch named another group than its route when one of the two is the pay-per-token group, and counts every request served by another group than its own (`mismatched` in `switchboard statistics`, `proxy_group_mismatch` in the log). A `claude` you start yourself in such a worktree still takes its main checkout's group and is counted the same way: launch it with Switchboard.
