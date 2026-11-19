@@ -363,7 +363,14 @@ fn leases_due(state: &State, machine: &str, now: i64) -> bool {
 /// The code a failed read is kept with.
 pub fn reason_of(error: &str) -> &'static str {
     // A refused target or path is named first: its sentence may itself mention ssh.
-    if [TARGET_INVALID, REMOTE_INVALID, REMOTE_DATA_DIR_INVALID, READ_REFUSED].contains(&error) {
+    if [
+        TARGET_INVALID,
+        REMOTE_INVALID,
+        REMOTE_DATA_DIR_INVALID,
+        READ_REFUSED,
+    ]
+    .contains(&error)
+    {
         "refused"
     } else if error == UNREACHABLE || error.contains("ssh") {
         "unreachable"
@@ -440,8 +447,8 @@ pub fn record(
             entry.reason = None;
             entry.failures = 0;
             // When each condition started, as first seen by a read that worked.
-            entry.health_since = (!entry.failing_checks().is_empty())
-                .then(|| entry.health_since.unwrap_or(now));
+            entry.health_since =
+                (!entry.failing_checks().is_empty()).then(|| entry.health_since.unwrap_or(now));
             entry.sessions_since = (!entry.troubled_sessions().is_empty())
                 .then(|| entry.sessions_since.unwrap_or(now));
         }
@@ -1121,7 +1128,10 @@ mod tests {
         assert!(studio.sessions.is_some());
         assert_eq!(studio.troubled_sessions().len(), 1);
         assert_eq!(studio.failing_checks(), vec!["crashes", "owner"]);
-        assert_eq!((studio.health_since, studio.sessions_since), (Some(1000), Some(1000)));
+        assert_eq!(
+            (studio.health_since, studio.sessions_since),
+            (Some(1000), Some(1000))
+        );
         pass(
             root.path(),
             &s,
@@ -1207,8 +1217,9 @@ mod tests {
         // at the old cadence (every 15 minutes), with the older calls, and asked the one call
         // again after an hour.
         calls.lock().unwrap().clear();
-        let read_one =
-            |target: &str, program: &Program<'_>, ask: Ask| read_remote(target, program, &older, ask);
+        let read_one = |target: &str, program: &Program<'_>, ask: Ask| {
+            read_remote(target, program, &older, ask)
+        };
         let mut now = 1000;
         for _ in 0..16 {
             pass(root.path(), &s, now, &read_one, &no_lease);
@@ -1220,10 +1231,23 @@ mod tests {
             1,
             "{made:?}"
         );
-        assert_eq!(made.len(), 1 + 2 * 2, "two reads in 16 minutes, two calls each: {made:?}");
+        assert_eq!(
+            made.len(),
+            1 + 2 * 2,
+            "two reads in 16 minutes, two calls each: {made:?}"
+        );
         calls.lock().unwrap().clear();
-        pass(root.path(), &s, 1000 + STATUS_RETRY_SECONDS, &read_one, &no_lease);
-        assert!(calls.lock().unwrap()[0].contains("remote-status"), "asked again after the hour");
+        pass(
+            root.path(),
+            &s,
+            1000 + STATUS_RETRY_SECONDS,
+            &read_one,
+            &no_lease,
+        );
+        assert!(
+            calls.lock().unwrap()[0].contains("remote-status"),
+            "asked again after the hour"
+        );
         // An older restricted entry (`ssh-serve`) refuses the one call by its own sentence.
         calls.lock().unwrap().clear();
         let entry = |args: &[String], _: Option<&[u8]>| -> Result<String, String> {
@@ -1241,8 +1265,9 @@ mod tests {
         // `sessions --rows`, which it refuses.
         let root = tempfile::tempdir().unwrap();
         calls.lock().unwrap().clear();
-        let through_entry =
-            |target: &str, program: &Program<'_>, ask: Ask| read_remote(target, program, &entry, ask);
+        let through_entry = |target: &str, program: &Program<'_>, ask: Ask| {
+            read_remote(target, program, &entry, ask)
+        };
         let mut now = 1000;
         for _ in 0..3 {
             pass(root.path(), &s, now, &through_entry, &no_lease);
@@ -1326,7 +1351,11 @@ mod tests {
             &|_, _, _| ok(there()),
             &extend,
         );
-        assert_eq!(extended.lock().unwrap().len(), 4, "a failure is tried again");
+        assert_eq!(
+            extended.lock().unwrap().len(),
+            4,
+            "a failure is tried again"
+        );
         now += LEASE_RETRY_SECONDS;
         // A machine that did not answer gets no extension call.
         let calls = extended.lock().unwrap().len();
