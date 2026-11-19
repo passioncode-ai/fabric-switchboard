@@ -80,15 +80,12 @@ pub fn record(root: &Path, item: &str, during: &str, at: i64) {
 pub fn record_at_stamp(root: &Path, item: &str, during: &str, at: i64, stamp: Option<String>) {
     let _held = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let mut items = read(root);
-    if items
-        .iter()
-        .any(|e| {
-            e.item == item
-                && e.during == during
-                && e.stamp == stamp
-                && e.version.as_deref() == Some(env!("CARGO_PKG_VERSION"))
-        })
-    {
+    if items.iter().any(|e| {
+        e.item == item
+            && e.during == during
+            && e.stamp == stamp
+            && e.version.as_deref() == Some(env!("CARGO_PKG_VERSION"))
+    }) {
         return;
     }
     items.retain(|e| e.item != item);
