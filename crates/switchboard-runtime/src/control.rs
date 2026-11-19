@@ -2307,7 +2307,8 @@ mod tests {
     /// SB-510: the watchdog's look at the owner names each state and never sends an operation.
     #[tokio::test]
     async fn the_watchdogs_probe_tells_an_answering_owner_from_a_gone_or_silent_one() {
-        let limit = Duration::from_secs(2);
+        // Windows refuses a closed port only after about two seconds of retries.
+        let limit = Duration::from_secs(8);
         let empty = tempfile::tempdir().unwrap();
         assert_eq!(probe(empty.path(), limit).await, Probe::NoDescriptor);
         let (tmp, _owner, desc) = fixture().await;

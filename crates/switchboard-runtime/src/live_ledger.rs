@@ -131,7 +131,8 @@ pub fn merge(
             .iter()
             .map(|(id, e)| (e.last_seen, id.clone()))
             .collect();
-        by_age.sort_by(|a, b| b.cmp(a));
+        by_age.sort();
+        by_age.reverse();
         let keep: HashSet<String> = by_age.into_iter().take(KEEP).map(|(_, id)| id).collect();
         next.sessions.retain(|id, _| keep.contains(id));
     }
@@ -203,15 +204,18 @@ mod tests {
     #[test]
     fn only_a_live_process_with_a_session_id_and_an_absolute_folder_is_observed() {
         let config = PathBuf::from("/h/.claude");
+        // An absolute folder on this platform (a drive letter on Windows).
+        let work = std::env::temp_dir().join("work");
+        let folder = |name: &str| work.join(name).to_string_lossy().into_owned();
         let files = vec![
-            (config.clone(), file(S1, 10, "/work/a")),
-            (config.clone(), file(S2, 11, "/work/b")),
-            (config.clone(), file("../escape", 12, "/work/c")),
+            (config.clone(), file(S1, 10, &folder("a"))),
+            (config.clone(), file(S2, 11, &folder("b"))),
+            (config.clone(), file("../escape", 12, &folder("c"))),
             (config.clone(), file(S2, 13, "relative")),
-            (config.clone(), json!({"pid": 14, "cwd": "/work/d"})),
+            (config.clone(), json!({"pid": 14, "cwd": folder("d")})),
         ];
         let alive: HashSet<u32> = [10, 12, 13, 14].into_iter().collect();
-        assert_eq!(observed(&files, &alive), vec![seen(S1, 10, "/work/a")]);
+        assert_eq!(observed(&files, &alive), vec![seen(S1, 10, &folder("a"))]);
     }
 
     #[test]
