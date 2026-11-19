@@ -24,7 +24,7 @@ use switchboard_core::{Provider, Snapshot};
 pub const PROTOCOL: &str = "access-grants/1";
 /// Switchboard's service key (`<id>.<instance>`): the issuer of every grant listed.
 pub const ISSUER: &str = "fabric-switchboard.default";
-/// DEC-0034: the calling agent of an act Switchboard did not record it for. A valid service key
+/// DEC-0036: the calling agent of an act Switchboard did not record it for. A valid service key
 /// that names no agent, so a host never joins it with a real one.
 pub const UNRECORDED_CALLER: &str = "unrecorded-caller.unknown";
 /// AG-1: at most this many grants a page.
@@ -246,7 +246,7 @@ pub fn agent_holder(name: &str) -> Value {
 
 /// AG-5: an act Switchboard recorded. The operator's words recorded with it make it the
 /// operator's; otherwise an agent's (`seats.jsonl`'s own `ordered_by`). No act records which
-/// agent called, so `agent` is [`UNRECORDED_CALLER`] (DEC-0034).
+/// agent called, so `agent` is [`UNRECORDED_CALLER`] (DEC-0036).
 fn act(at: i64, operator: bool) -> Map<String, Value> {
     let mut a = Map::new();
     a.insert("at".into(), json!(crate::rfc3339(at)));

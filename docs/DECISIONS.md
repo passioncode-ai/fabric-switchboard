@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0035` (`DEC-0034` is SB-573, who holds the access as access-grants/1; `DEC-0032` is SB-518, smart usage checks; `DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0034` (`DEC-0032` is SB-518, smart usage checks; `DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -1090,13 +1090,11 @@ research notes); the ones still in force that the board cites are seeded below w
   минуту через свитчборд а не через запросы напрямую к сессиям и на удаленный свитчборд в рамках
   организации то же самое».
 
-
-### DEC-0034: Who holds Switchboard's access is answered as access-grants/1, holders never named
+### DEC-0036: Who holds Switchboard's access is answered as access-grants/1, holders never named
 
 - **Date:** 2026-11-19
-- **Status:** Accepted (built on branch `sb-573-access-grants`: SB-573). The number is the next one
-  free after the decisions on open pull requests (DEC-0027 #821, DEC-0028, DEC-0029 #832); a pull
-  request that lands first with the same number moves this one to the next free.
+- **Status:** Accepted (built on branch `sb-573-access-grants`: SB-573, #874). The number is
+  assigned by pull request creation time: DEC-0034 is #871's, DEC-0035 #872's, DEC-0037 reserved.
 - **Context:** fabric-agent-contract DEC-0187 (`main` `320c7ab9`) asks every product that issues
   access to answer `access.grants.list` as `access-grants/1`, so Fabric Dashboards shows each
   agent's Access tab and one Access page (FD-351, board request `d4a3e8ac` in thread `747c6bb0`,
