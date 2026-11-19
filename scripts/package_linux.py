@@ -4,7 +4,11 @@
 receipt with checksums, the ELF architecture of each executable and the checks the job ran. The
 AppImage ships as the updater package (scripts/updater_artifacts.py linux), signed for updates.
 
-  python3 scripts/package_linux.py --arch x64 --native-tests PASS --smoke PASS
+  python3 scripts/package_linux.py --arch x64 --native-tests NIGHTLY --smoke PASS
+
+`--native-tests` says where the native tests passed: PASS, in this job (a rehearsal); NIGHTLY, in
+the nightly Linux job on this commit, which the release guard required before this job started (a
+publishing run, SB-563 M4-05). The smoke check always runs here, on the build that ships.
 """
 import argparse
 import hashlib
@@ -18,6 +22,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 # Per architecture: the .deb's architecture word and the ELF e_machine of the executables.
 ARCHES = {'x64': ('amd64', 62), 'arm64': ('arm64', 183)}
+# Where the native tests passed before packaging: here (a rehearsal) or in the nightly run on this
+# commit that the release guard required (a publishing run, SB-563).
+NATIVE_TESTS = ('PASS', 'NIGHTLY')
 
 
 def sha(path):
@@ -40,6 +47,8 @@ def elf_machine(path, expected):
 
 
 def package(root, version, commit, arch, toolchain, native_tests, smoke):
+    if native_tests not in NATIVE_TESTS:
+        raise SystemExit(f'Unknown native test result {native_tests!r}; expected one of {", ".join(NATIVE_TESTS)}.')
     if arch not in ARCHES:
         raise SystemExit(f'Unknown architecture {arch!r}; expected one of {", ".join(ARCHES)}.')
     deb_arch, machine = ARCHES[arch]
@@ -81,7 +90,8 @@ def capture(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--arch', choices=sorted(ARCHES), required=True)
-    parser.add_argument('--native-tests', choices=['PASS'], required=True, help='The tests this job ran before packaging')
+    parser.add_argument('--native-tests', choices=NATIVE_TESTS, required=True,
+                        help='PASS: this job ran the native tests; NIGHTLY: the guard required the nightly that ran them on this commit')
     parser.add_argument('--smoke', choices=['PASS'], required=True, help='scripts/smoke_native.py on the built app, both launches')
     args = parser.parse_args()
     if capture(['git', 'status', '--porcelain', '--untracked-files=all']):

@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from release_preflight import check, section  # noqa: E402
+from release_preflight import check, not_newer, section  # noqa: E402
 
 VERSIONS = {'package.json': '1.2.3', 'src-tauri/tauri.conf.json': '1.2.3', 'Cargo.toml': '1.2.3'}
 CHANGELOG = """# Changelog
@@ -53,6 +53,24 @@ class Preflight(unittest.TestCase):
         # Signed Windows builds need no such line; a rehearsal publishes no notes at all.
         self.assertEqual(check('v1.2.3', VERSIONS, quiet, publish=True, windows_signing=True), [])
         self.assertEqual(check('v1.2.3-rc.1', VERSIONS, quiet, publish=False, windows_signing=False), [])
+
+    def test_a_published_tag_must_be_newer_than_the_latest_release(self):
+        """SB-563 (M4-09): an old or duplicate tag is refused here, not after every platform built."""
+        self.assertEqual(check('v1.2.3', VERSIONS, CHANGELOG, publish=True, latest='v1.2.2'), [])
+        for latest in ('v1.2.4', 'v1.10.0', 'v2.0.0'):
+            errors = check('v1.2.3', VERSIONS, CHANGELOG, publish=True, latest=latest)
+            self.assertTrue(any('not newer' in e and latest in e for e in errors), latest)
+        # Numbers, not strings: 1.10.0 is newer than 1.9.9.
+        self.assertIsNone(not_newer('v1.10.0', 'v1.9.9'))
+        self.assertIsNotNone(not_newer('v1.9.9', 'v1.10.0'))
+
+    def test_the_latest_check_spares_what_the_publish_workflow_spares(self):
+        # No release yet, a rerun on the published tag itself, a prerelease and a rehearsal.
+        self.assertEqual(check('v1.2.3', VERSIONS, CHANGELOG, publish=True, latest=''), [])
+        self.assertEqual(check('v1.2.3', VERSIONS, CHANGELOG, publish=True, latest=None), [])
+        self.assertEqual(check('v1.2.3', VERSIONS, CHANGELOG, publish=True, latest='v1.2.3'), [])
+        self.assertIsNone(not_newer('v1.2.3-beta.1', 'v1.2.4'))
+        self.assertEqual(check('v1.2.3-rc.1', VERSIONS, '', publish=False, latest='v9.0.0'), [])
 
     def test_section_matches_the_publish_workflow(self):
         self.assertIn('NOT_SIGNED', section(CHANGELOG, '1.2.3'))

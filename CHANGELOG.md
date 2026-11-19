@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Releases are checked more strictly and recover from outside failures (SB-563). A release now starts only after a nightly run on its commit that actually ran the checks: the extra nightly run that each night skips the checks (one of two scheduled times, for daylight saving) now cancels itself instead of reading as passed. The release waits up to two hours for that run, builds on the same runner images it tested, and no longer runs the test suites a second time. An old or repeated version tag is refused before anything is built, releases publish one at a time, and after each one a last step proves the update feed offers the new version with a package whose signature verifies. Linux package downloads retry, and a release that failed only because a package mirror, a registry or GitHub's runner failed is run once more by itself.
+
 ## 0.7.123
 
 - Usage checks are smarter and gentler (SB-518): a response's rate-limit headers count as a check, so Switchboard asks the usage endpoint about an account with traffic only about once every 30 minutes; each provider gets 2 checks a minute; a refused check pauses the whole provider for at least 15 minutes; a switch checks its candidate first. Choose `switchboard usage-mode smart`, `timer` or `on-demand` (MCP `switchboard_usage_mode`, whose form without `mode` a read-only server answers too).

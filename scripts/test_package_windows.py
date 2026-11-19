@@ -127,6 +127,18 @@ class Package(unittest.TestCase):
             package_windows.package(self.root, VERSION, 'c0ffee', 'NOT_SIGNED', None,
                                     toolchain={'rustc': 'rustc test'}, native_tests='PASS', arch='arm64')
 
+    def test_a_publishing_run_records_the_nightly_that_ran_the_fixtures(self):
+        """SB-563 (M4-05): a publishing run does not run the suite the guard already required."""
+        receipt = package_windows.package(self.root, VERSION, 'c0ffee', 'NOT_SIGNED', None,
+                                          toolchain={'rustc': 'rustc test'}, native_tests='NIGHTLY')
+        self.assertEqual(receipt['native_windows_tests'], 'NIGHTLY')
+
+    def test_an_unknown_test_result_is_refused(self):
+        with self.assertRaises(SystemExit):
+            package_windows.package(self.root, VERSION, 'c0ffee', 'NOT_SIGNED', None,
+                                    toolchain={'rustc': 'rustc test'}, native_tests='SKIPPED')
+        self.assertFalse((self.root / 'artifacts').exists())
+
     def test_existing_output_is_preserved(self):
         self.build()
         with self.assertRaises(SystemExit):

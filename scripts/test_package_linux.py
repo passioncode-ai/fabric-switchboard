@@ -41,6 +41,18 @@ class Package(unittest.TestCase):
     def build(self, arch):
         return package_linux.package(self.root, VERSION, 'c0ffee', arch, {'rustc': 'test'}, 'PASS', 'PASS')
 
+    def test_a_publishing_run_records_the_nightly_that_ran_the_tests(self):
+        """SB-563 (M4-05): a publishing run keeps the smoke check and leaves the suite to nightly."""
+        self.files(62, 'amd64')
+        receipt = package_linux.package(self.root, VERSION, 'c0ffee', 'x64', {'rustc': 'test'}, 'NIGHTLY', 'PASS')
+        self.assertEqual((receipt['native_linux_tests'], receipt['smoke']), ('NIGHTLY', 'PASS'))
+
+    def test_an_unknown_test_result_is_refused(self):
+        self.files(62, 'amd64')
+        with self.assertRaises(SystemExit):
+            package_linux.package(self.root, VERSION, 'c0ffee', 'x64', {'rustc': 'test'}, 'SKIPPED', 'PASS')
+        self.assertFalse((self.root / 'artifacts').exists())
+
     def test_x64_and_arm64_are_packaged_under_their_own_names(self):
         for arch, machine, deb in (('x64', 62, 'amd64'), ('arm64', 183, 'arm64')):
             self.files(machine, deb)

@@ -4,7 +4,11 @@ and the portable CLI in one ZIP, with checksums, the license, a README and a rec
 whether the executables carry a valid Authenticode signature.
 
   python3 scripts/package_windows.py --authenticode NOT_SIGNED --native-tests PASS [--arch arm64]
-  python3 scripts/package_windows.py --authenticode SIGNED --signatures signatures.json --native-tests PASS
+  python3 scripts/package_windows.py --authenticode SIGNED --signatures signatures.json --native-tests NIGHTLY
+
+`--native-tests` says where the native fixtures passed: PASS, in this job (a rehearsal); NIGHTLY,
+in the nightly Windows job on this commit, which the release guard required before this job
+started (a publishing run, SB-563 M4-05: the suite is not run twice on one commit).
 
 `signatures.json` is what the workflow's PowerShell step read with Get-AuthenticodeSignature:
 a list of {file, status, signer, thumbprint, timestamper}. SIGNED is refused unless every
@@ -25,6 +29,9 @@ TARGET = 'x86_64-pc-windows-msvc'
 # Per architecture: the CLI's Rust target and the PE machine of the app and the CLI. The NSIS
 # installer is NSIS's own 32-bit x86 stub on both (0x14c), which Windows on ARM runs emulated.
 ARCHES = {'x64': ('x86_64-pc-windows-msvc', 0x8664), 'arm64': ('aarch64-pc-windows-msvc', 0xAA64)}
+# Where the native fixtures passed before packaging: here (a rehearsal) or in the nightly run on
+# this commit that the release guard required (a publishing run, SB-563).
+NATIVE_TESTS = ('PASS', 'NIGHTLY')
 NOT_SIGNED_REASON = ('Windows signing (Azure Artifact Signing) is switched off: the release '
                      'environment variable AZURE_SIGNING_ENABLED is not true.')
 
@@ -52,6 +59,8 @@ def readme(version, mode, arch='x64'):
 
 
 def package(root, version, commit, mode, signatures, toolchain, native_tests, arch='x64'):
+    if native_tests not in NATIVE_TESTS:
+        raise SystemExit(f'Unknown native test result {native_tests!r}; expected one of {", ".join(NATIVE_TESTS)}.')
     if arch not in ARCHES:
         raise SystemExit(f'Unknown architecture {arch!r}; expected one of {", ".join(ARCHES)}.')
     target, machine = ARCHES[arch]
@@ -115,7 +124,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--authenticode', choices=['SIGNED', 'NOT_SIGNED'], required=True)
     parser.add_argument('--signatures', type=Path, help='Get-AuthenticodeSignature report (JSON), required with SIGNED')
-    parser.add_argument('--native-tests', choices=['PASS'], required=True, help='The native fixtures this job ran before packaging')
+    parser.add_argument('--native-tests', choices=NATIVE_TESTS, required=True,
+                        help='PASS: this job ran the native fixtures; NIGHTLY: the guard required the nightly that ran them on this commit')
     parser.add_argument('--arch', choices=sorted(ARCHES), default='x64', help='x64 (windows-latest) or arm64 (windows-11-arm)')
     args = parser.parse_args()
     changed = capture(['git', 'status', '--porcelain', '--untracked-files=all'])

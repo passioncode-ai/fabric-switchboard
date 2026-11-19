@@ -32,6 +32,12 @@
 #
 # This workflow replaces build-windows.yml (the manual, unsigned Windows build): a Windows
 # build of a commit is now a rehearsal on an -rc tag.
+#
+# SB-563 (spec S5.1): the guard waits as long as nightly can take; a publishing run does not run the
+# test suites again that the guard proved on this commit (rehearsals still do); apt retries; the
+# preflight refuses a tag not newer than the latest release; one publish at a time across tags;
+# the `feed` job proves the feed serves the tag; `release-rerun.yml` retries a run that failed only
+# on the infrastructure, once. Runner images are pinned and are nightly's own.
 name: release
 
 on:
@@ -56,8 +62,9 @@ jobs:
   # every job that holds the release environment's keys needs this one, which passes a publishing
   # run only when main contains the tagged commit and CI passed on that exact commit.
   guard:
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
+    runs-on: ubuntu-24.04
+    # Above the action's own deadline (below), so the guard's refusal names its cause.
+    timeout-minutes: 135
     permissions:
       contents: read
       actions: write   # starts CI on the tag when none ran on the commit
@@ -66,11 +73,14 @@ jobs:
         with:
           workflows: nightly.yml
           publish: ${{ github.event_name == 'push' || inputs.publish }}
+          # SB-563 (M4-03): nightly's jobs may take 60 and 75 minutes after a queue; 60 (the action's
+          # default) refused releases whose nightly would have passed.
+          timeout-minutes: "120"
 
   # Before anyone is asked to approve: the tag names the version being built, and a published
   # release has its CHANGELOG section.
   preflight:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -82,13 +92,19 @@ jobs:
           TAG: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
           PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "$REF_TYPE" != tag ]]; then echo "::error::run the release on a tag, not a $REF_TYPE"; exit 1; fi
-          python scripts/release_preflight.py --tag "$TAG" --publish "$PUBLISH"
+          # SB-563 (M4-09): the latest published release, so a tag not newer is refused now, not
+          # after every platform was built and signed. No release yet (404) compares with nothing.
+          if ! latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>"$RUNNER_TEMP/latest.err"); then
+            if grep -q "HTTP 404" "$RUNNER_TEMP/latest.err"; then latest=""; else cat "$RUNNER_TEMP/latest.err"; echo "::error::the latest release could not be read"; exit 1; fi
+          fi
+          python scripts/release_preflight.py --tag "$TAG" --publish "$PUBLISH" --latest "$latest"
 
   macos:
     needs: [guard, preflight]
-    runs-on: macos-latest
+    runs-on: macos-26
     environment: release
     timeout-minutes: 75
     env:
@@ -173,7 +189,7 @@ jobs:
       matrix:
         include:
           - arch: x64
-            runner: windows-latest
+            runner: windows-2025-vs2026
             target: x86_64-pc-windows-msvc
             overlay: ""
           - arch: arm64
@@ -190,6 +206,11 @@ jobs:
     env:
       SIGNING: ${{ vars.AZURE_SIGNING_ENABLED == 'true' }}
       SWITCHBOARD_ANALYTICS_APP_KEY: ${{ secrets.SWITCHBOARD_ANALYTICS_APP_KEY }}
+      # SB-563 (M4-05): a publishing run starts only after the guard saw nightly pass on this commit,
+      # and nightly's Windows job runs these fixtures (and more) on this runner image. Running them
+      # again here only let a flaky test stop a release; a rehearsal, which the guard does not hold
+      # to nightly, still runs them. The receipt says which.
+      NATIVE_TESTS: ${{ (github.event_name == 'push' || inputs.publish) && 'NIGHTLY' || 'PASS' }}
     defaults:
       run:
         shell: pwsh
@@ -216,6 +237,7 @@ jobs:
           rustup target add ${{ matrix.target }}
       - run: npm ci
       - name: Native storage and runtime fixtures
+        if: env.NATIVE_TESTS == 'PASS'
         run: |
           cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli -p fabric-sessions-core -p fabric-sessions --locked --no-fail-fast
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -423,9 +445,9 @@ jobs:
       - name: Package the archive and its receipt
         run: |
           if ($env:SIGNING -eq 'true') {
-            python scripts/package_windows.py --authenticode SIGNED --signatures "$env:RUNNER_TEMP\signatures.json" --native-tests PASS --arch ${{ matrix.arch }}
+            python scripts/package_windows.py --authenticode SIGNED --signatures "$env:RUNNER_TEMP\signatures.json" --native-tests $env:NATIVE_TESTS --arch ${{ matrix.arch }}
           } else {
-            python scripts/package_windows.py --authenticode NOT_SIGNED --native-tests PASS --arch ${{ matrix.arch }}
+            python scripts/package_windows.py --authenticode NOT_SIGNED --native-tests $env:NATIVE_TESTS --arch ${{ matrix.arch }}
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -454,24 +476,36 @@ jobs:
     timeout-minutes: 75
     env:
       SWITCHBOARD_ANALYTICS_APP_KEY: ${{ secrets.SWITCHBOARD_ANALYTICS_APP_KEY }}
+      # As in the windows job (SB-563, M4-05): nightly's Linux job ran these tests on this commit;
+      # the smoke check below runs here, on the build that ships.
+      NATIVE_TESTS: ${{ (github.event_name == 'push' || inputs.publish) && 'NIGHTLY' || 'PASS' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: npm
+      # SB-563 (M4-04): v0.7.122's Linux x64 job failed on an Ubuntu mirror answering 503. apt
+      # retries each download, and the whole install is tried three times before the job fails.
       - name: Build and check dependencies (WebKitGTK 4.1, Secret Service, Xvfb)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libdbus-1-dev \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
-            libssl-dev file xdg-utils dbus-x11 gnome-keyring xvfb xauth
+          for attempt in 1 2 3; do
+            if sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+                pkg-config libdbus-1-dev libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+                libxdo-dev libssl-dev file xdg-utils dbus-x11 gnome-keyring xvfb xauth; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then echo "::error::the package mirror failed 3 times; see the apt-get output above"; exit 1; fi
+            echo "::warning::apt-get failed (attempt $attempt); again in 30 s"
+            sleep 30
+          done
       - name: Rust stable
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
       - run: npm ci
       - name: Native storage and runtime tests, against a real Secret Service
+        if: env.NATIVE_TESTS == 'PASS'
         run: |
           dbus-run-session -- sh -c 'printf "%s" synthetic-unlock | gnome-keyring-daemon --unlock --components=secrets >/dev/null && SWITCHBOARD_SECRET_SERVICE_TEST=1 cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli -p switchboard-proxy -p fabric-sessions-core -p fabric-sessions --locked --no-fail-fast'
       - name: Build the CLI, the app, the .deb and the AppImage
@@ -499,7 +533,7 @@ jobs:
           path: artifacts/updater/*
           if-no-files-found: error
       - name: The .deb, the CLI tarball and the receipt
-        run: python3 scripts/package_linux.py --arch ${{ matrix.arch }} --native-tests PASS --smoke PASS
+        run: python3 scripts/package_linux.py --arch ${{ matrix.arch }} --native-tests "$NATIVE_TESTS" --smoke PASS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-linux-${{ matrix.arch }}
@@ -513,7 +547,7 @@ jobs:
   # publish workflow as one more release-* artifact.
   updater:
     needs: [macos, windows, linux]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -539,6 +573,13 @@ jobs:
 
   publish:
     needs: [macos, windows, linux, updater]
+    # SB-563 (M4-07): one publish at a time across every tag. Two publishes that overlapped could
+    # let the older tag pass its "newer than latest" check first and become latest last; in one
+    # group the second starts after the first finished and refuses an older tag. A third waiting
+    # publish replaces the second (GitHub keeps one pending run per group); run that one again.
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
@@ -548,3 +589,22 @@ jobs:
     with:
       publish: ${{ github.event_name == 'push' || inputs.publish }}
     secrets: inherit
+
+  # SB-563 (M4-08): installed copies read releases/latest/download/latest.json. After a published
+  # vX.Y.Z (a prerelease never becomes latest), require that feed to announce this tag, every entry
+  # to name a file of this release, and one package downloaded from it to verify against the
+  # updater key's public half with this version signed into it, as the app's updater checks it.
+  feed:
+    needs: publish
+    if: (github.event_name == 'push' || inputs.publish) && !contains(github.ref_name, '-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: The feed serves this tag, and its package verifies
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python3 scripts/feed_check.py --tag "$TAG"
