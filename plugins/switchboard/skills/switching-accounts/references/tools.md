@@ -28,8 +28,7 @@ Since SB-517 every call is checked against its tool's `inputSchema` before it ru
 and no argument the schema does not name). A fault is a result with `isError: true` whose
 `structuredContent.error` is `{code: "invalid_arguments", field, message}`, the field as a path
 (`executors[0].agent`, `decision.by`), and nothing ran. A `decision` takes the operator's words
-as `by`, `instruction`, `at` and `source`, and also accepts the relayed-decision fields `via`,
-`action` and `target`. An operation that refuses as data (`{state: "refused", reason}`) reaches
+as `by`, `instruction`, `at` and `source`, and nothing else. An operation that refuses as data (`{state: "refused", reason}`) reaches
 an agent as `isError: true` with `structuredContent.error.code` set to its `reason`.
 
 ## Contents

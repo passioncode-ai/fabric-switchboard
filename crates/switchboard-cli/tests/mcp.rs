@@ -175,7 +175,9 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         [
             "switchboard_session_close_copy",
             "switchboard_dispatch_stop",
-            "switchboard_session_end"
+            "switchboard_session_end",
+            "switchboard_kimi_remove",
+            "switchboard_openrouter_remove"
         ]
     );
     let names: Vec<&str> = tools["result"]["tools"]
@@ -1824,7 +1826,7 @@ async fn arguments_are_checked_against_the_schema_and_the_window_removals_have_t
     ));
     assert_eq!(field, "days");
     assert!(message.contains("1 to 90"), "{message}");
-    // A nested object names its path; the relayed-decision shape's extra fields are accepted.
+    // A nested object names its path; a decision takes the four fields the runtime reads.
     let decision = |extra: Value| {
         let mut d = json!({"by": "operator", "instruction": "remove it", "at": "2026-11-19T10:00:00Z", "source": "session test"});
         d.as_object_mut()
@@ -1848,7 +1850,7 @@ async fn arguments_are_checked_against_the_schema_and_the_window_removals_have_t
     // agent; removing what is not saved removes nothing and says so.
     let (error, removed) = agent.tool(
         "switchboard_openrouter_remove",
-        json!({"decision": decision(json!({"via": "relayed-instruction", "action": "key.remove", "target": "openrouter"}))}),
+        json!({"decision": decision(json!({}))}),
     );
     assert!(!error, "{removed}");
     assert_eq!(removed["removed"], false);
