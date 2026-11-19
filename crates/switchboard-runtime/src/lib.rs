@@ -5019,9 +5019,15 @@ async fn take_handover(
     // (SB-213). Refused, it stays waiting: the window may double the ceiling meanwhile. SB-215: a record without `paid` is
     // classified as its start spends now, and the turn is waited for at most
     // `TAKE_TURN_WAIT`: a hand-over in progress elsewhere answers busy, the record kept.
-    let paid = handovers::waiting(root, id).and_then(|h| {
-        fallback::handover_paid(store.snapshot().ok().as_ref(), &h).map(|kind| (h, kind))
-    });
+    let snapshot = store.snapshot().ok();
+    // W1.2 (DEC-0027), review round 8 of PR #821: the account the person turned off since the
+    // hand-over was queued is not started on; the hand-over is dropped unopened.
+    if handovers::waiting(root, id).is_some_and(|h| handovers::account_off(snapshot.as_ref(), &h)) {
+        handovers::drop_turned_off(root, snapshot.as_ref(), monitor::now());
+        return Err(switchboard_core::off::ACCOUNT_OFF.to_string());
+    }
+    let paid = handovers::waiting(root, id)
+        .and_then(|h| fallback::handover_paid(snapshot.as_ref(), &h).map(|kind| (h, kind)));
     let _turn = match &paid {
         Some((waiting, kind)) => {
             let turn = if fallback::gated() {
@@ -10983,6 +10989,43 @@ mod owner_tests {
         .expect("a take is answered too");
         assert!(taken.is_err(), "no such hand-over");
         drop(held);
+    }
+
+    /// W1.2 (DEC-0027), review round 8 of PR #821: a console's take of a hand-over whose account
+    /// the person turned off after it was queued is refused as turned off, and the hand-over is
+    /// dropped unopened, so neither a console nor the background opens it later.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_hand_over_to_an_account_turned_off_since_it_was_queued_is_not_taken() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let account = fixtures::save(&runtime.store, "synthetic-off", "default");
+        handovers::set_enabled(root.path(), true).unwrap();
+        let handover = handovers::Handover {
+            id: handovers::new_id(),
+            workflow: "wf_0123456789abcdef".into(),
+            agent: "claude-code".into(),
+            account_label: account.label.clone(),
+            dir: root.path().to_owned(),
+            script: root.path().join("runtimes/never.command"),
+            offered_until: "2099-10-13T01:00:00Z".into(),
+            created_at: monitor::now(),
+            paid: None,
+            account: Some(account.id.clone()),
+            key: None,
+        };
+        handovers::record(root.path(), &handover).unwrap();
+        runtime.store.turn_off_since(&account.id, 5).unwrap();
+        let taken = runtime
+            .execute(Operation::HandoverTake {
+                id: handover.id.clone(),
+                ask: false,
+            })
+            .await;
+        assert_eq!(taken.unwrap_err(), switchboard_core::off::ACCOUNT_OFF);
+        assert!(
+            handovers::pending(root.path()).is_empty(),
+            "dropped, not left waiting"
+        );
     }
 
     /// SB-405: `handovers run --ask` takes a hand-over and answers a session with the agent's

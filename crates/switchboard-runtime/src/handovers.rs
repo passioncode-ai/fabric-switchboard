@@ -190,6 +190,48 @@ fn take_at(root: &Path, id: &str, now: i64) -> Result<Handover, String> {
         .ok_or_else(|| NOT_FOUND.to_string())
 }
 
+/// W1.2 (DEC-0027), review round 8 of PR #821: whether the account a waiting hand-over
+/// continues on (`account`, Claude Code, Codex or Kimi Code) is one the person turned off since
+/// it was queued. A record without `account` (queued before 0.7.0) or an unread snapshot is not
+/// refused here: the launch it continues was checked when it was queued.
+pub(crate) fn account_off(snapshot: Option<&switchboard_core::Snapshot>, h: &Handover) -> bool {
+    let (Some(snapshot), Some(id)) = (snapshot, h.account.as_deref()) else {
+        return false;
+    };
+    snapshot
+        .accounts
+        .iter()
+        .any(|a| a.id == id && a.off.is_some())
+        || snapshot
+            .kimi_accounts
+            .iter()
+            .any(|k| k.id == id && k.off.is_some())
+}
+
+/// W1.2 (DEC-0027): every waiting hand-over whose account the person turned off is taken without
+/// a start (log `handover outcome=account_off`), before the background's sweep or a console
+/// could open it. Returns how many.
+pub(crate) fn drop_turned_off(
+    root: &Path,
+    snapshot: Option<&switchboard_core::Snapshot>,
+    now: i64,
+) -> usize {
+    if snapshot.is_none() || !dir(root).exists() {
+        return 0;
+    }
+    let mut dropped = 0;
+    for handover in pending(root) {
+        if account_off(snapshot, &handover) && take_at(root, &handover.id, now).is_ok() {
+            dropped += 1;
+            crate::oplog::event(
+                "handover",
+                &[("outcome", crate::oplog::Field::Code("account_off"))],
+            );
+        }
+    }
+    dropped
+}
+
 pub(crate) fn offer_live(h: &Handover, now: i64) -> bool {
     time::OffsetDateTime::parse(
         &h.offered_until,
@@ -333,6 +375,61 @@ mod tests {
             account: None,
             key: None,
         }
+    }
+
+    /// W1.2 (DEC-0027), review round 8 of PR #821: a hand-over queued for an account the person
+    /// then turned off (Claude Code or Kimi Code) is taken without a start; one for an account
+    /// still on, and one with no recorded account, keep waiting.
+    #[test]
+    fn a_hand_over_to_an_account_turned_off_since_it_was_queued_is_dropped_unopened() {
+        let root = tempfile::tempdir().unwrap();
+        let account = |id: &str, off: bool| switchboard_core::Account {
+            id: id.into(),
+            label: id.into(),
+            provider: switchboard_core::Provider::Claude,
+            kind: switchboard_core::AuthKind::OAuth,
+            pool: "default".into(),
+            enabled: !off,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: None,
+            off: off.then(|| switchboard_core::TurnedOff::by_person(5)),
+        };
+        let snapshot = switchboard_core::Snapshot {
+            accounts: vec![account("claude-off", true), account("claude-on", false)],
+            kimi_accounts: vec![switchboard_core::kimi_accounts::KimiAccount {
+                id: "kimi-off".into(),
+                label: "Kimi".into(),
+                region: "global".into(),
+                added_at: 1,
+                nickname: None,
+                tier: None,
+                off: Some(switchboard_core::TurnedOff::by_person(6)),
+            }],
+            ..Default::default()
+        };
+        let with = |id: &str, account: Option<&str>| Handover {
+            account: account.map(str::to_owned),
+            ..handover(id, 100)
+        };
+        record(root.path(), &with("ho-000000000c01", Some("claude-off"))).unwrap();
+        record(root.path(), &with("ho-000000000c02", Some("kimi-off"))).unwrap();
+        record(root.path(), &with("ho-000000000c03", Some("claude-on"))).unwrap();
+        record(root.path(), &with("ho-000000000c04", None)).unwrap();
+        assert_eq!(
+            drop_turned_off(root.path(), None, 200),
+            0,
+            "no snapshot: nothing dropped"
+        );
+        assert_eq!(drop_turned_off(root.path(), Some(&snapshot), 200), 2);
+        let left: Vec<String> = pending(root.path()).into_iter().map(|h| h.id).collect();
+        assert_eq!(left, vec!["ho-000000000c03", "ho-000000000c04"]);
+        assert!(
+            take(root.path(), "ho-000000000c01").is_err(),
+            "taken once, never opened"
+        );
     }
 
     #[test]

@@ -353,6 +353,9 @@ impl Pass {
         // SB-215: one record without `paid` is classified on the snapshot as it is now, and the
         // pass's gates share one budget.
         let snapshot = runtime.store.snapshot().ok();
+        // W1.2 (DEC-0027): a hand-over whose account the person turned off since it was queued
+        // is dropped unopened.
+        crate::handovers::drop_turned_off(&runtime.root, snapshot.as_ref(), time);
         crate::handovers::sweep(
             &runtime.root,
             time,
