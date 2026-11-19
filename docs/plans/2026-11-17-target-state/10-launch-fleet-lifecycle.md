@@ -296,7 +296,7 @@ and :33; the window and CLI have no spacing (`switchboard-runtime/src/lib.rs:185
 
 | Item | What | Rows | Order |
 |---|---|---|---|
-| W10.0 | Open PRs land: #838 PATH, #848 duty journal, #830 recovery filters, #836 boot resume, #829 org usage, #821 account off, #832 named users | SB-455, SB-505, SB-423, SB-450, SB-451, SB-418, SB-421 | first |
+| W10.0 | Open PRs land: #838 PATH, #848 duty journal, #830 recovery filters, #836 boot resume, #829 org usage, #821 account off, #832 named users | SB-455, SB-505, SB-423, SB-450, SB-451, SB-568 (#829, renumbered from SB-418), SB-418 (#821), SB-421 | first |
 | W10.1 | Lifecycle: the duty journal (merged, #848), host idle rule, one continuation at a time, live-session ledger, gone and rotated-token continuations, dispatch extension, the watchdog job | SB-505 to SB-510, SB-529, SB-530 | 1 |
 | W10.2 | Full access for every agent, remote mode sent, MCP bugs | SB-515, SB-517 | 2 |
 | W10.3 | Smart usage checks and a provider budget | SB-518, SB-519 | 3 |

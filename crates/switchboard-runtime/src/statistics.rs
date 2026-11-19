@@ -515,7 +515,7 @@ impl Statistics {
     }
 }
 
-/// SB-418 (company-assessment-agent's request `8bdf827b`): one seat's opaque id within an
+/// SB-568 (company-assessment-agent's request `8bdf827b`): one seat's opaque id within an
 /// organization, 16 hex digits of SHA-256 over the organization's id and the account's id; the
 /// same in `org-seats/1` (SB-381) and `org-usage/1`, so the two join, and never the account's id.
 pub(crate) fn seat_id(organization: &str, account: &str) -> String {
@@ -524,11 +524,16 @@ pub(crate) fn seat_id(organization: &str, account: &str) -> String {
     digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
-/// SB-418: each organization's daily sums as data another agent may read through Observatory or
+/// SB-568: each organization's daily sums as data another agent may read through Observatory or
 /// the CLI (`org-usage/1`): per UTC day, seat (`seat_id`), provider, class and client, the
 /// requests, their outcomes and tokens. A request counts under its account's first context
-/// (SB-403), so an organization's rows add up to its line in `organizations`; personal accounts
-/// and removed ones are left out. Never a group, project, folder, label, e-mail or account id.
+/// (SB-403) as the store holds it when the report is read, the same rule as the `organizations`
+/// line, so an organization's rows add up to that line: a seat moved to another organization
+/// takes its history with it, and the history of an account or organization removed since
+/// leaves the report (the tally keeps no organization; M5-08 of the 2026-11-19 audit). Personal
+/// accounts are left out. Never a group, project, folder, label, e-mail or account id.
+/// The row's counts are named one by one (`usage_counts`), so a field added to `Tally` for
+/// another purpose never enters `org-usage/1` unannounced.
 /// One organization's rows: (day, seat, client) → the row's fields and its counts.
 type UsageRows = BTreeMap<(String, String, String), (Value, Tally)>;
 fn organization_usage(snapshot: &Snapshot, tallies: &Tallies, from: &str, to: &str) -> Value {
@@ -579,8 +584,8 @@ fn organization_usage(snapshot: &Snapshot, tallies: &Tallies, from: &str, to: &s
                 .into_values()
                 .rev()
                 .map(|(mut fields, t)| {
-                    if let (Value::Object(m), Value::Object(counts)) = (&mut fields, json!(t)) {
-                        m.extend(counts);
+                    if let Value::Object(m) = &mut fields {
+                        m.extend(usage_counts(&t));
                     }
                     fields
                 })
@@ -590,6 +595,34 @@ fn organization_usage(snapshot: &Snapshot, tallies: &Tallies, from: &str, to: &s
         })
         .collect();
     json!({"schema": "org-usage/1", "from": from, "to": to, "organizations": organizations})
+}
+
+/// SB-568: the counts of one `org-usage/1` row, named one by one (M5-08): the outcomes and
+/// tokens always, the list-price cost (SB-401) only when there is one. `Tally::mismatched`
+/// (SB-452) and any later field stay out until the contract names them.
+fn usage_counts(t: &Tally) -> serde_json::Map<String, Value> {
+    let mut m = serde_json::Map::new();
+    for (name, n) in [
+        ("requests", t.requests),
+        ("ok", t.ok),
+        ("limited", t.limited),
+        ("failed", t.failed),
+        ("input_tokens", t.input_tokens),
+        ("output_tokens", t.output_tokens),
+        ("cache_read_tokens", t.cache_read_tokens),
+        ("cache_write_tokens", t.cache_write_tokens),
+    ] {
+        m.insert(name.into(), json!(n));
+    }
+    for (name, n) in [
+        ("cost_micros", t.cost_micros),
+        ("cost_estimated", t.cost_estimated),
+    ] {
+        if n > 0 {
+            m.insert(name.into(), json!(n));
+        }
+    }
+    m
 }
 
 /// SB-147: which project a group folder belongs to. A project is a repository with all its
@@ -970,7 +1003,7 @@ mod tests {
 
     #[test]
     fn an_organizations_daily_usage_names_seats_and_clients_and_no_person_or_folder() {
-        // SB-418: org-usage/1 per day, seat and client; personal and removed accounts left out.
+        // SB-568: org-usage/1 per day, seat and client; personal and removed accounts left out.
         use switchboard_core::{Account, AuthKind, ExternalIdentity, Organization, Provider};
         let now = 1_792_400_000;
         let today = stats::day_of(now);
@@ -990,7 +1023,12 @@ mod tests {
             ),
             (
                 stats::key(&today, "work", "acme", "claude-code", "/Users/x/other"),
-                tally(2, 20),
+                // M5-08: a cost enters the row; `mismatched` (SB-452) never does.
+                Tally {
+                    cost_micros: 7,
+                    mismatched: 2,
+                    ..tally(2, 20)
+                },
             ),
             (
                 stats::key(&yesterday, "work", "acme", "codex", ""),
@@ -1083,6 +1121,59 @@ mod tests {
         ] {
             assert!(!text.contains(leak), "{leak} in {text}");
         }
+        // M5-08: the row's fields are named one by one; nothing else of `Tally` enters.
+        let mut fields: Vec<&str> = rows[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        fields.sort_unstable();
+        assert_eq!(
+            fields,
+            [
+                "cache_read_tokens",
+                "cache_write_tokens",
+                "class",
+                "client",
+                "cost_micros",
+                "day",
+                "failed",
+                "input_tokens",
+                "limited",
+                "ok",
+                "output_tokens",
+                "provider",
+                "requests",
+                "seat"
+            ]
+        );
+        assert_eq!(rows[0]["cost_micros"], 7);
+        assert!(rows[1].get("cost_micros").is_none(), "{:?}", rows[1]);
+        // M5-08: attribution is read when the report is: a seat moved to another organization
+        // takes its history there, as the `organizations` line does.
+        let other = "00000000-0000-4000-8000-000000000002";
+        snapshot.organizations.push(Organization {
+            id: other.into(),
+            name: "Other".into(),
+            domains: vec![],
+            provider_organizations: vec![],
+            created_at: 1,
+            vesta_id: None,
+        });
+        snapshot.memberships.insert("work".into(), other.into());
+        let moved = s.report(&snapshot, &index, 30, now);
+        let orgs = moved["usage"]["organizations"].as_array().unwrap();
+        assert_eq!(orgs.len(), 2);
+        let days_of = |id: &str| {
+            orgs.iter().find(|o| o["organization"] == id).unwrap()["days"]
+                .as_array()
+                .unwrap()
+                .clone()
+        };
+        assert!(days_of(org).is_empty());
+        assert_eq!(days_of(other).len(), 2);
+        assert_eq!(days_of(other)[0]["seat"], json!(seat_id(other, "work")));
     }
 
     #[test]
