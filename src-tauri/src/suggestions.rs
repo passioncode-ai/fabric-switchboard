@@ -115,6 +115,13 @@ fn spend_stamp(root: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
     Some((meta.modified().ok()?, meta.len()))
 }
 
+/// SB-550: remote-usage.json's stamp (modified time and length): one `stat` per look. The owner
+/// rewrites it at each one-minute read of another machine; the window reads it again when it moves.
+fn remote_stamp(root: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
+    let meta = std::fs::metadata(root.join(switchboard_runtime::remote_usage::FILE)).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
 /// One reached ceiling to announce: its value and whom it covers.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Reached {
@@ -214,8 +221,18 @@ pub fn watch(app: AppHandle) {
         let mut told_shell: Option<String> = None;
         let mut spend_last: Option<Option<(std::time::SystemTime, u64)>> = None;
         let mut told_ceilings: HashSet<String> = HashSet::new();
+        let mut remote_last: Option<Option<(std::time::SystemTime, u64)>> = None;
         loop {
             if let Some(runtime) = app.state::<crate::Slot>().running().await {
+                // SB-550: the other machines' last read moved; the window reads it again (a file).
+                let stamp = remote_stamp(&runtime.root);
+                if remote_last.as_ref() != Some(&stamp) {
+                    let first = remote_last.is_none();
+                    remote_last = Some(stamp);
+                    if !first {
+                        let _ = app.emit("machines-changed", 0);
+                    }
+                }
                 // C-7: spend.json's stamp; the ceilings are read only when it moved.
                 let stamp = spend_stamp(&runtime.root);
                 if spend_last.as_ref() != Some(&stamp) {
@@ -382,6 +399,20 @@ mod tests {
             ceiling_text(&only[0], false).1,
             "Daily ceiling $1.00 for beta reached. Double it or keep it in Switchboard."
         );
+    }
+    /// SB-550: remote-usage.json's stamp moves when the owner writes it, absent while there is none.
+    #[test]
+    fn the_remote_stamp_moves_with_the_file() {
+        let dir = std::env::temp_dir().join(format!("sb-550-stamp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(switchboard_runtime::remote_usage::FILE);
+        assert_eq!(remote_stamp(&dir), None);
+        std::fs::write(&file, "{}").unwrap();
+        let one = remote_stamp(&dir);
+        assert!(one.is_some());
+        std::fs::write(&file, "{\"machines\":{}}").unwrap();
+        assert_ne!(remote_stamp(&dir), one, "a longer file is a new stamp");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
     /// The stamp of spend.json moves when the file is written, and is absent while there is none.
     #[test]

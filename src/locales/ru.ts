@@ -4,6 +4,25 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  // SB-550 (DEC-0033, 2026-11-19): the other machines read every minute, with their sessions and health. Copylot en-US reports f4524725…79b729de; ru-RU e1b07239…4486543b.
+  "This machine's Switchboard has not answered three reads in a row. Check that the machine is on and reachable over ssh.": "Switchboard на этой машине не ответил на три чтения подряд. Проверьте, что машина включена и доступна по ssh.",
+  "This machine's Switchboard reports a failing health check. Open Other machines to see which.": "Switchboard на этой машине сообщает о проваленной проверке здоровья. Откройте «Другие машины», чтобы увидеть какой.",
+  "Sessions on this machine need a look: a second copy, or a board run that is quiet or gone.": "Сессии на этой машине требуют внимания: вторая копия или запуск с доски, который затих или пропал.",
+  "On {machine}, read just now": "На машине {machine}, прочитано только что",
+  "On {machine}, read {age} ago": "На машине {machine}, прочитано {age} назад",
+  "This computer's last check · {line}": "Последняя проверка на этом компьютере · {line}",
+  "its Switchboard is not running": "Switchboard там не запущен",
+  "it crashed in the last day": "за последние сутки было падение",
+  "Not answering: three reads in a row failed. Last answer {age} ago.": "Не отвечает: три чтения подряд не удались. Последний ответ {age} назад.",
+  "Not answering: three reads in a row failed.": "Не отвечает: три чтения подряд не удались.",
+  "Sessions: {running} running, {waiting} waiting, {needs} need you.": "Сессии: работают: {running}, ждут: {waiting}, ждут вас: {needs}.",
+  "Its Switchboard is older and does not report its sessions. Update it there.": "Switchboard там старее и не сообщает о своих сессиях. Обновите его там.",
+  "Needs a look there: {checks}.": "Требует внимания там: {checks}.",
+  "No failing health check there.": "Проваленных проверок здоровья там нет.",
+  "Read just now.": "Прочитано только что.",
+  "Read {age} ago.": "Прочитано {age} назад.",
+  "Checked on this computer {date}": "Проверено на этом компьютере {date}",
+  "Checked on {machine} {date}": "Проверено на машине {machine} {date}",
   // SB-403 waves S2 to S4 (DEC-0025, 2026-11-17): delegated seats and the own sign-in switch. Copylot ru-RU reports f0080d06…cd533b73; review round 1: 2117bbe1…e9785338.
   "sign-in removed": "вход удалён",
   "This seat's sign-in was removed from this computer 30 days after its lease ran out. The machine that delegated it signs in to the account again and delegates it again.": "Вход этого места удалён с этого компьютера через 30 дней после конца аренды. Машина, которая его делегировала, снова войдёт в аккаунт и делегирует его заново.",

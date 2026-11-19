@@ -9,7 +9,7 @@
 //! (never read as ok), `fix` names the tool that repairs it. The report's `state` is the worst
 //! check. A check reads only what this Switchboard already keeps: Needs attention (sign-ins,
 //! ended seats, failing usage checks, lost moves, ceiling questions, stuck, duplicate and gone
-//! sessions), `bugs.jsonl` (crashes found at the next start) and `error-counts.json`.
+//! sessions, and since SB-550 the machines its accounts live on), `bugs.jsonl` (crashes found at the next start) and `error-counts.json`.
 use serde_json::{json, Value};
 
 pub const SCHEMA: &str = "agent-health/1";
@@ -115,6 +115,16 @@ pub fn report(inputs: &Inputs) -> Value {
         "ok",
         gone,
         (gone > 0).then_some("switchboard_dispatch_stop"),
+    ));
+    // SB-550: the machines this computer's accounts live on, read every minute: one that stopped
+    // answering, a failing health check there, or sessions there that need a person.
+    let machines = count(&["machine_unreachable", "machine_health", "machine_sessions"]);
+    checks.push(check(
+        "machines",
+        "machines",
+        if machines > 0 { "warn" } else { "ok" },
+        machines,
+        (machines > 0).then_some("switchboard_machines"),
     ));
     let crashes: Vec<i64> = inputs.bugs["crashes"]
         .as_array()
@@ -286,6 +296,7 @@ mod tests {
             {"reason": "session_stuck", "folder": "/secret/path"},
             {"reason": "session_duplicate"},
             {"reason": "session_gone"},
+            {"reason": "machine_unreachable", "label": "studio-machine"},
         ]});
         let now = 10 * 86_400 + 100;
         let bugs = json!({"crashes": [{"at": now - 3600}], "counting": true,
@@ -296,12 +307,13 @@ mod tests {
         assert_eq!(state_of(&r, "sessions_stuck"), "warn");
         assert_eq!(state_of(&r, "sessions_duplicate"), "warn");
         assert_eq!(state_of(&r, "sessions_gone"), "ok");
+        assert_eq!(state_of(&r, "machines"), "warn");
         assert_eq!(state_of(&r, "crashes"), "fail");
         assert_eq!(state_of(&r, "errors_today"), "warn");
         assert_eq!(r["state"], "fail");
         // Counts and kinds only: no label, account, folder or text leaves.
         let text = r.to_string();
-        for planted in ["a@b.c", "/secret/path", "\"x\""] {
+        for planted in ["a@b.c", "/secret/path", "\"x\"", "studio-machine"] {
             assert!(!text.contains(planted), "{planted} leaked");
         }
         // A crash older than a day but within the week only warns.
