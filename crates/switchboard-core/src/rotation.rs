@@ -192,11 +192,10 @@ impl Store {
         now: i64,
         limited: &std::collections::HashSet<String>,
     ) -> Result<RotationDecision, String> {
-        self.decide(policy, current_id, now, limited, policy.max_age_seconds)
+        self.decide(policy, current_id, now, limited)
     }
-    /// SB-518 (DEC-0032): the candidate a switch would take if its figures, up to
-    /// `CANDIDATE_RANK_MAX_AGE_SECONDS` old, were current, when they are older than the policy
-    /// allows: the caller checks it fresh before the pass decides, and `rotation_decision_with`
+    /// SB-518 (DEC-0032): the candidate a switch would take if its last known figure, of any age,
+    /// were current, when no candidate has a figure as recent as the policy allows: the caller checks it fresh before the pass decides, and `rotation_decision_with`
     /// then switches to it only on that fresh figure. None when the decision already has a
     /// candidate known fresh, holds for another reason, or the account in use is held by a
     /// limit (that switch takes the last known figure, SB-98, and waits for nothing).
@@ -227,23 +226,70 @@ impl Store {
         if !over {
             return Ok(None);
         }
-        let ranked = self.decide(
-            policy,
-            current_id,
-            now,
-            limited,
-            policy.max_age_seconds.max(CANDIDATE_RANK_MAX_AGE_SECONDS),
-        )?;
-        let Some(id) = ranked.candidate_id else {
+        // Only where the strict decision found nobody with a current figure: a candidate it
+        // would take, a cooldown or an unusable account in use needs no check.
+        let strict = self.rotation_decision_with(policy, current_id, now, limited)?;
+        if strict.candidate_id.is_some() || strict.reason != "no_eligible_account" {
             return Ok(None);
+        }
+        let current = current_id.unwrap_or_default();
+        let current_kind = {
+            let state = self.lock()?;
+            match state.accounts.iter().find(|a| a.id == current) {
+                Some(a) => a.kind,
+                None => return Ok(None),
+            }
         };
-        let state = self.lock()?;
-        Ok(state
-            .accounts
-            .iter()
-            .find(|a| a.id == id)
-            .filter(|a| fresh_usage(a, policy.max_age_seconds, now).is_none())
-            .map(|a| a.id.clone()))
+        // SB-518 (round 1): ranked on the last figure known at any age; the figure only orders,
+        // the fresh check decides. Never measured reads as 99 (last), a failed or paced account
+        // after every healthy one, and an account last known full is not checked.
+        let paced = self.paced.lock().map(|p| p.clone()).unwrap_or_default();
+        let ranked: Vec<(bool, u8, f64, i64, String)> = {
+            let state = self.lock()?;
+            state
+                .accounts
+                .iter()
+                .filter(|a| {
+                    a.id != current
+                        && a.provider == policy.provider
+                        && state.chooses(a, &policy.pool)
+                        && !limited.contains(&a.id)
+                        && !state.is_assigned(&a.id)
+                        && a.kind == current_kind
+                        && fresh_usage(a, policy.max_age_seconds, now).is_none()
+                })
+                .filter_map(|a| {
+                    let used = last_known_usage(a, now);
+                    let blind = a.usage_health.as_ref().is_none_or(|h| h.status != "ok")
+                        || paced.contains(&a.id);
+                    (used < 100.0).then(|| {
+                        (
+                            !state.context_admits(&policy.pool, a),
+                            u8::from(blind),
+                            used,
+                            a.created_at,
+                            a.id.clone(),
+                        )
+                    })
+                })
+                .collect()
+        };
+        let mut ranked = ranked;
+        ranked.sort_by(|x, y| {
+            x.0.cmp(&y.0)
+                .then_with(|| x.1.cmp(&y.1))
+                .then_with(|| x.2.total_cmp(&y.2))
+                .then_with(|| x.3.cmp(&y.3))
+                .then_with(|| x.4.cmp(&y.4))
+        });
+        // The credential is read only for the one to check, and the next if it is unusable.
+        let state_accounts = self.snapshot()?.accounts;
+        Ok(ranked.into_iter().map(|r| r.4).find(|id| {
+            state_accounts
+                .iter()
+                .find(|a| a.id == *id)
+                .is_some_and(|a| self.rotation_credential_eligible(a, policy, now))
+        }))
     }
     fn decide(
         &self,
@@ -251,7 +297,6 @@ impl Store {
         current_id: Option<&str>,
         now: i64,
         limited: &std::collections::HashSet<String>,
-        candidate_max_age: i64,
     ) -> Result<RotationDecision, String> {
         policy.validate()?;
         if now <= 0 {
@@ -309,7 +354,7 @@ impl Store {
                     // spending ceiling gates, and a key's caller never onto a subscription.
                     && a.kind == current.kind
             })
-            .filter_map(|a| fresh_usage(a, candidate_max_age, now).map(|used| (a, used)))
+            .filter_map(|a| fresh_usage(a, policy.max_age_seconds, now).map(|used| (a, used)))
             .filter(|(a, used)| {
                 // An account in use that fails every request is worse than any account with
                 // room left; otherwise the usual headroom applies.
@@ -699,9 +744,6 @@ fn last_known_usage(account: &Account, now: i64) -> f64 {
     }
     usage.account_used_percent().unwrap_or(99.0)
 }
-/// SB-518: how old a candidate's figures may be for it to be ranked; the one chosen is checked
-/// fresh before a switch (`Store::rotation_candidate_to_confirm`).
-pub const CANDIDATE_RANK_MAX_AGE_SECONDS: i64 = 900;
 /// SB-518: the account in use is checked every `CHECK_ACTIVE_SECONDS` (± 15 %), on the 30-second
 /// pass, under the provider's budget: a policy age below this would hold every switch until a
 /// refusal forced one.

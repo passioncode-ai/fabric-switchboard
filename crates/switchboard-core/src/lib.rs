@@ -49,7 +49,7 @@ pub use projects::{
 };
 pub use rotation::{
     default_managed_policy, free_at, FailoverTally, Fits, RotationDecision, RotationPolicy,
-    CANDIDATE_RANK_MAX_AGE_SECONDS, CURRENT_MAX_AGE_FLOOR_SECONDS,
+    CURRENT_MAX_AGE_FLOOR_SECONDS,
 };
 pub use vault::{
     open_vault, set_vault_kind, vault_kind, FileVault, MemoryVault, NativeVault, Vault, VaultKind,

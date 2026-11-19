@@ -299,7 +299,8 @@ Account list order is display-only; it never selects/activates. Within provider/
   command, set with `switchboard usage-mode smart|timer|on-demand` or MCP `switchboard_usage_mode`
   (`Operation::UsageMode`). `timer` is 0.7.120's cadence below; `on_demand` makes no check on a
   schedule (no due list, no pull-in), while headers, a switch's candidate and a person's check work
-  as in `smart` (`usage_mode::tests`).
+  as in `smart` (`usage_mode::tests`); native rotation has no figure there and moves only on a
+  limit.
 - **Headers count as a check.** `Store::observe_generation` with `source: response_headers` whose
   windows include both `HEADER_WINDOWS` (`five_hour`, `seven_day`) and whose account the usage
   endpoint answered in this process within `PASSIVE_CEILING_SECONDS` = 1800 s
@@ -315,7 +316,7 @@ Account list order is display-only; it never selects/activates. Within provider/
 - **Cadence.** `next_quota_check(in_use || routed, …)`: an account that only could be switched to
   is on the idle cadence in `smart` and `on_demand` (`timer`: `in_use || routed || rotates`).
   `monitor::due_at` spreads every schedule of 120 s or more by ± 15 % (`usage_budget::jittered`,
-  deterministic per account and schedule; not in `timer`).
+  SHA-256 of the account and schedule, the same on every platform; not in `timer`).
 - **Budget.** `UsageGate::budget` (`usage_budget::UsageBudget`, unbudgeted in a test's
   `UsageGate::default()`): per provider a bucket of `TOKEN_SECONDS` = 30 s of refill per check,
   `BURST` = 4; the pass takes a token per check (`monitor::choose_checks`, at most 4 a pass);
@@ -327,25 +328,35 @@ Account list order is display-only; it never selects/activates. Within provider/
   in `smart`, over 400 in `timer`).
 - **Provider hold.** A usage check answered 429 records the account's hold (SB-39, unchanged) and
   `UsageBudget::refused(provider, at, retry_after)`: held until `at + max(retry_after,
-  min(900 · 2^(n-1), 3600))` for the n-th 429 in a row, never shortening a longer hold; a success
-  clears it (`a_429_holds_the_whole_provider_and_doubles_on_repeats_up_to_an_hour`). While held,
+  min(900 · 2^(n-1), 3600))` for the n-th 429 in a row (a 429 more than the last hold's length
+  after it ended counts as the first), never shortening a longer hold; a success clears it (`a_429_holds_the_whole_provider_and_doubles_on_repeats_up_to_an_hour`). While held,
   `due_now_at` leaves every account of the provider out and `check_as` answers
   `USAGE_RATE_LIMITED` before any renewal or credential read, logging `usage_check`
   `provider_held` (`a_429_on_one_accounts_check_holds_every_account_of_the_provider`).
   `usage-provider-holds.json` (0600, `{version: 1, providers: {claude|codex: {until,
   recorded_at, strikes}}}`), a hold over at start dropped, one stamped ahead of the clock moved
   to now plus what was left. Log event `usage_provider_held` (provider, seconds, strikes).
+- **Order.** `monitor::order_due`: class 0 the accounts that carry traffic (a value of
+  `routes`, or `Store::is_in_use`), class 1 those never checked or with a schedule shorter than
+  `CHECK_ACTIVE_SECONDS` (near the limit, pulled in, after a reset), class 2 the rest; oldest due
+  first in each (`a_due_accounts_class_puts_traffic_first_then_brought_forward_then_idle`,
+  `the_account_in_use_stays_under_300_s_old_among_32_accounts_on_the_budget`: 32 accounts, the
+  one in use never 300 s old, every idle one checked within two hours).
 - **Fresh candidate.** `Store::rotation_candidate_to_confirm(policy, current, now, held)`: None
   unless the account in use is at or over its threshold on a current figure (from metadata, no
-  credential read), not held by a limit (SB-98 takes the last known figure and waits for
-  nothing); otherwise the decision ranked with `CANDIDATE_RANK_MAX_AGE_SECONDS` = 900 names a
-  candidate whose figure is older than the policy allows. `monitor::confirm_candidates` checks at
-  most 2 such a pass before the rotation transaction (`check_candidate`, log event
-  `usage_confirm`); `rotation_decision_with` still switches only on figures within the policy's
-  age, the account in use within `max(max_age, CURRENT_MAX_AGE_FLOOR_SECONDS = 300)`
+  credential read; its header figure counts), not held by a limit (SB-98 takes the last known
+  figure and waits for nothing), and the strict decision found `no_eligible_account`; otherwise
+  the candidates without a figure inside the policy's age, ranked by organization, then healthy
+  before failed or paced, then last known usage (`last_known_usage`: of any age, 99 when never
+  measured, 100 or more never taken), then age and id; the first whose credential is usable.
+  `monitor::confirm_candidates` checks at most 2 such a pass before the rotation transaction
+  (`check_candidate`, log event `usage_confirm`), each with a `Caller::Confirm` token, at most one
+  a minute per provider (`CONFIRM_SPACING_SECONDS`); `rotation_decision_with` still switches only
+  on figures within the policy's age, the account in use within `max(max_age,
+  CURRENT_MAX_AGE_FLOOR_SECONDS = 300)`
   (`a_candidate_known_only_from_an_older_figure_is_checked_fresh_before_the_switch`,
-  `a_switch_checks_its_candidate_fresh_before_it_moves`). The proxy's failover (DEC-0002) is
-  unchanged.
+  `a_switch_checks_its_candidate_fresh_before_it_moves`). While the provider is held no candidate
+  is checked. The proxy's failover (DEC-0002) is unchanged.
 - **Near the limit.** An endpoint answer near the limit is not checked again before the last
   complete header plus 60 s, and `pull_in_next_accounts` skips an account whose header is under
   60 s old (`near_its_limit_the_endpoint_is_asked_only_once_no_header_came_for_a_minute`,

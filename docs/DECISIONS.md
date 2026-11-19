@@ -927,10 +927,15 @@ research notes); the ones still in force that the board cites are seeded below w
     makes a per-model window fresher than the endpoint's answer it came with; the account in use
     may switch on its header figures alone when they reach the threshold, never below it.
   - An account that carries no traffic (neither a group's routed account nor the ordinary CLI's)
-    is checked on the idle cadence (600 s); a switch ranks candidates on figures up to 900 s old
-    and takes the one chosen only after one fresh check of it, made before the pass decides
-    (`Store::rotation_candidate_to_confirm`). The account in use is held to its policy's age but
-    never to less than 300 s, the real interval of its checks.
+    is checked on the idle cadence (600 s). Under the budget a pass serves the accounts that carry
+    traffic first, then those brought forward (near the limit, the pool's next account, after a
+    reset, a new sign-in), then the idle ones in turn, so the account in use keeps its 180 s
+    cadence and idle accounts wait longer than 600 s when the budget is short. A switch ranks the
+    candidates on their last known figure, of any age (it only orders: never measured comes last,
+    one last known full is never taken), and takes the one chosen only after one fresh check of
+    it, made before the pass decides (`Store::rotation_candidate_to_confirm`), at most once a
+    minute per provider. The account in use is held to its policy's age but never to less than
+    300 s, the real interval of its checks.
   - Each provider has a budget: 2 checks a minute, a burst of 4, at most 2 on the network at
     once; a person's check and a candidate's check may run up to 4 ahead, which the background
     then waits out. A 429 on any usage check holds the whole provider for
@@ -946,9 +951,15 @@ research notes); the ones still in force that the board cites are seeded below w
 
   The person may choose `timer` (0.7.120's fixed cadence: every account of a switching group every
   180 s, headers postpone nothing, no budget beyond the provider's holds) or `on_demand` (no check
-  on a schedule; a switch's candidate and a person's check still ask). Nothing here touches a
+  on a schedule; a switch's candidate and a person's check still ask). In `on_demand` a managed
+  group's account in use is read from its answers' headers, so it still switches before the limit;
+  native rotation of the ordinary Claude Code has no such source and switches only on a limit. Nothing here touches a
   session's request: DEC-0002's one move of a refused request and DEC-0031's wait stay as they are.
 - **Consequences / affects:** about 120 checks an hour per provider at most instead of up to 480;
+  while a 429 holds a provider, no candidate is checked, so its groups switch only on a limit or a
+  refusal (DEC-0002) until the hold ends; a new sign-in waits out the provider's hold too (the
+  per-account hold of SB-39 still starts afresh with a new credential); a 429 that comes more than
+  its last hold's length after that hold ended starts again from 900 s;
   an account with traffic is read from its answers, the endpoint at least every 30 minutes. A
   switch before the limit no longer waits for a refusal: the candidate is checked fresh within the
   pass. An account whose per-model window is older than its policy's age reads as not fresh in

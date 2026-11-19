@@ -38,6 +38,9 @@ pub(crate) const PROVIDER_HOLD_FLOOR: i64 = crate::usage_gate::RATE_LIMIT_FLOOR;
 pub(crate) const PROVIDER_HOLD_CEILING: i64 = 3600;
 /// ± this share of every computed next-check interval, so checks never fall due in step.
 pub(crate) const JITTER: f64 = 0.15;
+/// A switch's candidate is checked fresh at most once in this many seconds per provider, so
+/// confirmations never take the whole budget from the accounts in use.
+pub(crate) const CONFIRM_SPACING_SECONDS: i64 = 60;
 /// Shorter schedules (a near-limit minute, a reset's half minute) are not spread.
 const JITTER_FROM_SECONDS: i64 = 120;
 const MAX_FILE: u64 = 16 * 1024;
@@ -130,10 +133,15 @@ pub(crate) fn jittered(id: &str, checked: i64, next: i64) -> i64 {
     if reach == 0 {
         return next;
     }
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    (id, next).hash(&mut h);
-    let offset = (h.finish() % (2 * reach as u64 + 1)) as i64 - reach;
+    // A fixed hash (SHA-256), so the spread is the same on every build and platform.
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(id.as_bytes());
+    h.update(next.to_be_bytes());
+    let digest = h.finalize();
+    let mut eight = [0u8; 8];
+    eight.copy_from_slice(&digest[..8]);
+    let offset = (u64::from_be_bytes(eight) % (2 * reach as u64 + 1)) as i64 - reach;
     next.saturating_add(offset)
 }
 
@@ -146,6 +154,8 @@ pub(crate) struct UsageBudget {
     buckets: Mutex<HashMap<Provider, Bucket>>,
     holds: Mutex<BTreeMap<String, ProviderHold>>,
     flights: Mutex<HashMap<Provider, Arc<tokio::sync::Semaphore>>>,
+    /// When the last fresh check of a switch's candidate took a token, per provider.
+    confirmed_at: Mutex<HashMap<Provider, i64>>,
 }
 
 impl UsageBudget {
@@ -238,15 +248,22 @@ impl UsageBudget {
         }
         let snapshot = {
             let mut holds = lock(&self.holds);
+            // A hold that ended more than its own length ago is history: the next 429 starts
+            // again from the floor.
             let strikes = holds
                 .get(provider.as_str())
+                .filter(|h| now.saturating_sub(h.until) <= h.until.saturating_sub(h.recorded_at))
                 .map_or(0, |h| h.strikes)
                 .saturating_add(1);
             let until = now.saturating_add(provider_hold_seconds(retry_after, strikes));
             // Never shortens a hold already longer.
-            let until = holds
-                .get(provider.as_str())
-                .map_or(until, |h| h.until.max(until));
+            let until = holds.get(provider.as_str()).map_or(until, |h| {
+                if h.until > now {
+                    h.until.max(until)
+                } else {
+                    until
+                }
+            });
             holds.insert(
                 provider.as_str().to_owned(),
                 ProviderHold {
@@ -306,6 +323,13 @@ impl UsageBudget {
         if caller == Caller::Background && self.flight(provider).available_permits() == 0 {
             return Err(USAGE_PACED.into());
         }
+        if caller == Caller::Confirm
+            && lock(&self.confirmed_at)
+                .get(&provider)
+                .is_some_and(|at| now >= *at && now - at < CONFIRM_SPACING_SECONDS)
+        {
+            return Err(USAGE_PACED.into());
+        }
         let mut buckets = lock(&self.buckets);
         let bucket = buckets.entry(provider).or_default();
         bucket.refill(now);
@@ -318,6 +342,10 @@ impl UsageBudget {
             return Err(USAGE_PACED.into());
         }
         bucket.credit -= TOKEN_SECONDS;
+        drop(buckets);
+        if caller == Caller::Confirm {
+            lock(&self.confirmed_at).insert(provider, now);
+        }
         Ok(())
     }
 
@@ -378,6 +406,12 @@ mod tests {
         assert!(budget.take(p, Caller::Person, 1_030).is_err());
         assert!(budget.take(p, Caller::Background, 1_030 + 120).is_err());
         assert!(budget.take(p, Caller::Background, 1_030 + 150).is_ok());
+        // A switch's candidate: once a minute per provider, whatever the bucket holds.
+        let confirming = UsageBudget::limited();
+        assert!(confirming.take(p, Caller::Confirm, 5_000).is_ok());
+        assert!(confirming.take(p, Caller::Confirm, 5_059).is_err());
+        assert!(confirming.take(p, Caller::Background, 5_059).is_ok());
+        assert!(confirming.take(p, Caller::Confirm, 5_060).is_ok());
         // A clock set back refills nothing.
         assert!(budget.take(p, Caller::Background, 500).is_err());
         // A test's gate is unbudgeted.
@@ -431,6 +465,14 @@ mod tests {
         restarted.succeeded(Provider::Claude);
         assert_eq!(restarted.held_until(Provider::Claude, 2_000), None);
         assert_eq!(restarted.refused(Provider::Claude, 4_000, None), 4_900);
+        // A 429 long after the last hold ended starts again from the floor.
+        let aging = UsageBudget::limited();
+        assert_eq!(aging.refused(Provider::Codex, 10_000, None), 10_900);
+        assert_eq!(aging.refused(Provider::Codex, 10_900, None), 12_700);
+        // That hold lasted 1800 s and ended at 12 700: a 429 within 1800 s after doubles again,
+        assert_eq!(aging.refused(Provider::Codex, 14_000, None), 17_600);
+        // one later than its length after the end does not.
+        assert_eq!(aging.refused(Provider::Codex, 17_600 + 3_601, None), 22_101);
         // A hold over by the next start is dropped.
         assert_eq!(
             UsageBudget::kept_in(path, 4_900).held_until(Provider::Claude, 4_900),

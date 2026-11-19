@@ -2612,23 +2612,64 @@ fn the_pools_next_account_is_not_pulled_in_while_its_headers_are_fresh() {
 
 #[test]
 fn a_candidate_known_only_from_an_older_figure_is_checked_fresh_before_the_switch() {
-    use switchboard_core::CANDIDATE_RANK_MAX_AGE_SECONDS;
     let (_root, _vault, store) = setup();
     let now = clock();
     let a = account(&store, "org-a", now);
     let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
     let p = policy();
     let none = Default::default();
     observe(&store, &a, 95., now);
-    // Older than the ranking allows: not even a candidate to check.
-    observe(&store, &b, 10., now - CANDIDATE_RANK_MAX_AGE_SECONDS - 1);
+    // Nothing measured but a and b: c, never measured, ranks after any known figure, at any age.
+    // Two hours old (and still before its window's reset): ranked on it all the same.
+    store
+        .observe(
+            &b,
+            Usage {
+                used_percent: 10.,
+                observed_at: now - 7200,
+                resets_at: Some(now + 3600),
+                source: "claude_oauth".into(),
+                windows: vec![UsageWindow {
+                    name: "five_hour".into(),
+                    used_percent: 10.,
+                    resets_at: Some(now + 3600),
+                }],
+            },
+        )
+        .unwrap();
     assert_eq!(
         store
             .rotation_candidate_to_confirm(&p, Some(&a), now, &none)
             .unwrap(),
-        None
+        Some(b.clone()),
+        "the last known figure orders at any age"
     );
-    // Ten minutes old: past the policy's five, inside the ranking's fifteen.
+    // One last known full is never checked: the never-measured one is.
+    store
+        .observe(
+            &b,
+            Usage {
+                used_percent: 100.,
+                observed_at: now - 7000,
+                resets_at: Some(now + 3600),
+                source: "claude_oauth".into(),
+                windows: vec![UsageWindow {
+                    name: "five_hour".into(),
+                    used_percent: 100.,
+                    resets_at: Some(now + 3600),
+                }],
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .rotation_candidate_to_confirm(&p, Some(&a), now, &none)
+            .unwrap(),
+        Some(c.clone())
+    );
+    store.update(&c, "C".into(), false).unwrap();
+    // Ten minutes old: past the policy's five.
     observe(&store, &b, 10., now - 600);
     let strict = store
         .rotation_decision_with(&p, Some(&a), now, &none)

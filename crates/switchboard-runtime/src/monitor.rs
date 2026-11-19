@@ -276,13 +276,20 @@ impl Pass {
                 )
             })
             .collect();
-        // Oldest due first: a failing first row cannot starve another account.
-        due.sort_by_key(|a| {
-            a.usage_health
-                .as_ref()
-                .map(|h| h.next_check_at)
-                .unwrap_or(0)
-        });
+        // SB-518 (round 1): the accounts that carry traffic first, then those brought forward
+        // (near the limit, the pool's next account, a reset, a new sign-in), then the rest;
+        // oldest due first in each, so a failing first row cannot starve another account.
+        let active: std::collections::HashSet<String> = snapshot
+            .routes
+            .values()
+            .cloned()
+            .chain(
+                due.iter()
+                    .filter(|a| runtime.store.is_in_use(&a.id))
+                    .map(|a| a.id.clone()),
+            )
+            .collect();
+        order_due(&mut due, &active);
         if native_sources {
             renew_due(runtime, time, &mut self.renew).await;
         }
@@ -306,7 +313,7 @@ impl Pass {
         // W4 items 2 and 14: Claude Code's sign-in and the accounts that need a new sign-in are
         // read once per pass, before the transaction (Keychain reads held it up to 48 s).
         let inputs = crate::blocking::run(|| rotate_inputs(runtime, native_sources));
-        // SB-518 (DEC-0032): a switch ranks candidates on figures up to fifteen minutes old and
+        // SB-518 (DEC-0032): a switch ranks candidates on their last known figure, of any age, and
         // takes one only on a fresh figure: the one it would take is checked now, outside the
         // transaction, counted in its provider's budget. Never a request of a session: the proxy's
         // one move of a refused request (DEC-0002) is untouched.
@@ -600,7 +607,35 @@ fn primed_or_read(
     }
 }
 
-/// The due accounts (oldest first) this pass checks: at most four, and in the `smart` and
+/// SB-518 (round 1): a due account's place in the pass. 0: it carries traffic (a group's routed
+/// account, or the ordinary CLI's); 1: its check was brought forward (a schedule shorter than the
+/// active cadence: near the limit, the pool's next account, just after a reset) or it was never
+/// checked (a new sign-in); 2: the rest. Under the budget the first class is served first, so
+/// the account in use keeps its three-minute cadence however many idle accounts wait.
+fn check_class(a: &Account, active: &std::collections::HashSet<String>) -> u8 {
+    if active.contains(&a.id) {
+        return 0;
+    }
+    match a.usage_health.as_ref() {
+        None => 1,
+        Some(h) if h.next_check_at - h.checked_at < switchboard_core::CHECK_ACTIVE_SECONDS => 1,
+        Some(_) => 2,
+    }
+}
+/// Orders the due accounts by class, then oldest due first.
+fn order_due(due: &mut [Account], active: &std::collections::HashSet<String>) {
+    due.sort_by_key(|a| {
+        (
+            check_class(a, active),
+            a.usage_health
+                .as_ref()
+                .map(|h| h.next_check_at)
+                .unwrap_or(0),
+        )
+    });
+}
+
+/// The due accounts (in `order_due`'s order) this pass checks: at most four, and in the `smart` and
 /// `on_demand` modes each only with a token of its provider's budget (SB-518, DEC-0032: two a
 /// minute, a burst of four), so a provider without one waits for a later pass. The `timer` mode
 /// keeps 0.7.120's four a pass with no budget.
@@ -2923,7 +2958,7 @@ mod tests {
                     .filter(|a| due_now_at(a, time, &gate, spread))
                     .cloned()
                     .collect();
-                due.sort_by_key(|a| a.usage_health.as_ref().map(|h| h.next_check_at));
+                order_due(&mut due, &Default::default());
                 for chosen in choose_checks(due, &gate, mode, time) {
                     checks += 1;
                     let a = accounts.iter_mut().find(|a| a.id == chosen.id).unwrap();
@@ -2943,6 +2978,102 @@ mod tests {
         );
         let timer = hour(switchboard_core::UsageMode::Timer);
         assert!(timer > 400, "timer: {timer} checks an hour");
+    }
+    /// SB-518 review round 1 (P1-1): with the budget spent on 31 idle accounts, the account a
+    /// session works on is served first, so its figure is never older than the 300 s a switch
+    /// needs, and the idle accounts still take the rest of the budget in turn.
+    #[test]
+    fn the_account_in_use_stays_under_300_s_old_among_32_accounts_on_the_budget() {
+        let gate = UsageGate::budgeted();
+        let start = 2_000_000;
+        let active_id = "synthetic-00".to_string();
+        let active: std::collections::HashSet<String> = [active_id.clone()].into();
+        let mut accounts: Vec<Account> = (0..32)
+            .map(|n| switchboard_core::Account {
+                id: format!("synthetic-{n:02}"),
+                label: "Synthetic".into(),
+                provider: Provider::Claude,
+                kind: AuthKind::OAuth,
+                pool: "default".into(),
+                enabled: true,
+                created_at: 1,
+                identity: None,
+                usage: None,
+                external_identity: None,
+                usage_health: Some(switchboard_core::UsageHealth {
+                    status: "ok".into(),
+                    checked_at: start - 600,
+                    next_check_at: start,
+                }),
+            })
+            .collect();
+        let (mut oldest, mut checks) = (0, 0);
+        let mut idle_checked = std::collections::HashSet::new();
+        for k in 0..2 * 3600 / PASS_SECONDS as i64 {
+            let time = start + k * PASS_SECONDS as i64;
+            let mut due: Vec<Account> = accounts
+                .iter()
+                .filter(|a| due_now_at(a, time, &gate, true))
+                .cloned()
+                .collect();
+            order_due(&mut due, &active);
+            for chosen in choose_checks(due, &gate, switchboard_core::UsageMode::Smart, time) {
+                checks += 1;
+                let cadence = if chosen.id == active_id {
+                    switchboard_core::CHECK_ACTIVE_SECONDS
+                } else {
+                    idle_checked.insert(chosen.id.clone());
+                    switchboard_core::CHECK_IDLE_SECONDS
+                };
+                let a = accounts.iter_mut().find(|a| a.id == chosen.id).unwrap();
+                a.usage_health = Some(switchboard_core::UsageHealth {
+                    status: "ok".into(),
+                    checked_at: time,
+                    next_check_at: time + cadence,
+                });
+            }
+            if k >= 1 {
+                let a = accounts.iter().find(|a| a.id == active_id).unwrap();
+                oldest = oldest.max(time - a.usage_health.as_ref().unwrap().checked_at);
+            }
+        }
+        assert!(
+            oldest < switchboard_core::CURRENT_MAX_AGE_FLOOR_SECONDS,
+            "the account in use was {oldest} s old"
+        );
+        assert!(checks <= 2 * 130, "{checks} checks in two hours");
+        assert_eq!(idle_checked.len(), 31, "every idle account takes its turn");
+    }
+    #[test]
+    fn a_due_accounts_class_puts_traffic_first_then_brought_forward_then_idle() {
+        let account = |id: &str, health: Option<(i64, i64)>| switchboard_core::Account {
+            id: id.into(),
+            label: "Synthetic".into(),
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            pool: "default".into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: health.map(
+                |(checked_at, next_check_at)| switchboard_core::UsageHealth {
+                    status: "ok".into(),
+                    checked_at,
+                    next_check_at,
+                },
+            ),
+        };
+        let mut due = vec![
+            account("idle-old", Some((0, 600))),
+            account("near", Some((500, 550))),
+            account("new", None),
+            account("routed", Some((900, 1080))),
+        ];
+        order_due(&mut due, &["routed".to_string()].into());
+        let order: Vec<&str> = due.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(order, ["routed", "new", "near", "idle-old"]);
     }
     #[test]
     fn backoff_is_bounded_and_clock_independent() {
