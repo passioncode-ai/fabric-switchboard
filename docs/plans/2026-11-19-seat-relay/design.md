@@ -44,6 +44,8 @@ Goals:
 - G5. The teammate accepts it in the window or through MCP; Claude Code on the teammate's computer
   can do the whole setup except the browser consent.
 - G6. Every state is typed. A read that failed is `unknown`, never an empty inbox or an absent seat.
+- G7. The owner bounds what a guest may spend: a usage ceiling per window and a last-resort place
+  in the teammate's rotation, both enforced on the receiving machine (section 9a).
 
 Non-goals:
 
