@@ -460,6 +460,7 @@ async fn incomplete_stream_is_aborted_instead_of_success() {
         spend_pool: String::new(),
         spend_root: None,
         _permit: permit,
+        _named_permit: None,
     };
     drop(stream);
     let snap = s.snapshot().unwrap();
