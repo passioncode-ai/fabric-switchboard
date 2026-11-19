@@ -1,7 +1,8 @@
 //! SB-420: a Claude Code Keychain item Switchboard could not write because it is too large to
 //! go through the security tool without its value on the command line. Each refusal is kept in
 //! `<data>/keychain-too-large.json` (0600, which item, during what and when; never a value or a
-//! size), cleared by the next write of that item that succeeds. `switchboard status` (MCP
+//! size; since SB-549 the version that recorded it), cleared by the next write of that item that
+//! succeeds, and dropped at the start of an owner of another version. `switchboard status` (MCP
 //! `switchboard_status`) and Needs attention read it, so the state is seen, not only logged.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -81,7 +82,12 @@ pub fn record_at_stamp(root: &Path, item: &str, during: &str, at: i64, stamp: Op
     let mut items = read(root);
     if items
         .iter()
-        .any(|e| e.item == item && e.during == during && e.stamp == stamp)
+        .any(|e| {
+            e.item == item
+                && e.during == during
+                && e.stamp == stamp
+                && e.version.as_deref() == Some(env!("CARGO_PKG_VERSION"))
+        })
     {
         return;
     }

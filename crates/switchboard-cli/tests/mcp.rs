@@ -175,7 +175,9 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         [
             "switchboard_session_close_copy",
             "switchboard_dispatch_stop",
-            "switchboard_session_end"
+            "switchboard_session_end",
+            "switchboard_kimi_remove",
+            "switchboard_openrouter_remove"
         ]
     );
     let names: Vec<&str> = tools["result"]["tools"]
@@ -269,6 +271,8 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_kimi_accounts",
             "switchboard_kimi_login",
             "switchboard_kimi_rename",
+            "switchboard_kimi_remove",
+            "switchboard_openrouter_remove",
             "switchboard_handovers_set",
             "switchboard_openrouter_models",
             "switchboard_project_suggestions",
@@ -464,13 +468,64 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             && !read_names.contains(&"switchboard_shell_hook_set"),
         "the terminal hook reads under --read-only and is never set there"
     );
-    assert_eq!(
-        reader.request(
-            "tools/call",
-            json!({"name":"switchboard_switch","arguments":{"account_id":"x"}})
-        )["error"]["code"],
-        -32602
+    // SB-517: a write on a read-only server is refused by name, as an error result with its
+    // code, never as an unknown tool; the tools with a read form are listed and answer it.
+    let reply = reader.request(
+        "tools/call",
+        json!({"name":"switchboard_switch","arguments":{"account_id":"x"}}),
     );
+    assert_eq!(reply["result"]["isError"], true, "{reply}");
+    assert_eq!(
+        reply["result"]["structuredContent"]["error"]["code"],
+        "read_only"
+    );
+    assert!(reply["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("read-only"));
+    for name in [
+        "switchboard_capacity",
+        "switchboard_duty",
+        "switchboard_own_sign_in",
+        "switchboard_app",
+        "switchboard_analytics",
+        "switchboard_balance",
+        "switchboard_feed",
+        "switchboard_anthropic_keys",
+        "switchboard_launch_keys",
+        "switchboard_codex_route",
+    ] {
+        assert!(
+            read_names.contains(&name),
+            "{name} reads on a read-only server"
+        );
+    }
+    assert!(!read_names.contains(&"switchboard_openrouter_remove"));
+    assert!(!read_names.contains(&"switchboard_kimi_remove"));
+    let (error, capacity) = reader.tool("switchboard_capacity", json!({}));
+    assert!(!error, "the read form answers: {capacity}");
+    let (error, balance) = reader.tool("switchboard_balance", json!({}));
+    assert!(!error, "the read form answers: {balance}");
+    let (error, keys) = reader.tool("switchboard_anthropic_keys", json!({}));
+    assert!(!error, "the read form answers: {keys}");
+    for (name, arguments) in [
+        ("switchboard_capacity", json!({"cap": 4})),
+        ("switchboard_duty", json!({"on": false})),
+        ("switchboard_duty", json!({"run": true})),
+        (
+            "switchboard_anthropic_keys",
+            json!({"name": "team-a", "model": "claude-sonnet-5-5"}),
+        ),
+        ("switchboard_balance", json!({"add": ["default"]})),
+        ("switchboard_feed", json!({"pool": "default", "on": true})),
+    ] {
+        let reply = reader.request("tools/call", json!({"name": name, "arguments": arguments}));
+        assert_eq!(reply["result"]["isError"], true, "{name}: {reply}");
+        assert_eq!(
+            reply["result"]["structuredContent"]["error"]["code"], "read_only",
+            "{name}"
+        );
+    }
     // A read-only server never asks the provider: `refresh` shows the stored observation and
     // says why, so no quota request, renewal or write happens on its behalf.
     let (error, usage) = reader.tool(
@@ -962,15 +1017,17 @@ async fn ceiling_answer_double_over_mcp_is_refused_with_the_window_named() {
     assert_eq!(empty["ceilings"], json!([]));
     // Risk 5: a body without usd, or with usd null, on a scope with no ceiling is refused with
     // the one sentence, never answered as a success that clears nothing (ceiling null).
+    // SB-517: a body without usd is refused by the schema check, naming usd.
     const USD: &str = "usd is a number of dollars from 0.01 to 1000.";
-    for body in [
-        json!({}),
-        json!({"usd": null}),
-        json!({"scope": "workflow:wf_0123456789abcdef"}),
+    const REQUIRED: &str = "usd is required.";
+    for (body, sentence) in [
+        (json!({}), REQUIRED),
+        (json!({"usd": null}), USD),
+        (json!({"scope": "workflow:wf_0123456789abcdef"}), REQUIRED),
     ] {
         let (error, refused) = agent.tool("switchboard_ceiling_set", body.clone());
         assert!(error, "{body}: {refused}");
-        assert_eq!(refused.as_str(), Some(USD), "{body}");
+        assert_eq!(refused.as_str(), Some(sentence), "{body}");
     }
     let (error, set) = agent.tool("switchboard_ceiling_set", json!({"usd": 5}));
     assert!(!error, "{set}");
@@ -982,7 +1039,7 @@ async fn ceiling_answer_double_over_mcp_is_refused_with_the_window_named() {
     );
     let (error, missing) = agent.tool("switchboard_ceiling_set", json!({}));
     assert!(error, "a body without usd is never a clear: {missing}");
-    assert_eq!(missing.as_str(), Some(USD));
+    assert_eq!(missing.as_str(), Some(REQUIRED));
     let (error, lowered) = agent.tool(
         "switchboard_ceiling_set",
         json!({"scope": "machine", "usd": 4}),
@@ -1748,4 +1805,104 @@ fn a_server_whose_program_was_replaced_answers_with_the_new_program() {
     // `initialize` and `ping` stay with the running server.
     let ping = agent.request("ping", json!({}));
     assert_eq!(ping["result"], json!({}));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn arguments_are_checked_against_the_schema_and_the_window_removals_have_tools() {
+    // SB-517: every call is checked against its tool's schema before it runs; a fault is an
+    // error result that names the field, with the code `invalid_arguments`.
+    let (data, projects, _owner, ids) = fixture().await;
+    let mut agent = Agent::start(data.path(), projects.path(), &[], false);
+    let refused = |reply: &Value| {
+        assert_eq!(reply["result"]["isError"], true, "{reply}");
+        let error = &reply["result"]["structuredContent"]["error"];
+        assert_eq!(error["code"], "invalid_arguments", "{reply}");
+        (
+            error["field"].as_str().unwrap().to_owned(),
+            error["message"].as_str().unwrap().to_owned(),
+        )
+    };
+    let call = |agent: &mut Agent, name: &str, arguments: Value| {
+        agent.request("tools/call", json!({"name": name, "arguments": arguments}))
+    };
+    let (field, message) = refused(&call(
+        &mut agent,
+        "switchboard_switch",
+        json!({"account_id": ids[0], "acount": "typo"}),
+    ));
+    assert_eq!(field, "acount");
+    assert!(
+        message.contains("account_id"),
+        "the known arguments are named: {message}"
+    );
+    let (field, _) = refused(&call(&mut agent, "switchboard_switch", json!({})));
+    assert_eq!(field, "account_id");
+    let (field, message) = refused(&call(
+        &mut agent,
+        "switchboard_switch",
+        json!({"account_id": ids[0], "target": "everywhere"}),
+    ));
+    assert_eq!(field, "target");
+    assert!(message.contains("route"), "{message}");
+    let (field, message) = refused(&call(
+        &mut agent,
+        "switchboard_capacity",
+        json!({"cap": "4"}),
+    ));
+    assert_eq!(field, "cap");
+    assert!(message.contains("whole number"), "{message}");
+    let (field, message) = refused(&call(
+        &mut agent,
+        "switchboard_statistics",
+        json!({"days": 0}),
+    ));
+    assert_eq!(field, "days");
+    assert!(message.contains("1 to 90"), "{message}");
+    // A nested object names its path; a decision takes the four fields the runtime reads.
+    let decision = |extra: Value| {
+        let mut d = json!({"by": "operator", "instruction": "remove it", "at": "2026-11-19T10:00:00Z", "source": "session test"});
+        d.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        d
+    };
+    let (field, _) = refused(&call(
+        &mut agent,
+        "switchboard_openrouter_remove",
+        json!({"decision": decision(json!({"by": "agent"}))}),
+    ));
+    assert_eq!(field, "decision.by");
+    let (field, _) = refused(&call(
+        &mut agent,
+        "switchboard_openrouter_remove",
+        json!({"decision": decision(json!({"mood": "sure"}))}),
+    ));
+    assert_eq!(field, "decision.mood");
+    // SB-517: the window's Remove of the OpenRouter key and of a Kimi Code account, for an
+    // agent; removing what is not saved removes nothing and says so.
+    let (error, removed) = agent.tool(
+        "switchboard_openrouter_remove",
+        json!({"decision": decision(json!({}))}),
+    );
+    assert!(!error, "{removed}");
+    assert_eq!(removed["removed"], false);
+    let (error, removed) = agent.tool("switchboard_openrouter_remove", json!({}));
+    assert!(!error, "{removed}");
+    assert_eq!(removed["removed"], false);
+    let id = "8a3c6f0e-6d55-4b8e-9a51-2f4b3c1d7e90";
+    let (error, removed) = agent.tool("switchboard_kimi_remove", json!({"id": id}));
+    assert!(!error, "{removed}");
+    assert_eq!(removed["removed"], false);
+    let tools = agent.request("tools/list", json!({}));
+    for name in ["switchboard_openrouter_remove", "switchboard_kimi_remove"] {
+        let tool = tools["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is listed"))
+            .clone();
+        assert_eq!(tool["annotations"]["destructiveHint"], true, "{name}");
+        assert_eq!(tool["annotations"]["idempotentHint"], true, "{name}");
+    }
 }
