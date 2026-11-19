@@ -8070,6 +8070,8 @@ async fn execute(
             // SB-403: a delegated seat whose lease ran out there: nothing is there to give back
             // to. Its row there is removed, and the account stays here to be signed in again.
             if !answered && taken.lease_ended {
+                // The program there, for a removal tried again (the tuple below shadows it).
+                let program_there = program.clone();
                 let (machine, program, data_dir, remote, key) = (
                     from.clone(),
                     program.clone(),
@@ -8103,7 +8105,7 @@ async fn execute(
                             machine: from.clone(),
                             remote_id: taken.remote_id.clone(),
                             sender_key: taken.sender_key.clone(),
-                            program: program.clone(),
+                            program: program_there,
                             data_dir: remote_data_dir.clone(),
                             since: monitor::now(),
                             tries: 0,
