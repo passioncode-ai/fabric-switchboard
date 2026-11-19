@@ -188,6 +188,13 @@ pub fn seen_of(rows: &[Value], pairs: &[(String, u32)]) -> Vec<Seen> {
 /// sessions run every `REFRESH_SECONDS`; with no session running nothing is written. Called after
 /// `tick`, which reads the previous boot's.
 pub fn observe(root: &Path, boot: i64, seen: Vec<Seen>, now: i64) {
+    if STOPPED
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .contains(root)
+    {
+        return;
+    }
     let kept = read_ledger(root);
     if kept.as_ref().is_some_and(|l| {
         l.boot == boot
@@ -210,7 +217,12 @@ pub fn observe(root: &Path, boot: i64, seen: Vec<Seen>, now: i64) {
 
 /// The owner's drain: the ledger of this boot says when its watch stopped looking.
 pub fn owner_stopped(root: &Path, now: i64) {
-    let Some(boot) = boot_time() else { return };
+    // A watch pass still running after this writes no ledger of its own (`observe`).
+    STOPPED
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(root.to_owned());
+    let Some(boot) = boot() else { return };
     if let Some(mut ledger) = read_ledger(root).filter(|l| l.boot == boot) {
         ledger.stopped_at = Some(now);
         write_ledger(root, &ledger);
@@ -271,6 +283,37 @@ pub trait Machine {
     fn on_limit_stop(&self) -> HashSet<String> {
         HashSet::new()
     }
+    /// Sessions closed on purpose since `since` (`session_watch::closed_on_purpose`, and the duty
+    /// officer's close begun and not finished yet): they were meant to end.
+    fn closed_on_purpose(&self, _since: i64) -> HashSet<String> {
+        HashSet::new()
+    }
+    /// Whether the session's last words were the person's `/exit` (`session_watch::exited`).
+    fn exited(&self, _folder: &str, _session: &str) -> bool {
+        false
+    }
+    /// Whether the person's own sign-in is off limits (SB-403 S3): only sessions in
+    /// Switchboard's own homes are continued then.
+    fn own_sign_in_off(&self) -> bool {
+        false
+    }
+}
+
+/// Exit codes of a process a signal ended at shutdown (128 + SIGHUP, SIGKILL, SIGTERM).
+const SHUTDOWN_EXIT_CODES: [i64; 3] = [129, 137, 143];
+
+/// SB-450 (review round 3 of #836): a launch whose end was recorded as `exited` by a shutdown
+/// signal after the owner's last look and before the boot (an in-place or headless launch, a
+/// host, which record their own end as the machine stops) was cut by the restart.
+fn ended_by_restart(record: &Value, last_look: i64, boot: i64) -> bool {
+    let ended = &record["ended"];
+    ended["kind"] == "exited"
+        && ended["exit_code"]
+            .as_i64()
+            .is_some_and(|c| SHUTDOWN_EXIT_CODES.contains(&c))
+        && ended["at"]
+            .as_i64()
+            .is_some_and(|at| at >= last_look && at <= boot)
 }
 
 /// One session the restart cut.
@@ -304,6 +347,8 @@ pub fn candidates(
     }
     let live = machine.live_sessions();
     let stopped = machine.on_limit_stop();
+    let closed = machine.closed_on_purpose(boot - WINDOW_SECONDS);
+    let ours_only = machine.own_sign_in_off();
     let mut found: Vec<Candidate> = Vec::new();
     for seen in &ledger.sessions {
         let Some(r) = records.get(&seen.launch_id) else {
@@ -318,7 +363,16 @@ pub fn candidates(
         }
         let claude = r["provider"].as_str().is_none_or(|p| p == "claude");
         let before = r["launched_at"].as_i64().is_some_and(|t| t < boot);
-        if !claude || !before || !r["ended"].is_null() || !r["continued_as"].is_null() {
+        let open = r["ended"].is_null() || ended_by_restart(r, ledger.at, boot);
+        // A dispatched board run is Fabric's to start again, never an interactive session; with
+        // the person's own sign-in off limits only Switchboard's own homes (`home_dir`) are ours.
+        if !claude
+            || !before
+            || !open
+            || !r["continued_as"].is_null()
+            || !r["dispatch"].is_null()
+            || (ours_only && r["home_dir"].as_str().is_none())
+        {
             continue;
         }
         let Some(folder) = r["working_directory"].as_str() else {
@@ -337,6 +391,18 @@ pub fn candidates(
             || looked < boot - WINDOW_SECONDS
             || written > looked.saturating_add(LOOK_SLACK_SECONDS)
         {
+            continue;
+        }
+        // Only a session the restart cut in a turn (SB-509's rule): it wrote after its last turn
+        // ended and its last words were not the person's `/exit`. One idle between turns waited
+        // for the person, and nothing would answer a prompt to go on.
+        let baseline = r["last_turn_at"]
+            .as_i64()
+            .or_else(|| r["launched_at"].as_i64())
+            .unwrap_or(boot);
+        let cut = written > baseline + crate::session_watch::CUT_MARGIN_SECONDS
+            && !machine.exited(folder, &seen.session);
+        if !cut || closed.contains(&seen.session) {
             continue;
         }
         if done.contains(&seen.session)
@@ -500,6 +566,31 @@ impl Machine for Real<'_> {
     fn on_limit_stop(&self) -> HashSet<String> {
         crate::recovery::live_stop_sessions(self.root, self.now)
     }
+    fn closed_on_purpose(&self, since: i64) -> HashSet<String> {
+        let duty = crate::duty::journal(self.root);
+        let mut closed = crate::session_watch::closed_on_purpose(
+            &crate::resumable::recent(self.root, since),
+            &duty,
+            since,
+        );
+        // A close the duty officer began and has not finished: its next check records it closed.
+        closed.extend(
+            duty.iter()
+                .filter(|l| l["phase"] == "intent" && l["action"] == "close")
+                .filter(|l| l["at"].as_i64().is_some_and(|at| at >= since))
+                .filter_map(|l| l["session"].as_str().map(str::to_owned)),
+        );
+        closed
+    }
+    fn exited(&self, folder: &str, session: &str) -> bool {
+        crate::resumable::locate(self.root, session, self.now).is_some_and(|(config, _)| {
+            let path = crate::resumable::transcript(&config, folder, session);
+            crate::session_watch::exited(&crate::session_watch::transcript_tail(&path))
+        })
+    }
+    fn own_sign_in_off(&self) -> bool {
+        crate::own_sign_in::is_off(self.root)
+    }
     fn admit(&self) -> Result<Option<Box<dyn std::any::Any>>, Full> {
         crate::capacity::reserve(self.root, crate::capacity::Start::Interactive)
             .map(|r| r.map(|r| Box::new(r) as Box<dyn std::any::Any>))
@@ -519,6 +610,14 @@ impl Machine for Real<'_> {
             by,
         };
         let cli = crate::launch::agent_cli().ok_or("no_cli")?;
+        // SB-403 S3: with the person's own sign-in off limits, never a session found in the
+        // person's own Claude folder.
+        if self.own_sign_in_off()
+            && crate::resumable::locate(self.root, session, self.now)
+                .is_none_or(|(config, _)| !config.starts_with(self.root))
+        {
+            return Err("not_ours".into());
+        }
         let answer = crate::resumable::continue_as(self.root, session, self.now, &how)?;
         let (Some(id), Some(script)) = (answer["launch_id"].as_str(), answer["script"].as_str())
         else {
@@ -527,10 +626,14 @@ impl Machine for Real<'_> {
         if let Err(error) =
             crate::session_host::start_detached(self.root, id, Path::new(script), &cli, 40, 120)
         {
-            // A host that never came up ends its record here; one that runs ends it itself.
-            if crate::session_host::attachable(self.root, id).is_none() {
-                crate::launches::end_once(self.root, id, "not_started", self.now, Some(1));
+            // A host still coming up when the wait ended is given a moment more: one that runs
+            // now is a continuation, never journalled as failed.
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if crate::session_host::attachable(self.root, id).is_some() {
+                return Ok(id.to_owned());
             }
+            // A host that never came up ends its record here; one that runs ends it itself.
+            crate::launches::end_once(self.root, id, "not_started", self.now, Some(1));
             return Err(error);
         }
         Ok(id.to_owned())
@@ -542,6 +645,10 @@ impl Machine for Real<'_> {
 }
 
 static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The data folders whose owner drained in this process: their ledger keeps the drain's
+/// `stopped_at`, never a later watch pass's look.
+static STOPPED: std::sync::Mutex<std::collections::BTreeSet<std::path::PathBuf>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
 static BOOT: std::sync::OnceLock<Option<i64>> = std::sync::OnceLock::new();
 /// This boot's time, read once a process.
 pub(crate) fn boot() -> Option<i64> {
@@ -560,7 +667,7 @@ pub fn tick(root: &Path, rows: &[Value], pairs: &[(String, u32)], table_read: bo
         && settings(root).is_ok_and(|s| s.on)
     {
         // SB-403 S3: with the person's own sign-in off limits, only sessions in Switchboard's
-        // own homes are continued; `continue_as` locates each in its launch's home.
+        // own homes are continued (`Machine::own_sign_in_off`).
         let _ = run(root, boot, now, &Real { root, now });
     }
     // A scan that could not read the process table says nothing of what runs.
@@ -607,6 +714,9 @@ mod tests {
         full: bool,
         fail: HashSet<String>,
         stopped: HashSet<String>,
+        closed: HashSet<String>,
+        exited: HashSet<String>,
+        off: bool,
         started: RefCell<Vec<String>>,
     }
     impl Machine for Fake {
@@ -628,6 +738,15 @@ mod tests {
         }
         fn on_limit_stop(&self) -> HashSet<String> {
             self.stopped.clone()
+        }
+        fn closed_on_purpose(&self, _: i64) -> HashSet<String> {
+            self.closed.clone()
+        }
+        fn exited(&self, _: &str, session: &str) -> bool {
+            self.exited.contains(session)
+        }
+        fn own_sign_in_off(&self) -> bool {
+            self.off
         }
         fn continue_hosted(&self, session: &str, _: &str) -> Result<String, String> {
             if self.fail.contains(session) {
@@ -972,6 +1091,85 @@ mod tests {
         fake.stopped.insert("c".into());
         run(root, BOOT, BOOT + 60, &fake);
         assert_eq!(*fake.started.borrow(), ["b"]);
+    }
+
+    #[test]
+    fn only_sessions_the_restart_cut_in_a_turn_are_continued() {
+        // Review round 3 of #836.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let at = BOOT - 600;
+        let home = json!({"home_dir": "homes/acct"});
+        // a: cut in a turn, in Switchboard's home. b: closed on purpose (a resumable line, a
+        // duty close). c: the person's `/exit`. d: idle between turns (no write after its last
+        // turn). e: a dispatched board run. f: ended by the shutdown's SIGTERM after the last
+        // look. g: ended by SIGTERM before the last look (the person's own stop). h: in the
+        // person's own Claude folder (no `home_dir`).
+        launch(root, &id(1), "a", BOOT - 9000, home.clone());
+        launch(root, &id(2), "b", BOOT - 9000, home.clone());
+        launch(root, &id(3), "c", BOOT - 9000, home.clone());
+        launch(
+            root,
+            &id(4),
+            "d",
+            BOOT - 9000,
+            json!({"home_dir": "homes/acct", "last_turn_at": BOOT - 1000}),
+        );
+        launch(
+            root,
+            &id(5),
+            "e",
+            BOOT - 9000,
+            json!({"home_dir": "homes/acct", "dispatch": {"request": "r"}}),
+        );
+        launch(
+            root,
+            &id(6),
+            "f",
+            BOOT - 9000,
+            json!({"home_dir": "homes/acct",
+                "ended": {"kind": "exited", "exit_code": 143, "at": BOOT - 30}}),
+        );
+        launch(
+            root,
+            &id(7),
+            "g",
+            BOOT - 9000,
+            json!({"home_dir": "homes/acct",
+                "ended": {"kind": "exited", "exit_code": 143, "at": at - 60}}),
+        );
+        launch(root, &id(8), "h", BOOT - 9000, json!({}));
+        let pairs: Vec<(String, String)> = ["a", "b", "c", "d", "e", "f", "g", "h"]
+            .iter()
+            .enumerate()
+            .map(|(n, s)| ((*s).to_owned(), id(n as u32 + 1)))
+            .collect();
+        let pairs: Vec<(&str, &str)> = pairs
+            .iter()
+            .map(|(s, i)| (s.as_str(), i.as_str()))
+            .collect();
+        ledger(root, &pairs, at, Some(BOOT - 20));
+        let mut fake = Fake {
+            off: true,
+            ..Fake::default()
+        };
+        for s in ["a", "b", "c", "e", "f", "g", "h"] {
+            fake.written.insert(s.into(), BOOT - 300);
+        }
+        fake.written.insert("d".into(), BOOT - 1000 + 10);
+        fake.closed.insert("b".into());
+        fake.exited.insert("c".into());
+        run(root, BOOT, BOOT + 60, &fake);
+        assert_eq!(*fake.started.borrow(), ["a", "f"]);
+        // With the person's own sign-in on, the session in their folder is theirs to continue.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        launch(root, &id(8), "h", BOOT - 9000, json!({}));
+        ledger(root, &[("h", &id(8))], at, Some(BOOT - 20));
+        let mut fake = Fake::default();
+        fake.written.insert("h".into(), BOOT - 300);
+        run(root, BOOT, BOOT + 60, &fake);
+        assert_eq!(*fake.started.borrow(), ["h"]);
     }
 
     #[test]

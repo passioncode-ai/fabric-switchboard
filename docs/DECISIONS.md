@@ -890,8 +890,16 @@ research notes); the ones still in force that the board cites are seeded below w
   they change and every 30 minutes while such sessions run, and stamped with `stopped_at` at the owner's drain. The first watch pass of an
   owner whose ledger is from an earlier boot (boot time from `kern.boottime` on macOS, `/proc/stat`
   `btime` on Linux) continues each session of that ledger that:
-  - has a launch record with no `ended`, no `continued_as`, provider Claude, launched before the
-    boot (a dispatched board run is continued only when it has no end either);
+  - has a launch record naming that session, with no `continued_as`, provider Claude, launched
+    before the boot, not a dispatched board run (Fabric starts those again), and either no `ended`
+    or an `exited` end with a shutdown signal's code (129, 137, 143) recorded after the ledger's
+    last look and before the boot; with the person's own sign-in off (SB-403 S3), only a record in
+    Switchboard's own home;
+  - was cut in a turn (SB-509's rule: its transcript written more than 30 s after its last turn
+    ended and its last lines not the person's `/exit`), and nothing closed it on purpose (a
+    `resumable.jsonl` line, a duty officer's close, finished or begun); a session idle between
+    turns waited for the person, and a prompt to go on would answer for them (review round 3 of
+    PR #836, 2026-11-19);
   - was in the ledger at a look no older than 2 hours before the boot, and its owner did not stop
     looking before the session's last transcript write (120 s of slack);
   - has its transcript (in any config folder) last written in the 2 hours before the boot, not after;

@@ -1338,8 +1338,12 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   `session_corrected_at` says when; logged once per pass as `launch_session_corrected` with a
   count. It runs on every fresh read of the session watch (each minute, and a tree read older than
   15 s) and before `sessions show <launch_id>` answers; a scan that could not read the process
-  table corrects nothing. Its own turns count from the correction on. Evidence:
-  `a_record_naming_another_session_than_its_own_process_holds_is_corrected`.
+  table corrects nothing. A record that ended, was launched before this boot, or whose process
+  started more than 60 s before its `launched_at` is never corrected (`launches::may_correct`: that
+  process cannot be its own, a stale marker or a reused pid joined it). Its own turns count from
+  the correction on. Evidence:
+  `a_record_naming_another_session_than_its_own_process_holds_is_corrected`,
+  `a_record_a_process_could_not_belong_to_is_never_corrected`.
 - **Where it went.** `continued_as` is set once, where the successor is known, and only to a
   launch that started: a launch naming a
   `parent` sets `{kind: "launch", id}` on it; a continuation of a workflow sets it on the latest
@@ -3900,15 +3904,29 @@ the window's `boot_resume` command (Settings → Sessions after a restart, SCN-1
   session; a nested `claude -p` joined to the same launch is not its session) and writes `<data>/boot-live.json` (0600:
   `boot`, `at`, `sessions: [{session, launch_id}]`, `stopped_at`) when the boot or that set
   changed, `stopped_at` was set, or, while that set is not empty, its `at` is 30 minutes old
-  (`REFRESH_SECONDS`); with no such session running nothing is written. The owner's drain sets `stopped_at` on a ledger of this boot.
+  (`REFRESH_SECONDS`); with no such session running nothing is written. The owner's drain sets `stopped_at` on a ledger of this boot,
+  and no watch pass of that owner writes the ledger after it (`boot_resume::observe` checks the drained data folders).
+  A home's `.session-pid` written before this boot, or older than the process now holding its pid
+  by more than 60 s (`launch::marker_outlived`), joins no process to its launch, and a
+  `sessions/<pid>.json` last written more than 60 s before its process started is not that
+  process's session (`fabric_sessions_core::machine_sessions::written_before_start`): after a
+  restart a reused pid never reads as an old session.
   Boot time: `sysctl kern.boottime` (macOS), `btime` of `/proc/stat` (Linux), read once a process.
 - **The pass.** Once per owner process, the first watch pass that read the process table decides:
   with `boot-resume.json` saying on (absent: on) and a ledger from an earlier boot it runs
   `boot_resume::run`; a pass that could not read the table waits for the next one. `run` it first settles each
   intent of this boot with no outcome (`continued` when a live process holds the session or it is
   `being_continued`, else `interrupted`), then continues what `boot_resume::candidates` admits,
-  the rule of DEC-0030 (no end, not continued, Claude, launched before the boot, its record naming
-  that session; in the ledger, the
+  the rule of DEC-0030 (Claude, launched before the boot, its record naming that session, not
+  continued, not a dispatched board run (`dispatch`), and either no end or an `exited` end with a
+  shutdown signal's exit code (129, 137, 143) recorded between the ledger's `at` and the boot (an
+  in-place or headless launch, or a host, records its own end as the machine stops); with the
+  person's own sign-in off (SB-403 S3), only a record with `home_dir` (Switchboard's own home),
+  and its continuation refused (`not_ours`) when `resumable::locate` finds it outside the data
+  folder; cut in a turn (SB-509's rule: transcript written more than
+  `session_watch::CUT_MARGIN_SECONDS` after `last_turn_at`, else `launched_at`, and its last
+  lines not the person's `/exit`), not closed on purpose since 2 hours before the boot
+  (`session_watch::closed_on_purpose`, and a duty officer's close intent not finished yet); in the ledger, the
   ledger at most 2 hours older than the boot and its last look neither older than that nor older
   than the transcript's last write minus 120 s, the last look being `stopped_at`, or, with none
   (no drain: a crash, a power cut), the ledger's `at` plus `REFRESH_SECONDS`; transcript last written in `[boot - 7200, boot]`
@@ -3919,9 +3937,12 @@ the window's `boot_resume` command (Settings → Sessions after a restart, SCN-1
   until the pass ends (a started session takes seconds to show in the process table); a refusal
   writes `at_capacity` for it and every one after. A continuation is `resumable::continue_as` with `How
   {in_place: true, hosted: true, by: {surface: recovery, by: boot-resume, parent: <launch>}}`, then
-  `session_host::start_detached(root, launch, script, launch::agent_cli(), 40, 120)`; a host that
-  never came up ends the new launch `not_started`. A started one gives the cut launch `ended: {kind:
-  reboot, at}` (unless an end was recorded) and `continued_as: {kind: launch, id}`.
+  `session_host::start_detached(root, launch, script, launch::agent_cli(), 40, 120)`; when that
+  wait ends unanswered the pass looks once more 2 s later, a host that runs then is a
+  continuation, and one that never came up ends the new launch `not_started`. A started one gives the cut launch `ended: {kind:
+  reboot, at}` (unless an end was recorded) and `continued_as: {kind: launch, id}`; the
+  Sessions page reads that end as “Cut by a computer restart, continued after it” (`why:
+  reboot`), and MCP `switchboard_sessions` names `reboot` among the ends.
 - **The journal.** `<data>/boot-resume.jsonl` (0600, the newest 500 lines within 256 KiB; a
   file grown past that is read up to 4 MiB and cut to its newest lines, never emptied): `at`, `boot`, `session`,
   `launch_id`, `folder`, `phase` (`intent` before a start; `outcome` after) and `outcome`

@@ -108,11 +108,12 @@ pub fn session_pairs(accounts: &dyn Accounts) -> Vec<(String, u32, String)> {
 }
 
 fn pairs_for(accounts: &dyn Accounts, procs: &[Proc]) -> Vec<(String, u32, String)> {
-    let alive: std::collections::HashSet<u32> = procs
+    let started: HashMap<u32, Option<i64>> = procs
         .iter()
         .filter(|p| p.agent == "claude-code")
-        .map(|p| p.pid)
+        .map(|p| (p.pid, p.started_at))
         .collect();
+    let alive: std::collections::HashSet<u32> = started.keys().copied().collect();
     let mut files = Vec::new();
     for dir in session_dirs(accounts) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -123,17 +124,46 @@ fn pairs_for(accounts: &dyn Accounts, procs: &[Proc]) -> Vec<(String, u32, Strin
                 continue;
             }
             // A session file is a few hundred bytes; anything larger is not one.
-            if std::fs::metadata(&path).is_ok_and(|m| m.len() <= 64 * 1024) {
-                if let Some(v) = std::fs::read(&path)
+            let Ok(meta) = std::fs::metadata(&path) else {
+                continue;
+            };
+            if meta.len() > 64 * 1024 {
+                continue;
+            }
+            if let Some(v) = std::fs::read(&path)
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            {
+                // SB-450 (review round 3 of fabric-switchboard #836): a file last written before
+                // the process now holding its pid started is an older process's (a pid reused,
+                // after a restart above all), never that process's session.
+                let written = meta
+                    .modified()
                     .ok()
-                    .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-                {
-                    files.push(v);
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64);
+                let pid = v["pid"].as_u64().and_then(|p| u32::try_from(p).ok());
+                let begun = pid.and_then(|p| started.get(&p).copied().flatten());
+                if written_before_start(written, begun) {
+                    continue;
                 }
+                files.push(v);
             }
         }
     }
     pairs_from(&files, &alive)
+}
+
+/// How much earlier than its process's start a session file may read as written (clock rounding).
+const SESSION_FILE_MARGIN: i64 = 60;
+
+/// SB-450: whether a session file written at `written` predates the process that started at
+/// `started` (by more than `SESSION_FILE_MARGIN`), so that process did not write it. Unknown
+/// times keep the file. Pure.
+pub fn written_before_start(written: Option<i64>, started: Option<i64>) -> bool {
+    written
+        .zip(started)
+        .is_some_and(|(w, s)| w + SESSION_FILE_MARGIN < s)
 }
 
 /// The pure part of [`session_pairs`]: one pair per session file whose pid is a live process.
@@ -585,6 +615,19 @@ fn os_agent_processes() -> Result<Vec<Proc>, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_file_older_than_its_process_is_not_its_session() {
+        // SB-450: a file from before a restart whose pid a new process holds.
+        assert!(written_before_start(Some(1000), Some(2000)));
+        assert!(
+            !written_before_start(Some(1990), Some(2000)),
+            "within the margin"
+        );
+        assert!(!written_before_start(Some(2100), Some(2000)));
+        assert!(!written_before_start(None, Some(2000)), "unknown keeps it");
+        assert!(!written_before_start(Some(1000), None));
+    }
 
     #[test]
     fn claude_code_and_codex_are_known_by_their_executable() {

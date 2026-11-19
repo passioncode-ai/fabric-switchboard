@@ -375,7 +375,14 @@ fn reconcile_records(root: &Path, scan: &Value, pairs: &[(String, u32)], now: i6
         let path = crate::resumable::transcript(config, cwd, session);
         path.is_file().then_some(path)
     };
-    crate::launches::reconcile(root, &rows, pairs, transcript_of, now);
+    crate::launches::reconcile(
+        root,
+        &rows,
+        pairs,
+        transcript_of,
+        crate::boot_resume::boot(),
+        now,
+    );
 }
 
 /// SB-451: before one launch is shown, its record is checked against its process (a read at most
@@ -699,7 +706,7 @@ pub fn offer(
 }
 
 /// The last bytes of a transcript, for `exited`.
-fn transcript_tail(path: &Path) -> String {
+pub(crate) fn transcript_tail(path: &Path) -> String {
     use std::io::{Read, Seek, SeekFrom};
     let Ok(mut file) = std::fs::File::open(path) else {
         return String::new();

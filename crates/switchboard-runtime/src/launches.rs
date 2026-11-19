@@ -1133,7 +1133,8 @@ pub(crate) fn continued_by_boot(root: &Path, id: &str, to: &str, now: i64) {
 /// when it started. A launch's own process is the earliest one of its rows: a session it runs
 /// itself (a nested `claude -p`) is its child and starts after it. `pairs` are the live
 /// (session id, pid) pairs. `transcript_of(pid, session)` names that session's transcript when
-/// it exists. Each record whose session differs is corrected: `provider_session_id` and
+/// it exists; `boot`, this boot's time (`boot_resume::boot`). Each record whose session differs,
+/// and that `may_correct` admits, is corrected: `provider_session_id` and
 /// `transcript` become the process's, the session it named moves to `nested_sessions`, and
 /// `session_corrected_at` says when. Returns the launches corrected.
 pub(crate) fn reconcile(
@@ -1141,6 +1142,7 @@ pub(crate) fn reconcile(
     rows: &[Value],
     pairs: &[(String, u32)],
     transcript_of: impl Fn(u32, &str) -> Option<PathBuf>,
+    boot: Option<i64>,
     now: i64,
 ) -> Vec<String> {
     let session_of: std::collections::HashMap<u32, &str> =
@@ -1163,17 +1165,19 @@ pub(crate) fn reconcile(
         }
     }
     let mut corrected = Vec::new();
-    for (id, (_, pid)) in own {
+    for (id, (started, pid)) in own {
         let Some(session) = session_of.get(&pid).copied().filter(|s| valid_session(s)) else {
             continue;
         };
-        if read(root, id).is_none_or(|r| r["provider_session_id"] == session) {
+        if read(root, id)
+            .is_none_or(|r| r["provider_session_id"] == session || !may_correct(&r, started, boot))
+        {
             continue;
         }
         let transcript = transcript_of(pid, session);
         let _writing = writing();
         let changed = update(root, id, |r| {
-            if r["provider_session_id"] == session {
+            if r["provider_session_id"] == session || !may_correct(r, started, boot) {
                 return false;
             }
             correct(r, session, transcript.as_deref(), now);
@@ -1191,6 +1195,21 @@ pub(crate) fn reconcile(
     }
     corrected
 }
+/// SB-450 (review round 3 of #836): whether the process that started at `started` can be the
+/// launch `record` runs. Never a record that ended or was launched before this boot (a process
+/// now holding a pid its marker or host named then is another one), nor one launched after the
+/// process started (beyond `PROCESS_START_MARGIN`): its process starts after its record.
+fn may_correct(record: &Value, started: i64, boot: Option<i64>) -> bool {
+    let Some(launched) = record["launched_at"].as_i64() else {
+        return false;
+    };
+    record["ended"].is_null()
+        && boot.is_none_or(|b| launched >= b)
+        && (started == i64::MAX || started + PROCESS_START_MARGIN >= launched)
+}
+/// How much earlier than its record a launch's process may read as started (clocks, rounding).
+const PROCESS_START_MARGIN: i64 = 60;
+
 /// SB-451: `record` with `session` as its own, the session it named kept in `nested_sessions`.
 fn correct(record: &mut Value, session: &str, transcript: Option<&Path>, now: i64) {
     let before = record["provider_session_id"].as_str().map(str::to_owned);
@@ -1779,7 +1798,7 @@ mod tests {
         let found =
             |pid: u32, session: &str| (pid == 20 && session == "9dd3-own").then(|| own.clone());
         assert_eq!(
-            reconcile(&root, &rows, &pairs, found, 300),
+            reconcile(&root, &rows, &pairs, found, None, 300),
             std::slice::from_ref(&id)
         );
         let r = read_back(&root, &id);
@@ -1791,19 +1810,40 @@ mod tests {
         // Its own turns count from now on, and a second read changes nothing.
         event(&root, &id, Event::Turn, Some("9dd3-own"), None, 310);
         assert_eq!(read_back(&root, &id)["turns"], 1);
-        assert!(reconcile(&root, &rows, &pairs, found, 400).is_empty());
+        assert!(reconcile(&root, &rows, &pairs, found, None, 400).is_empty());
         assert_eq!(read_back(&root, &id)["session_corrected_at"], 300);
         // A session that wrote no transcript yet leaves none named, never the old one.
         let rows =
             vec![json!({"pid": 22, "agent": "claude-code", "launch_id": id, "started_at": 150})];
         let pairs = vec![("cleared-again".to_owned(), 22)];
         assert_eq!(
-            reconcile(&root, &rows, &pairs, |_, _| None, 500),
+            reconcile(&root, &rows, &pairs, |_, _| None, None, 500),
             std::slice::from_ref(&id)
         );
         let r = read_back(&root, &id);
         assert!(r["transcript"].is_null());
         assert_eq!(r["nested_sessions"], json!(["222f-nested", "9dd3-own"]));
+    }
+
+    #[test]
+    fn a_record_a_process_could_not_belong_to_is_never_corrected() {
+        // SB-450 (review round 3 of #836): a stale marker or a reused pid joins a process to an
+        // old launch; its record must keep its own session.
+        let (_temp, root, id) = fixture();
+        event(&root, &id, Event::Start, Some("own"), None, 101);
+        let rows = |started: i64| {
+            vec![json!({"pid": 20, "agent": "claude-code", "launch_id": id, "started_at": started})]
+        };
+        let pairs = vec![("other".to_owned(), 20)];
+        // Launched before this boot (100 < 150).
+        assert!(reconcile(&root, &rows(160), &pairs, |_, _| None, Some(150), 200).is_empty());
+        // A process older than its record (launched at 100, started at 10).
+        assert!(reconcile(&root, &rows(10), &pairs, |_, _| None, None, 200).is_empty());
+        assert_eq!(read_back(&root, &id)["provider_session_id"], "own");
+        // An ended record.
+        assert!(end_once(&root, &id, "exited", 150, Some(0)));
+        assert!(reconcile(&root, &rows(100), &pairs, |_, _| None, None, 200).is_empty());
+        assert_eq!(read_back(&root, &id)["provider_session_id"], "own");
     }
 
     /// SB-347: a history answer reads no record file that did not change since the last one

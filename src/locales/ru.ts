@@ -2119,6 +2119,7 @@ export const RU: Record<string, string> = {
   // Sessions page wave 1 (2026-11-16): the audit of the page and its restart flow.
   "Unable to load sessions": "Не удалось загрузить сессии",
   "Ended by a restart and not back, can continue": "Завершена перезапуском и не вернулась, можно продолжить",
+  "Cut by a computer restart, continued after it": "Прервана перезагрузкой компьютера, продолжена после неё",
   "Asking this computer and your other machines…": "Загрузка с этого компьютера и других ваших машин…",
   "No restart wave has run on this computer.": "На этом компьютере ещё не было перезапуска.",
   "The sessions could not be read. Refresh to retry.": "Не удалось прочитать сессии. Обновите, чтобы повторить.",
