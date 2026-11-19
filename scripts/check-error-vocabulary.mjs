@@ -143,6 +143,7 @@ const ALLOWLIST = {
   'no_cli': 'SB-450: a journal reason code, shown as its outcome sentence',
   'no_script': 'SB-450: a journal reason code, shown as its outcome sentence',
   'unsupported': 'SB-450: a journal reason code, shown as its outcome sentence',
+  'not_ours': 'SB-450: a journal reason code, shown as its outcome sentence',
   // runtime session_host.rs start_detached (SB-450): `launch --hosted` and `sessions continue
   // --hosted` print it to their terminal, and the owner's pass after a restart journals it; no
   // window or MCP request starts a host.
