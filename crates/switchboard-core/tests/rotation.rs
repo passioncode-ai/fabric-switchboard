@@ -2455,6 +2455,24 @@ fn a_complete_header_observation_postpones_the_next_check_up_to_the_ceiling() {
         .observe(&id, header_usage(15., fresh + 10, &both))
         .unwrap();
     assert_eq!(next_check(&store, &id), fresh + 10 + CHECK_ACTIVE_SECONDS);
+    // A new credential generation is checked at once: its first header postpones nothing,
+    // though the endpoint answered the previous one within the ceiling.
+    let renewed = store
+        .upsert(
+            "org-routed".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "routed".into(),
+            credential("org-routed-new", now + 9999),
+            Some(identity("org-routed")),
+        )
+        .unwrap()
+        .id;
+    assert_eq!(renewed, id);
+    store
+        .observe(&id, header_usage(16., fresh + 20, &both))
+        .unwrap();
+    assert_eq!(next_check(&store, &id), fresh + 20);
 }
 
 #[test]

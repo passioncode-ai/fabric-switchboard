@@ -964,7 +964,8 @@ research notes); the ones still in force that the board cites are seeded below w
   switch before the limit no longer waits for a refusal: the candidate is checked fresh within the
   pass. An account whose per-model window is older than its policy's age reads as not fresh in
   `switchboard_usage` while headers keep its five-hour and seven-day figures current. A person's
-  burst of more than 4 checks of one provider answers that checks are paced. Settings: CLI
+  checks of one provider run 4 ahead of the bucket (up to 8 at once from a full one), then answer
+  that checks are paced. Settings: CLI
   `switchboard usage-mode`, MCP `switchboard_usage_mode`. `AGENTS.md` (Background monitor, Writes,
   Idle budget), [CONTRACTS](CONTRACTS.md#smart-usage-checks-sb-518-dec-0032).
 - **Source:** plan 10 §H (target state, 2026-11-19 audit); the coordinator of SB-518 (plan review:

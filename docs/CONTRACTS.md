@@ -291,7 +291,7 @@ Account list order is display-only; it never selects/activates. Within provider/
 
 - `switchboard uninstall [--keep-data] [--yes]` → `switchboard_runtime::uninstall::uninstall(root, vault, keep_data, apply, places)`. Without `--yes` it returns the plan (`accounts`, `cli_link`, `orphan_keychain_item`, `data_entries`, `kept`, `applied: false`) and changes nothing. The store is opened exclusively, so it refuses while an owner runs.
 - With `--yes`, first (SB-183): the terminal hook's block comes out of every start file it is in (`shell::install::remove_all`, `Places::shell`, the person's home; each file byte for byte as before, whatever the choice; a start file the installer created and that holds nothing else is deleted), and the plan names `shell_hook_files` (start files holding the block). Only the app's own data folder looks at the start files (`uninstall::places(root)`: `Places::shell` is None for any other `--data-dir`, since every data folder writes the same marker into the same home; test `uninstall::tests::only_the_apps_own_data_folder_takes_the_blocks_out`, and on Linux CLI `another_data_folder_never_touches_the_start_files`). `shell-hook` and `shell-hook.json` are owned entries; `<data>/shell/` is kept like a session home: its map and hook scripts go, and in each shell home the credential-shaped files of a session home plus `config.toml` (it names the machine's auto capability) go while the history stays (`--purge` removes it whole). Test: `uninstall::tests::apply_removes_owned_things_and_keeps_the_persons_files` (an injected home).
-- With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then, unless `--keep-data`, only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` (the Kimi Code homes, each the only copy of its login, SB-81), `launches` (the launch records, SB-212), `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
+- With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then, unless `--keep-data`, only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `usage-provider-holds.json` and `usage-mode` (SB-518), `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` (the Kimi Code homes, each the only copy of its login, SB-81), `launches` (the launch records, SB-212), `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
 
 ## Smart usage checks (SB-518, DEC-0032)
 
@@ -308,7 +308,8 @@ Account list order is display-only; it never selects/activates. Within provider/
   endpoint answered in this process within `PASSIVE_CEILING_SECONDS` = 1800 s
   (`Store::endpoint_seen`, memory only): `next_check_at = max(existing, min(observed + 180,
   endpoint + 1800))`, near the limit `observed + HEADER_FRESH_SECONDS` (60) instead of 180. A
-  partial header, a header before the endpoint's first answer and one past the ceiling keep
+  partial header, a header before the endpoint's first answer, one for a new credential
+  generation (its usage health cleared) and one past the ceiling keep
   `max(existing, observed)` as before
   (`a_complete_header_observation_postpones_the_next_check_up_to_the_ceiling`). The merged usage
   keeps the oldest age of the windows it holds, as before
@@ -340,8 +341,9 @@ Account list order is display-only; it never selects/activates. Within provider/
   `due_now_at` leaves every account of the provider out and `check_as` answers
   `USAGE_RATE_LIMITED` before any renewal or credential read, logging `usage_check`
   `provider_held` (`a_429_on_one_accounts_check_holds_every_account_of_the_provider`), and asks
-  again once it has its place on the network, so a check that waited for one meets a hold set
-  meanwhile.
+  again once it has its place on the network and just before the request (`monitor::probe`), so a
+  check that waited or renewed meets a hold set meanwhile, and the answer that ends a hold is to a
+  request sent after it.
   `usage-provider-holds.json` (0600, `{version: 1, providers: {claude|codex: {until,
   recorded_at, strikes}}}`), a hold over at start dropped, one stamped ahead of the clock moved
   to now plus what was left. Log event `usage_provider_held` (provider, seconds, strikes).

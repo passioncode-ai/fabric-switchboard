@@ -22,6 +22,9 @@ const OWNED: &[&str] = &[
     "proxy.json",
     "renewal-state.json",
     "usage-holds.json",
+    // The provider-wide holds after a 429 and the person's usage check mode (SB-518).
+    "usage-provider-holds.json",
+    "usage-mode",
     "limit-evidence.json",
     "recovery.json",
     // Events pruned from recovery.json lately, ids only (N1 round 1).

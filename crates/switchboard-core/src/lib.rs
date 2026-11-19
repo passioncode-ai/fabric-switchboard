@@ -2821,8 +2821,12 @@ impl Store {
         // While the endpoint answered within the ceiling, a header is as fresh as a check. The
         // `timer` mode keeps the fixed cadence of 0.7.121: no header postpones anything.
         let smart = self.usage_mode() != UsageMode::Timer;
-        let passive =
-            smart && complete && anchor.is_some_and(|at| observed < at + PASSIVE_CEILING_SECONDS);
+        // A new credential generation (its usage health cleared) is never postponed by a header:
+        // the endpoint answered the previous one.
+        let passive = smart
+            && complete
+            && a.usage_health.is_some()
+            && anchor.is_some_and(|at| observed < at + PASSIVE_CEILING_SECONDS);
         let in_use = self
             .in_use
             .lock()
