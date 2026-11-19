@@ -566,7 +566,7 @@ pub fn read_remote(
         .ok()
         .and_then(|out| data(&out))
         .filter(|answer| answer["rows"].is_array())
-        .map(|answer| sessions_digest(&answer, None))
+        .map(|answer| sessions_digest(&answer, None, None))
     };
     Ok(Remote {
         accounts,
@@ -581,14 +581,24 @@ pub fn read_remote(
 /// SB-550: a session rows answer (`sessions --rows`) cut to what another machine may keep: per
 /// row its id, group, why, agent, launch and session ids and since when; never its folder, its
 /// account's label, its group or its task. With `pool`, only the rows of that group (a restricted
-/// entry answers only for the group its key line names). Every group is counted; the rows of the
-/// ended group are not sent.
-pub fn sessions_digest(answer: &Value, pool: Option<&str>) -> Value {
+/// entry answers only for the group its key line names); with `seats`, only the rows of sessions
+/// on those accounts (SB-560: a restricted entry answers only its own seats' sessions). Every
+/// group is counted; the rows of the ended group are not sent.
+pub fn sessions_digest(answer: &Value, pool: Option<&str>, seats: Option<&[String]>) -> Value {
+    // SB-560 (M3-09, M2-21): a restricted entry answers only the rows of sessions on the seats
+    // the calling key delegated; a row with no account is not one of them.
     let rows: Vec<&Value> = answer["rows"]
         .as_array()
         .map(|rows| {
             rows.iter()
                 .filter(|r| pool.is_none_or(|p| r["pool"].as_str() == Some(p)))
+                .filter(|r| {
+                    seats.is_none_or(|s| {
+                        r["account_id"]
+                            .as_str()
+                            .is_some_and(|id| s.iter().any(|seat| seat == id))
+                    })
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -1075,7 +1085,7 @@ mod tests {
             {"id": "bad id with spaces", "group": "running", "why": "working"},
             {"id": "pid:43", "group": "running", "why": "Some text a session wrote"}
         ], "degraded": ["recovery", "/a/path"]});
-        let digest = sessions_digest(&rows, None);
+        let digest = sessions_digest(&rows, None, None);
         let text = digest.to_string();
         for planted in ["/Users/someone", "work@example.com", "apps"] {
             assert!(!text.contains(planted), "{planted} left the machine");
@@ -1171,7 +1181,7 @@ mod tests {
         assert_eq!((studio.health_since, studio.sessions_since), (None, None));
         assert!(!TROUBLE.contains(&"gone"), "a gone run is history there");
         // A restricted entry answers the group's rows only.
-        let only = sessions_digest(&rows, Some("apps"));
+        let only = sessions_digest(&rows, Some("apps"), None);
         assert_eq!(only["rows"].as_array().unwrap().len(), 1);
         assert_eq!(only["counts"]["running"], 0);
     }

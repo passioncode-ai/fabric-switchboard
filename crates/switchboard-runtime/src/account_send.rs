@@ -145,11 +145,25 @@ fn refusal(output: &str) -> Option<String> {
         .flatten()
 }
 
+/// SB-560 (M2-02): a call's data; the machine proof's own refusal passed on unchanged; else
+/// `otherwise` (the other machine did not answer).
+pub(crate) fn answer_or(out: Result<String, String>, otherwise: &str) -> Result<Value, String> {
+    if let Some(refusal) = crate::machine_proof::refused(&out) {
+        return Err(refusal);
+    }
+    out.ok()
+        .and_then(|o| data(&o))
+        .ok_or_else(|| otherwise.to_owned())
+}
+
 /// SB-312: the other machine's ids for its accounts, or None when it did not answer.
 fn remote_ids(output: &str) -> Option<Vec<String>> {
-    let accounts = data(output)?["accounts"].as_array()?.clone();
+    ids_of(&data(output)?)
+}
+fn ids_of(data: &Value) -> Option<Vec<String>> {
     Some(
-        accounts
+        data["accounts"]
+            .as_array()?
             .iter()
             .filter_map(|a| a["id"].as_str().map(str::to_owned))
             .collect(),
@@ -367,10 +381,10 @@ pub fn send_with(
     let ssh = |command: String| vec![target.to_owned(), "--".to_owned(), command];
     // SB-312: before anything is marked, the other machine answers, has the group, and its
     // accounts are read, so a lost answer to the save can be settled by looking.
-    let groups = run(&ssh(remote(program, &["--json", "project", "list"])), None)
-        .ok()
-        .and_then(|out| data(&out))
-        .ok_or(UNREACHABLE)?;
+    let groups = answer_or(
+        run(&ssh(remote(program, &["--json", "project", "list"])), None),
+        UNREACHABLE,
+    )?;
     let known = pool == "default"
         || groups["projects"]
             .as_array()
@@ -378,10 +392,11 @@ pub fn send_with(
     if !known {
         return Err(POOL_MISSING.into());
     }
-    let before = run(&ssh(remote(program, &["--json", "accounts", "list"])), None)
-        .ok()
-        .and_then(|out| remote_ids(&out))
-        .ok_or(UNREACHABLE)?;
+    let before = answer_or(
+        run(&ssh(remote(program, &["--json", "accounts", "list"])), None),
+        UNREACHABLE,
+    )
+    .and_then(|d| ids_of(&d).ok_or_else(|| UNREACHABLE.into()))?;
     // SB-377 (operator 2026-11-14): a selected account moves too. Each group that has it selected
     // first moves to its next account here (`next_in_group`: one with room, else the one free
     // first), so the group's sessions go on; only a group with no other account refuses.
@@ -920,6 +935,10 @@ pub fn recall_take_as(
         }),
         None,
     );
+    // SB-560 (M2-02): a machine that did not prove itself took nothing and gave nothing; say why.
+    if let Some(refusal) = crate::machine_proof::refused(&answer) {
+        return Err(refusal);
+    }
     let output = match &answer {
         Ok(out) | Err(out) => out.as_str(),
     };

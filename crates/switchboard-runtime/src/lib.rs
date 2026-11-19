@@ -5544,6 +5544,8 @@ fn dispatch_remote(
         let reason = match started["reason"].as_str() {
             Some(remote_dispatch::NOT_ON_TARGET) => remote_dispatch::NOT_ON_TARGET,
             Some(remote_dispatch::TARGET_BUSY) => remote_dispatch::TARGET_BUSY,
+            Some(remote_dispatch::TARGET_KEY_CHANGED) => remote_dispatch::TARGET_KEY_CHANGED,
+            Some(remote_dispatch::TARGET_UNPROVEN) => remote_dispatch::TARGET_UNPROVEN,
             _ => remote_dispatch::TARGET_UNREACHABLE,
         };
         return refuse(reason);
@@ -5632,6 +5634,8 @@ fn attention_report(
         too_large: &item_size::read(root),
         // SB-509: read only while the proxy's token changed and sessions may be left on the old.
         rotated: token_rotation::sessions(root, &snapshot).as_ref(),
+        // SB-560: machines that answered the proof with another key.
+        key_changes: &machine_proof::key_changes(root),
         // SB-510: the watchdog's current findings; the owner's own codes only offline.
         watchdog: &watchdog::current(root, now, owner_running).unwrap_or_default(),
         now,
@@ -7576,7 +7580,8 @@ async fn execute(
                     path: &program,
                     data_dir: data_dir.as_deref(),
                 };
-                let ssh = machine_proof::ssh(&root, &target, &program);
+                // SB-560: a read runs unproven and never pins a key (M3-08).
+                let ssh = machine_proof::ssh_read(&root, &target, &program);
                 remote_check::status(&target, &program, &|a, i| ssh.run(a, i))
             })
         }
@@ -7623,7 +7628,8 @@ async fn execute(
                     path: &program,
                     data_dir: data_dir.as_deref(),
                 };
-                let ssh = machine_proof::ssh(&root, &target, &program);
+                // SB-560: a read runs unproven and never pins a key (M3-08).
+                let ssh = machine_proof::ssh_read(&root, &target, &program);
                 remote_check::check(&snapshot, &seats, &target, &program, &|a, i| ssh.run(a, i))
             })
         }

@@ -8,6 +8,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- The proof another machine gives before Switchboard acts on it is now typed and stricter (SB-560, W11.1): `pinned`, `matched`, `unproven`, `key_changed` or `refused`. A move, a call back, settings carried there, a session ended there and a board run sent there need a machine that proved a key this computer trusts; a read of another machine may run unproven and never pins a key, so a read-only MCP server cannot choose which key a name is trusted with. An answer whose signature does not hold is refused even the first time. A machine that answers with another key is named as such in every answer (no more “did not answer over ssh”), a board run sent there is refused with `target_key_changed`, and Needs attention lists it (`machine_key_changed`) with the `switchboard machines trust` command until a key is trusted. Moving an account to a machine whose Switchboard is older than 0.7.104 now asks to update it there first.
+- The restricted entry a teammate's machine opens to yours (`ssh-serve`) answers only for one of its own groups, never its default group or its pay-per-token group; its one-minute read sends only the sessions on your seats, not the group's other sessions; one key holds at most 16 seats there; and each call is logged on that machine with its kind and result (SB-560).
+
 ## 0.7.123
 
 - Usage checks are smarter and gentler (SB-518): a response's rate-limit headers count as a check, so Switchboard asks the usage endpoint about an account with traffic only about once every 30 minutes; each provider gets 2 checks a minute; a refused check pauses the whole provider for at least 15 minutes; a switch checks its candidate first. Choose `switchboard usage-mode smart`, `timer` or `on-demand` (MCP `switchboard_usage_mode`, whose form without `mode` a read-only server answers too).

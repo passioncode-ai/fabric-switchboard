@@ -14,6 +14,10 @@ use switchboard_core::Provider;
 pub const NOT_ON_TARGET: &str = "not_on_target";
 pub const TARGET_BUSY: &str = "target_busy";
 pub const TARGET_UNREACHABLE: &str = "target_unreachable";
+/// SB-560 (M2-02): the target answered the machine proof with another key than the one trusted.
+pub const TARGET_KEY_CHANGED: &str = "target_key_changed";
+/// SB-560: the target did not prove it is the machine trusted for its name.
+pub const TARGET_UNPROVEN: &str = "target_unproven";
 /// D-8: at most this many dispatched sessions run on one target at once.
 pub const MAX_PER_TARGET: usize = 2;
 /// D-6: the result file is read up to this size.
@@ -228,12 +232,17 @@ pub fn start(
     }
     let refused =
         |reason: &str| Ok(json!({"state": "refused", "reason": reason, "target": target}));
-    let Some(projects) = run(
+    let listed = run(
         &ssh(target, remote(program, &["--json", "project", "list"])),
         None,
-    )
-    .ok()
-    .and_then(|out| data(&out)) else {
+    );
+    // SB-560 (M2-02): a proof's refusal is its own reason, never "unreachable".
+    match crate::machine_proof::refused(&listed).as_deref() {
+        Some(crate::machine_proof::KEY_CHANGED) => return refused(TARGET_KEY_CHANGED),
+        Some(_) => return refused(TARGET_UNPROVEN),
+        None => {}
+    }
+    let Some(projects) = listed.ok().and_then(|out| data(&out)) else {
         return refused(TARGET_UNREACHABLE);
     };
     let Some(repository) = repo_there(&projects, s.identity) else {

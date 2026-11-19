@@ -28,6 +28,9 @@ pub const KEY_MISMATCH: &str =
 pub const DATA_DIR_MISMATCH: &str =
     "That call names another data folder than the one this machine serves.";
 pub const POOL_NOT_ALLOWED: &str = "This computer takes seats from the calling machine only into the group its ssh key line names.";
+/// SB-560 (M3-09): the forced command names the default group, the pay-per-token group or no
+/// group this computer has: nothing is answered.
+pub const POOL_NOT_SERVED: &str = "This computer serves another machine only for one of its own groups, never the default group or the pay-per-token group. Name such a group in that machine's ssh key line.";
 pub const ORGANIZATION_NOT_ALLOWED: &str = "That names an organization the group this computer opened to the calling machine does not work for.";
 #[cfg_attr(unix, allow(dead_code))]
 pub const UNIX_ONLY: &str = "switchboard ssh-serve runs on macOS and Linux.";
@@ -69,6 +72,36 @@ pub enum Request {
         id: String,
         hours: u32,
     },
+}
+
+impl Request {
+    /// SB-560 (M3-17): the call's kind, logged with its result; never its arguments.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Request::Prove { .. } => "prove",
+            Request::AccountsList => "accounts_list",
+            Request::RemoteStatus => "remote_status",
+            Request::ProjectList => "project_list",
+            Request::OrgList => "org_list",
+            Request::OrgAssign { .. } => "org_assign",
+            Request::Add { .. } => "add",
+            Request::Remove { .. } => "remove",
+            Request::Usage { .. } => "usage",
+            Request::Surrender { .. } => "surrender",
+            Request::Lease { .. } => "lease",
+        }
+    }
+}
+
+/// SB-560 (M3-09): whether `pool` is a group this entry may serve: one of this computer's groups,
+/// never the default group or the pay-per-token group. Checked before any call is answered.
+pub fn pool_served(snapshot: &Value, pool: &str) -> bool {
+    pool != "default"
+        && pool != switchboard_core::TOKENS_POOL
+        && snapshot["projects"].as_array().is_some_and(|list| {
+            list.iter()
+                .any(|p| p["pool"] == pool && p["tokens"] != true)
+        })
 }
 
 /// The words of `command` as a POSIX shell would split single-quoted words: plain words of safe
@@ -734,16 +767,44 @@ mod tests {
         assert_eq!(accounts[0]["usage"]["used_percent"], 12.0);
         let rows = json!({"rows": [
             {"id": "pid:1", "group": "running", "why": "working", "pool": "org",
-             "folder": "/Users/teammate/org-work", "account": "seat"},
+             "folder": "/Users/teammate/org-work", "account": "seat", "account_id": "b"},
+            {"id": "pid:4", "group": "running", "why": "working", "pool": "org",
+             "folder": "/Users/teammate/own-org-work", "account": "own", "account_id": "c"},
+            {"id": "pid:5", "group": "running", "why": "working", "pool": "org"},
             {"id": "pid:2", "group": "needs_you", "why": "stuck", "pool": "own",
              "folder": "/Users/teammate/private"},
             {"id": "pid:3", "group": "running", "why": "working", "pool": null}
         ]});
-        let sessions = sessions_digest(&rows, Some("org"));
+        let seats = seats_of(&snapshot, KEY, "org");
+        assert_eq!(seats, ["b"]);
+        // SB-560 (M3-09, M2-21): only the sessions on the caller's seats, not the group's others.
+        let sessions = sessions_digest(&rows, Some("org"), Some(&seats));
         assert_eq!(sessions["rows"].as_array().unwrap().len(), 1);
         assert_eq!(sessions["counts"]["needs_you"], 0);
+        assert_eq!(sessions["counts"]["running"], 1);
         let text = sessions.to_string();
         assert!(!text.contains("/Users/") && !text.contains("seat") && !text.contains("own"));
+        assert!(!text.contains("pid:4") && !text.contains("pid:5"));
+    }
+
+    #[test]
+    fn only_a_group_of_this_computer_is_served() {
+        let snapshot = json!({"projects": [
+            {"pool": "default", "name": "Default"},
+            {"pool": "org", "name": "Org"},
+            {"pool": "paid", "name": "Pay-per-token keys", "tokens": true}
+        ]});
+        assert!(pool_served(&snapshot, "org"));
+        for pool in ["default", "paid", "missing"] {
+            assert!(!pool_served(&snapshot, pool), "{pool}");
+        }
+        assert!(!pool_served(&json!({}), "org"), "an unreadable list serves nothing");
+        assert_eq!(
+            parse(&asked(&["--json", "accounts", "list"]), KEY, "org", &root())
+                .unwrap()
+                .kind(),
+            "accounts_list"
+        );
     }
 
     /// Review P1-1: the documented key line survives sshd's `$SHELL -c`: the program's path with

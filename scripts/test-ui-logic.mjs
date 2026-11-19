@@ -2165,6 +2165,9 @@ check(() => {
   for (const item of items) { const line = logic.attentionReasonText(item.reason); assert.ok(line && !line.includes('\u2014') && !line.includes('studio'), item.reason); }
   for (const v of [shared, silent, before, nothing, signIn, unmeasured, noCopy, offThere, neverAnswered]) assert.ok(!v.line.includes('\u2014'));
   assert.equal(logic.attentionReasonText('machine_sessions'), 'Sessions on this machine need a look: a second copy, or a board run that has gone quiet.');
+  // SB-560: a machine whose proof answered with another key is kept and worded.
+  assert.equal(logic.attentionReasonText('machine_key_changed'), 'This machine answered with a different key than the one Switchboard trusts for it, so nothing is sent to it. If it is still your machine, trust its new key.');
+  assert.deepEqual(logic.attentionView({ items: ['machine_unreachable', 'machine_key_changed'].map((reason) => ({ account_id: null, label: 'studio', provider: null, pool: null, reason, since: 9000, action: { tool: 'switchboard_machines', window: 'open_machines' } })) }).items.map((i) => i.reason), ['machine_unreachable', 'machine_key_changed']);
   i18nForShell.setLocale('ru');
   assert.equal(logic.remoteUsageView(read({}), own, 'studio', now).line, 'На машине studio, прочитано 2 мин назад');
   assert.equal(logic.attentionReasonText('machine_unreachable'), 'Switchboard на этой машине не ответил на три чтения подряд. Проверьте, что машина включена и доступна по ssh.');
