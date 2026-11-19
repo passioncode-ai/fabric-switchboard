@@ -18,6 +18,10 @@ const REFRESH_SPACING: i64 = 60;
 /// SB-145: a statistics range outside what is kept.
 const STATISTICS_DAYS: &str = "Statistics cover 1 to 90 days.";
 const LAUNCHES_LIMIT: &str = "Give limit as a whole number from 1 to 500.";
+/// SB-423: `launch_ids` reads the history, so it comes with `history: true`.
+const LAUNCH_IDS_WITHOUT_HISTORY: &str = "Give launch_ids with history: true.";
+/// SB-423: `launch_ids` names the launches; no page or single launch goes beside it.
+const LAUNCH_IDS_ALONE: &str = "Give launch_ids without limit, before or launch_id.";
 /// `switchboard_shell_hook_set` without its one argument.
 const SHELL_HOOK_ON: &str = "on is true or false.";
 /// SB-146: adding to one more group leaves none.
@@ -1658,24 +1662,40 @@ impl Server {
                     .get("history")
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
+                // SB-423: launch_ids reads the history's named launches alone, as the CLI's
+                // `--launch` does: it needs history and takes no paging or single launch beside it.
+                if args.get("launch_ids").is_some() {
+                    if !history {
+                        return Some(Err(LAUNCH_IDS_WITHOUT_HISTORY.into()));
+                    }
+                    if ["limit", "before", "launch_id"]
+                        .iter()
+                        .any(|k| args.get(*k).is_some())
+                    {
+                        return Some(Err(LAUNCH_IDS_ALONE.into()));
+                    }
+                }
                 match args.get("launch_id").map(Value::as_str) {
                     Some(Some(id)) => {
                         self.call(Operation::Launches {
                             launch_id: Some(id.to_owned()),
                             limit: None,
                             before: None,
+                            launch_ids: None,
                         })
                         .await
                     }
                     Some(None) => Err(switchboard_runtime::launches::LAUNCH_NOT_FOUND.into()),
                     // SB-423 (FD-316): only the named launches.
-                    None if history && args.get("launch_ids").is_some() => {
+                    None if args.get("launch_ids").is_some() => {
                         let Some(ids) = args["launch_ids"].as_array().and_then(|a| {
                             a.iter()
                                 .map(|v| v.as_str().map(str::to_owned))
                                 .collect::<Option<Vec<String>>>()
                         }) else {
-                            return Some(Err(crate::LAUNCH_IDS_INVALID.into()));
+                            return Some(Err(
+                                switchboard_runtime::launches::LAUNCH_IDS_INVALID.into()
+                            ));
                         };
                         crate::launches_by_id(&self.root, &ids).await
                     }
@@ -1688,6 +1708,7 @@ impl Server {
                             launch_id: None,
                             limit: limit.map(|n| n as usize),
                             before: args.get("before").and_then(Value::as_i64),
+                            launch_ids: None,
                         })
                         .await
                     }

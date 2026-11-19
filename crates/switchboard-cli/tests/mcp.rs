@@ -371,6 +371,25 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
     let (error, sessions) = agent.tool("switchboard_sessions", json!({"all": true}));
     assert!(!error, "{sessions}");
     assert_eq!(sessions["sessions"], json!([]));
+    // SB-423: launch_ids reads named launches of the history, alone.
+    let (error, picked) = agent.tool(
+        "switchboard_sessions",
+        json!({"history": true, "launch_ids": ["no-such-launch"]}),
+    );
+    assert!(!error, "{picked}");
+    assert_eq!(
+        (picked["launches"].clone(), picked["missing"].clone()),
+        (json!([]), json!(["no-such-launch"]))
+    );
+    for refused in [
+        json!({"launch_ids": ["no-such-launch"]}),
+        json!({"history": true, "launch_ids": ["no-such-launch"], "limit": 5}),
+        json!({"history": true, "launch_ids": ["no-such-launch"], "before": 1}),
+        json!({"history": true, "launch_ids": ["no-such-launch"], "launch_id": "x"}),
+    ] {
+        let (error, answer) = agent.tool("switchboard_sessions", refused.clone());
+        assert!(error, "{refused}: {answer}");
+    }
     // SB-71: chains over MCP — set from a preset, read back, an agent that cannot take over refused.
     let (error, set) = agent.tool(
         "switchboard_chain_set",

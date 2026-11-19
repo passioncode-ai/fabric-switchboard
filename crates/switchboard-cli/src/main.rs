@@ -251,8 +251,8 @@ enum Command {
         /// `next_before` of the previous page.
         #[arg(long, requires = "history")]
         before: Option<i64>,
-        /// With --history: only these launches (repeat it, at most 64), each read by its id
-        /// instead of the whole history; an id with no record is named in `missing`.
+        /// With --history: only these launches (repeat it, 1 to 64 ids), each read by its id and
+        /// no other record (no chain); an id with no record is named in `missing`.
         #[arg(long = "launch", value_name = "LAUNCH_ID", requires = "history",
               conflicts_with_all = ["limit", "before"])]
         launch: Vec<String>,
@@ -551,6 +551,7 @@ enum Command {
         command: KimiCommand,
     },
     /// Stopped sessions and accounts ready to continue their work.
+    #[command(args_conflicts_with_subcommands = true)]
     Recovery {
         /// Only the stops still open (waiting or claimed); the counts stay those of every stop.
         #[arg(long)]
@@ -2554,6 +2555,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         if names_launch && !words.last().is_some_and(|id| launches::valid_id(id)) {
             return Err(launches::NO_SUCH_LAUNCH.into());
         }
+        // SB-423: the ids of `sessions --history --launch` too, and their number.
+        if let Command::Sessions { launch, .. } = &cli.command {
+            if !launch.is_empty() {
+                launches_travel(launch)?;
+            }
+        }
         let (program, data_dir) =
             switchboard_runtime::targets::program_for(&root, &target, remote, remote_data_dir);
         let ssh_args = switchboard_runtime::targets::command_ssh(
@@ -3342,6 +3349,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             launch_id: Some(launch_id.clone()),
             limit: None,
             before: None,
+            launch_ids: None,
         },
         Command::Sessions {
             history: true,
@@ -3357,6 +3365,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             launch_id: None,
             limit: limit.map(usize::from),
             before: *before,
+            launch_ids: None,
         },
         Command::Sessions { all, .. } => Operation::Sessions { all: *all },
         Command::Provenance {
@@ -4342,26 +4351,31 @@ pub(crate) fn open_stops(mut status: Value) -> Value {
     }
     status
 }
-/// The most launch ids one `sessions --history --launch` (or MCP `launch_ids`) reads.
-pub(crate) const MAX_LAUNCH_IDS: usize = 64;
-pub(crate) const LAUNCH_IDS_INVALID: &str = "Give from 1 to 64 launch ids.";
 /// SB-423 (FD-316, fabric-dashboards, 2026-11-17): `sessions --history --launch ID...` and MCP
 /// `switchboard_sessions` `{history: true, launch_ids}`: only the named launches, in the order
 /// given (a repeated id once), shaped like a history page (`launches`, `total`, `next_before`
-/// null) plus `missing`, the ids with no record. Each id is the owner's `Launches` by id, as
-/// `sessions show` reads it, so it works with an owner of any version.
+/// null) plus `missing`, the ids with no record. The owner reads each named record and no other
+/// (`launches::by_ids`). An owner from before `launch_ids` refuses the field
+/// (`CONTROL_OWNER_OLDER`, nothing done); it is then asked one id at a time, as `sessions show`
+/// asks it, which each reads every record for a chain, until it is restarted on this version.
 pub(crate) async fn launches_by_id(
     root: &std::path::Path,
     ids: &[String],
 ) -> Result<Value, String> {
-    let mut wanted: Vec<&String> = Vec::new();
-    for id in ids {
-        if !wanted.contains(&id) {
-            wanted.push(id);
-        }
-    }
-    if wanted.is_empty() || wanted.len() > MAX_LAUNCH_IDS {
-        return Err(LAUNCH_IDS_INVALID.into());
+    let wanted = switchboard_runtime::launches::wanted_ids(ids)?;
+    match call(
+        root,
+        Operation::Launches {
+            launch_id: None,
+            limit: None,
+            before: None,
+            launch_ids: Some(wanted.clone()),
+        },
+    )
+    .await
+    {
+        Err(e) if e == switchboard_runtime::control::CONTROL_OWNER_OLDER => {}
+        answer => return answer,
     }
     let (mut found, mut missing) = (Vec::new(), Vec::new());
     for id in wanted {
@@ -4371,6 +4385,7 @@ pub(crate) async fn launches_by_id(
                 launch_id: Some(id.clone()),
                 limit: None,
                 before: None,
+                launch_ids: None,
             },
         )
         .await
@@ -4381,6 +4396,16 @@ pub(crate) async fn launches_by_id(
         }
     }
     Ok(json!({"launches": found, "total": found.len(), "next_before": null, "missing": missing}))
+}
+/// SB-423: the ids `sessions --history --launch --target` sends over ssh: 1 to 64, each one a
+/// launch id's characters, checked here before they reach the other machine.
+fn launches_travel(ids: &[String]) -> Result<(), String> {
+    launches::wanted_ids(ids)?;
+    if ids.iter().all(|id| launches::valid_id(id)) {
+        Ok(())
+    } else {
+        Err(launches::LAUNCH_NOT_FOUND.into())
+    }
 }
 /// SB-380: the command to run on another machine for `sessions`, `sessions end` and `attach`
 /// given `--target`: the machine, its program and data folder, the words, and whether it needs a
@@ -5403,11 +5428,21 @@ fn print_result(value: &Value, cli: &Cli) {
         }
         Command::Sessions { history: true, .. } => {
             let launches = value["launches"].as_array().cloned().unwrap_or_default();
-            if launches.is_empty() {
+            // SB-423: with --launch, the ids that have no record.
+            let missing: Vec<&str> = value["missing"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            if launches.is_empty() && missing.is_empty() {
                 println!("No launch is recorded yet.");
             }
             for l in &launches {
                 println!("{}", launch_line(l));
+            }
+            if !missing.is_empty() {
+                println!("No launch is recorded with id {}.", missing.join(", "));
             }
             let total = value["total"].as_u64().unwrap_or(0);
             if total as usize > launches.len() {
@@ -7377,13 +7412,55 @@ mod tests {
         let root = std::env::temp_dir().join(format!("sb-423-{}", std::process::id()));
         assert_eq!(
             launches_by_id(&root, &[]).await.unwrap_err(),
-            LAUNCH_IDS_INVALID
+            launches::LAUNCH_IDS_INVALID
         );
-        let many: Vec<String> = (0..=MAX_LAUNCH_IDS).map(|i| format!("l-{i}")).collect();
+        let many: Vec<String> = (0..=launches::MAX_LAUNCH_IDS)
+            .map(|i| format!("l-{i}"))
+            .collect();
         assert_eq!(
             launches_by_id(&root, &many).await.unwrap_err(),
-            LAUNCH_IDS_INVALID
+            launches::LAUNCH_IDS_INVALID
         );
+    }
+
+    #[test]
+    fn launch_ids_are_checked_before_they_travel() {
+        assert!(launches_travel(&["5b7f2c1e-0000-4000-8000-000000000001".into()]).is_ok());
+        assert_eq!(
+            launches_travel(&["l-1".into(), "x;rm -rf ~".into()]).unwrap_err(),
+            launches::LAUNCH_NOT_FOUND
+        );
+        let many: Vec<String> = (0..=launches::MAX_LAUNCH_IDS)
+            .map(|i| format!("l-{i}"))
+            .collect();
+        assert_eq!(
+            launches_travel(&many).unwrap_err(),
+            launches::LAUNCH_IDS_INVALID
+        );
+    }
+
+    #[test]
+    fn recovery_open_is_refused_beside_a_subcommand() {
+        assert!(Cli::try_parse_from([
+            "switchboard",
+            "recovery",
+            "--open",
+            "claim",
+            "e1",
+            "--account",
+            "a"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "switchboard",
+            "recovery",
+            "claim",
+            "e1",
+            "--account",
+            "a",
+            "--open"
+        ])
+        .is_err());
     }
 
     #[test]
