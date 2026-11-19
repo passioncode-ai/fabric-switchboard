@@ -110,7 +110,7 @@ those used elsewhere.
   minute ago; showing that observation." Since SB-518 (DEC-0032) a 429 on any check of a provider
   holds every account of it for at least 15 minutes (longer when the provider asks, doubling on
   repeats up to an hour): `refresh` then answers "Usage checks are rate limited by the provider.
-  Switchboard waits before the next one." And past the provider's budget (two checks a minute,
+  Switchboard waits before the next one." And in the `smart` and `on_demand` modes, past the provider's budget (two checks a minute,
   a reserve of up to eight) it answers "Usage checks of this provider are paced to keep its usage
   endpoint answering. Try again in a minute." A read-only server (`switchboard mcp --read-only`)
   never asks the provider: it answers with the stored observation and `note` = "This server is

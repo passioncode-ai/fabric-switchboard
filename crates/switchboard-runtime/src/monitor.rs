@@ -1505,12 +1505,17 @@ async fn confirm_candidates(
             None
         };
         let excluded = rotation_excluded(runtime, &inputs.sign_in, current.as_deref());
-        if let Ok(Some(id)) = runtime.store.rotation_candidate_to_confirm(
-            policy,
-            current.as_deref(),
-            now(),
-            &excluded,
-        ) {
+        // The strict decision under it reads credentials (the Keychain on macOS): a blocking
+        // section, as for `rotate_with`, so the proxy and control tasks do not wait with it.
+        let wanted_id = crate::blocking::run(|| {
+            runtime.store.rotation_candidate_to_confirm(
+                policy,
+                current.as_deref(),
+                now(),
+                &excluded,
+            )
+        });
+        if let Ok(Some(id)) = wanted_id {
             // An account the provider asked to wait for is not checked; its token would buy
             // nothing.
             if !wanted.iter().any(|(_, w)| *w == id) && !runtime.usage_gate.held(&id, time) {
