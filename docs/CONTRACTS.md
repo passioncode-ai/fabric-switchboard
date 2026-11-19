@@ -299,9 +299,10 @@ Account list order is display-only; it never selects/activates. Within provider/
   (`switchboard_core::UsageMode`, `usage_mode::read`); read at owner start and by each offline
   command, set with `switchboard usage-mode smart|timer|on-demand` or MCP `switchboard_usage_mode`
   (`Operation::UsageMode`). `timer` is 0.7.121's cadence below; `on_demand` makes no check on a
-  schedule (no due list, no pull-in), while headers, a switch's candidate and a person's check work
-  as in `smart` (`usage_mode::tests`); native rotation has no figure there and moves only on a
-  limit.
+  schedule (no due list, no pull-in: `monitor::Pass::run`), while headers, a switch's candidate and
+  a person's check work as in `smart` (the setting itself: `usage_mode::tests`); native rotation
+  has no figure there and moves only on a limit. The mode governs the cadence and the budget: the
+  account in use's 300 s floor and its switch on header figures (below) hold in every mode.
 - **Headers count as a check.** `Store::observe_generation` with `source: response_headers` whose
   windows include both `HEADER_WINDOWS` (`five_hour`, `seven_day`) and whose account the usage
   endpoint answered in this process within `PASSIVE_CEILING_SECONDS` = 1800 s
@@ -326,14 +327,21 @@ Account list order is display-only; it never selects/activates. Within provider/
   a person's check answers `usage_budget::USAGE_PACED` and logs `usage_check` `paced`
   (`the_bucket_allows_its_burst_then_two_a_minute`,
   `the_budget_holds_an_hour_of_passes_with_32_accounts_to_about_120_checks`: 100 to 130 an hour
-  in `smart`, over 400 in `timer`).
+  in `smart`, over 400 in `timer`). A token counts a check: a check whose token the provider
+  refused with 401 and whose renewal succeeded asks once more on the same token. The bucket lives in
+  the process: the offline CLI (no owner running) starts each command with a full one, while the
+  provider holds below are shared through their file.
 - **Provider hold.** A usage check answered 429 records the account's hold (SB-39, unchanged) and
   `UsageBudget::refused(provider, at, retry_after)`: held until `at + max(retry_after,
   min(900 · 2^(n-1), 3600))` for the n-th 429 in a row (a 429 more than the last hold's length
-  after it ended counts as the first), never shortening a longer hold; a success clears it (`a_429_holds_the_whole_provider_and_doubles_on_repeats_up_to_an_hour`). While held,
+  after it ended counts as the first; a 429 while the hold still runs, from a check in flight
+  beside the one refused, doubles nothing), never shortening a longer hold; a success clears it
+  unless the hold was recorded after that check started (`UsageBudget::succeeded_since`) (`a_429_holds_the_whole_provider_and_doubles_on_repeats_up_to_an_hour`). While held,
   `due_now_at` leaves every account of the provider out and `check_as` answers
   `USAGE_RATE_LIMITED` before any renewal or credential read, logging `usage_check`
-  `provider_held` (`a_429_on_one_accounts_check_holds_every_account_of_the_provider`).
+  `provider_held` (`a_429_on_one_accounts_check_holds_every_account_of_the_provider`), and asks
+  again once it has its place on the network, so a check that waited for one meets a hold set
+  meanwhile.
   `usage-provider-holds.json` (0600, `{version: 1, providers: {claude|codex: {until,
   recorded_at, strikes}}}`), a hold over at start dropped, one stamped ahead of the clock moved
   to now plus what was left. Log event `usage_provider_held` (provider, seconds, strikes).

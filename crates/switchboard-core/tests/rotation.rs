@@ -2717,7 +2717,7 @@ fn a_candidate_known_only_from_an_older_figure_is_checked_fresh_before_the_switc
 }
 
 #[test]
-fn the_timer_mode_keeps_the_fixed_cadence_of_0_7_120() {
+fn the_timer_mode_keeps_the_fixed_cadence_of_0_7_121() {
     use switchboard_core::{UsageMode, CHECK_ACTIVE_SECONDS};
     let (_root, _vault, store) = setup();
     let now = clock() - 3000;

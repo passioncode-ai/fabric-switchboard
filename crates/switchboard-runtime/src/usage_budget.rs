@@ -250,11 +250,17 @@ impl UsageBudget {
             let mut holds = lock(&self.holds);
             // A hold that ended more than its own length ago is history: the next 429 starts
             // again from the floor.
-            let strikes = holds
-                .get(provider.as_str())
-                .filter(|h| now.saturating_sub(h.until) <= h.until.saturating_sub(h.recorded_at))
-                .map_or(0, |h| h.strikes)
-                .saturating_add(1);
+            // A 429 while the hold still runs (two checks were in flight together) is the
+            // same refusal: it doubles nothing.
+            let strikes = match holds.get(provider.as_str()) {
+                Some(h) if now < h.until => h.strikes.max(1),
+                other => other
+                    .filter(|h| {
+                        now.saturating_sub(h.until) <= h.until.saturating_sub(h.recorded_at)
+                    })
+                    .map_or(0, |h| h.strikes)
+                    .saturating_add(1),
+            };
             let until = now.saturating_add(provider_hold_seconds(retry_after, strikes));
             // Never shortens a hold already longer.
             let until = holds.get(provider.as_str()).map_or(until, |h| {
@@ -297,14 +303,22 @@ impl UsageBudget {
     /// A usage check of `provider` answered: the doubling starts again from the floor. Writes
     /// only when a hold was recorded.
     pub(crate) fn succeeded(&self, provider: Provider) {
+        self.succeeded_since(provider, i64::MAX);
+    }
+    /// A usage check of `provider` that started at `started` answered. A hold recorded since it
+    /// started (another check in flight beside it was refused) stays: an answer sent before that
+    /// 429 says nothing about it.
+    pub(crate) fn succeeded_since(&self, provider: Provider, started: i64) {
         if !self.limited {
             return;
         }
         let snapshot = {
             let mut holds = lock(&self.holds);
-            if holds.remove(provider.as_str()).is_none() {
-                return;
+            match holds.get(provider.as_str()) {
+                Some(hold) if hold.recorded_at < started => {}
+                _ => return,
             }
+            holds.remove(provider.as_str());
             holds.clone()
         };
         self.save(&snapshot);
@@ -473,6 +487,16 @@ mod tests {
         assert_eq!(aging.refused(Provider::Codex, 14_000, None), 17_600);
         // one later than its length after the end does not.
         assert_eq!(aging.refused(Provider::Codex, 17_600 + 3_601, None), 22_101);
+        // Two checks in flight together: a 429 while the hold runs doubles nothing, and an
+        // answer to a check that started before that 429 leaves the hold in place.
+        let pair = UsageBudget::limited();
+        assert_eq!(pair.refused(Provider::Claude, 30_000, None), 30_900);
+        assert_eq!(pair.refused(Provider::Claude, 30_001, None), 30_901);
+        pair.succeeded_since(Provider::Claude, 29_999);
+        assert_eq!(pair.held_until(Provider::Claude, 30_002), Some(30_901));
+        // An answer to a check that started after it ends the hold.
+        pair.succeeded_since(Provider::Claude, 30_002);
+        assert_eq!(pair.held_until(Provider::Claude, 30_002), None);
         // A hold over by the next start is dropped.
         assert_eq!(
             UsageBudget::kept_in(path, 4_900).held_until(Provider::Claude, 4_900),

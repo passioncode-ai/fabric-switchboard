@@ -805,7 +805,7 @@ pub(crate) async fn probe(
     let checked = now();
     match result {
         Ok(usage) => {
-            gate.budget.succeeded(account.provider);
+            gate.budget.succeeded_since(account.provider, started);
             Ok(usage)
         }
         Err(failure) => {
@@ -967,9 +967,17 @@ async fn check_as(
         Err(SIGN_IN.to_string())
     };
     let sequence = || async {
-        // SB-518: a person's check takes its provider's token here (the pass took the
-        // background's and a candidate's with its own clock); every check waits for one of the
-        // provider's two places on the network, the background only when one is free.
+        if gate.has_hold(id) {
+            if let Ok(credential) = store.stored_credential(id) {
+                if gate.active(id, &credential, now()).is_some() {
+                    return Err(switchboard_proxy::USAGE_RATE_LIMITED.to_string());
+                }
+            }
+        }
+        // SB-518: a person's check takes its provider's token here, after the account's own
+        // wait refused it for free (the pass took the background's and a candidate's with its
+        // own clock); every check waits for one of the provider's two places on the network,
+        // the background only when one is free.
         let _flight = match provider {
             Some(provider) => {
                 if caller == Caller::Person
@@ -983,17 +991,19 @@ async fn check_as(
                         return Err(paced);
                     }
                 }
-                Some(gate.budget.fly(provider, caller).await?)
+                let flight = gate.budget.fly(provider, caller).await?;
+                // Another check may have met a 429 while this one waited for its place.
+                if gate.budget.held_until(provider, now()).is_some() {
+                    crate::oplog::event(
+                        "usage_check",
+                        &[("outcome", crate::oplog::Field::Code("provider_held"))],
+                    );
+                    return Err(switchboard_proxy::USAGE_RATE_LIMITED.into());
+                }
+                Some(flight)
             }
             None => None,
         };
-        if gate.has_hold(id) {
-            if let Ok(credential) = store.stored_credential(id) {
-                if gate.active(id, &credential, now()).is_some() {
-                    return Err(switchboard_proxy::USAGE_RATE_LIMITED.to_string());
-                }
-            }
-        }
         // B-5 fix cycle 1: a person's check asks once past a usage verdict (never past a
         // lineage the token endpoint refused). Nothing is renewed: a 401 keeps the verdict.
         if person && refresh.usage_verdict_only(store, id) {
@@ -1405,8 +1415,8 @@ fn rotation_excluded(
             .cloned(),
     );
     // SB-98: a candidate whose switch fails is set aside for ten minutes and the next one
-    // is tried in the same pass — up to three — instead of the same one every 30 s.
-    // SB-102: only ever as a candidate — the account in use is never "limited" for an earlier
+    // is tried in the same pass (up to three) instead of the same one every 30 s.
+    // SB-102: only ever as a candidate: the account in use is never "limited" for an earlier
     // failed switch to it; expired entries go.
     if let Ok(mut failed) = runtime.failed_switches.lock() {
         failed.retain(|_, until| *until > now());
@@ -1496,7 +1506,9 @@ async fn confirm_candidates(
                 ("provider", crate::oplog::Field::Code(provider.as_str())),
                 (
                     "outcome",
-                    crate::oplog::Field::Code(if outcome.is_ok() { "ok" } else { "failed" }),
+                    // Not `failed`: a candidate held, paced or refused is routine, not an
+                    // error the digest counts.
+                    crate::oplog::Field::Code(if outcome.is_ok() { "ok" } else { "unconfirmed" }),
                 ),
             ],
         );
