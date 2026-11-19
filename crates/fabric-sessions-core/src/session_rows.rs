@@ -252,7 +252,7 @@ pub fn build(sources: &Sources) -> Value {
     }
 
     // SB-396 D5: the sessions Switchboard closed (the duty officer, an idle session host) can be
-    // continued as themselves.
+    // continued as themselves; SB-508: so can a session the ledger saw live that ended since.
     for r in sources.resumable {
         let Some(session) = r["session"].as_str() else {
             continue;
@@ -270,6 +270,9 @@ pub fn build(sources: &Sources) -> Value {
             Some("stuck") => "closed_stuck",
             // A restart wave stopped it and it did not come back (SB-397 R1).
             Some("restart") => "closed_restart",
+            // SB-508: a session the person started that ended outside Switchboard (a reboot, a
+            // crash, a closed terminal), from the ledger of live sessions.
+            Some("seen_live") => "ended_seen",
             _ => "closed_idle",
         };
         rows.push(row(
@@ -631,6 +634,7 @@ mod tests {
         let resumable = [
             json!({"session": "S40", "reason": "restart_back", "cwd": "/w/r", "at": 900}),
             json!({"session": "S41", "reason": "restart", "cwd": "/w/q", "at": 900}),
+            json!({"session": "S42", "reason": "seen_live", "cwd": "/w/s", "at": 880}),
         ];
         let answer = build(&Sources {
             tree: &json!({"observed_at": 1000, "live": [], "launches": [], "findings": []}),
@@ -646,7 +650,13 @@ mod tests {
             .iter()
             .filter_map(|r| r["id"].as_str())
             .collect();
-        assert_eq!(ids, vec!["closed:S41"]);
+        assert_eq!(ids, vec!["closed:S41", "closed:S42"]);
+        // SB-508: a session the ledger saw live that ended since can be continued.
+        let seen = &answer["rows"][1];
+        assert_eq!(
+            (seen["why"].clone(), seen["acts"].clone()),
+            (json!("ended_seen"), json!(["continue"]))
+        );
     }
 
     #[test]

@@ -424,9 +424,11 @@ pub fn build(inputs: &Inputs) -> Value {
             ),
             _ => continue,
         };
+        // Failures first (review round 2 of PR #852), then by code.
+        let rank = if finding["severity"] == "fail" { 0 } else { 1 };
         push(
             "watchdog",
-            code.to_owned(),
+            format!("{rank}{code}"),
             json!({
                 "account_id": null, "label": null, "provider": null, "pool": null,
                 "reason": "watchdog", "detail": detail, "code": code,
@@ -662,7 +664,10 @@ mod tests {
             ["watchdog", "watchdog", "session_duplicate"],
             "a code this version does not know is left out"
         );
-        let act = &answer["items"][0];
+        let owner = &answer["items"][0];
+        assert_eq!(owner["code"], "owner_down", "a failure comes first");
+        assert_eq!(owner["action"]["window"], "none");
+        let act = &answer["items"][1];
         assert_eq!(
             (
                 act["code"].clone(),
@@ -680,9 +685,6 @@ mod tests {
             act["action"],
             json!({"tool": "switchboard_duty", "window": "open_sessions"})
         );
-        let owner = &answer["items"][1];
-        assert_eq!(owner["code"], "owner_down");
-        assert_eq!(owner["action"]["window"], "none");
     }
     #[test]
     fn dispatches_refused_at_the_session_limit_are_one_item_with_their_count() {

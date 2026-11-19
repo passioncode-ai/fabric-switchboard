@@ -69,14 +69,34 @@ impl Host {
     }
 }
 
+/// How long one `launchctl` or `systemctl` call may take before it is killed and reaped.
+pub const CALL_SECONDS: u64 = 10;
+
 fn run_quietly(program: &str, args: &[String]) -> bool {
-    std::process::Command::new(program)
+    let Ok(mut child) = std::process::Command::new(program)
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(CALL_SECONDS);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            // Past its time, or its state unreadable: killed and reaped, never left behind.
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
 
 fn xml(text: &str) -> String {
@@ -106,6 +126,8 @@ pub fn plist(program: &Path) -> String {
   <integer>{}</integer>
   <key>RunAtLoad</key>
   <true/>
+  <key>AssociatedBundleIdentifiers</key>
+  <string>ai.passioncode.fabric-switchboard</string>
   <key>ProcessType</key>
   <string>Background</string>
   <key>LowPriorityIO</key>
@@ -405,6 +427,10 @@ mod tests {
             .collect();
         assert_eq!(left.len(), 1, "{left:?}");
         assert!(text.contains("<key>StartInterval</key>\n  <integer>300</integer>"));
+        // Login Items names the job by the app it belongs to.
+        assert!(text.contains(
+            "<key>AssociatedBundleIdentifiers</key>\n  <string>ai.passioncode.fabric-switchboard</string>"
+        ));
         assert_eq!(
             ran(),
             [
@@ -435,6 +461,18 @@ mod tests {
         let mut none = h.clone();
         none.program = None;
         assert_eq!(install(&none), "no_program");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_call_that_hangs_is_killed_and_reaped_at_its_limit() {
+        let started = std::time::Instant::now();
+        assert!(!run_quietly("/bin/sleep", &["30".into()]));
+        let took = started.elapsed().as_secs();
+        assert!((CALL_SECONDS..CALL_SECONDS + 5).contains(&took), "{took}");
+        assert!(run_quietly("/bin/sh", &["-c".into(), "exit 0".into()]));
+        assert!(!run_quietly("/bin/sh", &["-c".into(), "exit 3".into()]));
+        assert!(!run_quietly("/no/such/program", &[]));
     }
 
     #[test]

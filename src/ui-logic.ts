@@ -2331,6 +2331,8 @@ export function sessionWhyText(row: Pick<SessionRow, 'why' | 'quiet_minutes' | '
     case 'closed_duplicate': return t('Closed as a second copy');
     case 'closed_stuck': return t('Closed after it stopped making progress');
     case 'closed_restart': return t('Ended by a restart and not back, can continue');
+    // SB-508: a session the person started that ended outside Switchboard, from the ledger.
+    case 'ended_seen': return t('Ended outside Switchboard, can continue');
     // FD-291: a stop the session went past, and one whose history no folder holds any more.
     case 'moved_on': return t('Went on after its limit stop and ended, can continue');
     case 'no_transcript': return t('Stopped on a limit, its history is gone');

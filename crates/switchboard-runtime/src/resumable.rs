@@ -120,16 +120,20 @@ pub fn locate(root: &Path, session: &str, now: i64) -> Option<(PathBuf, String)>
         if r["provider_session_id"] != session {
             continue;
         }
-        let config = match r["home_dir"].as_str() {
-            Some(home) => Some(root.join(home)),
-            None => crate::person::claude_dir(),
+        // A record that names its config folder (its home, or a resume's own) ranks by its time;
+        // one that names none is a guess (the person's Claude folder) and ranks below every
+        // source that names one (review round 2 of PR #852).
+        let (config, named) = match (r["home_dir"].as_str(), r["config_dir"].as_str()) {
+            (Some(home), _) => (Some(root.join(home)), true),
+            (None, Some(config)) => (Some(PathBuf::from(config)), true),
+            (None, None) => (crate::person::claude_dir(), false),
         };
         if let (Some(config), Some(cwd)) = (config, r["working_directory"].as_str()) {
             let at = r["last_turn_at"]
                 .as_i64()
                 .or(r["launched_at"].as_i64())
                 .unwrap_or(0);
-            found.push((at, config, cwd.to_owned()));
+            found.push((if named { at } else { i64::MIN }, config, cwd.to_owned()));
         }
     }
     if let Some(entry) = crate::live_ledger::read(root).sessions.get(session) {
@@ -220,6 +224,9 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
                 "in_place": true, "hosted": true, "launched_at": now,
                 "provider_session_id": session,
                 "home_dir": config.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/")),
+                // SB-508 (review round 2): the config folder itself, so `locate` never guesses it
+                // for a config outside the data folder.
+                "config_dir": config,
             });
             crate::launches::record_resume(root, id, record, &how.by)?;
         }
@@ -336,6 +343,46 @@ mod tests {
         assert_eq!(
             locate(root.path(), session, 5000),
             Some((PathBuf::from("/h/.claude"), "/w/other".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_launch_record_that_names_no_config_never_beats_a_source_that_does() {
+        // Review round 2 of PR #852: a resume's record outside the data folder named no config
+        // before; its guess (the person's Claude folder) must not win over the real one.
+        let root = tempfile::tempdir().unwrap();
+        let session = "44444444-4444-4444-8444-444444444444";
+        record(
+            root.path(),
+            json!({"session": session, "config": "/h/.claude-work", "cwd": "/w/a", "reason": "idle", "at": 100}),
+        );
+        let guess = crate::launches::new_id();
+        crate::launches::record_resume(
+            root.path(),
+            &guess,
+            json!({"provider": "claude", "provider_session_id": session, "working_directory": "/w/b",
+                "launched_at": 200, "home_dir": null}),
+            &crate::launches::LaunchedBy::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            locate(root.path(), session, 300),
+            Some((PathBuf::from("/h/.claude-work"), "/w/a".to_owned())),
+            "the end line names its config; the record only guesses"
+        );
+        // A newer record that names its config folder wins by its time.
+        let named = crate::launches::new_id();
+        crate::launches::record_resume(
+            root.path(),
+            &named,
+            json!({"provider": "claude", "provider_session_id": session, "working_directory": "/w/c",
+                "launched_at": 250, "home_dir": null, "config_dir": "/h/.claude-other"}),
+            &crate::launches::LaunchedBy::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            locate(root.path(), session, 300),
+            Some((PathBuf::from("/h/.claude-other"), "/w/c".to_owned()))
         );
     }
 

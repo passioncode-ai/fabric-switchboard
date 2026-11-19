@@ -57,6 +57,13 @@ pub fn owner_code(code: &str) -> bool {
     matches!(code, OWNER_DOWN | OWNER_NOT_ANSWERING | OWNER_STOPPED)
 }
 
+/// The codes a running owner already says itself: its own state, and what the watchdog read from
+/// its `session-watch.json`, which Needs attention lists as `session_gone` and
+/// `session_duplicate` with their acts (review round 2 of PR #852: never the same finding twice).
+pub fn owner_says(code: &str) -> bool {
+    owner_code(code) || matches!(code, BOARD_RUN_GONE | DUPLICATE_SESSION)
+}
+
 fn severity(code: &str) -> &'static str {
     match code {
         OWNER_DOWN | OWNER_NOT_ANSWERING => "fail",
@@ -87,14 +94,18 @@ pub fn owner_state(
     probe: &crate::control::Probe,
     run: Option<&crate::bugs::Run>,
     alive: impl Fn(u32) -> bool,
+    boot: Option<i64>,
     now: i64,
 ) -> &'static str {
     use crate::control::Probe;
+    // A run that started before this boot cannot still run, whatever process holds its pid now.
+    let alive =
+        |run: &crate::bugs::Run| boot.is_none_or(|boot| run.started_at >= boot) && alive(run.pid);
     match probe {
         Probe::Answers { .. } => "answers",
         Probe::NoAnswer | Probe::Unreadable => "not_answering",
         Probe::NoDescriptor | Probe::OwnerGone | Probe::Refused => match run {
-            Some(run) if !run.clean && alive(run.pid) => {
+            Some(run) if !run.clean && alive(run) => {
                 if now - run.started_at < STARTING_SECONDS {
                     "starting"
                 } else {
@@ -105,6 +116,41 @@ pub fn owner_state(
             _ => "stopped",
         },
     }
+}
+
+/// When this computer started (Unix seconds), or `None` where it cannot be read.
+#[cfg(target_os = "macos")]
+pub fn boot_time() -> Option<i64> {
+    let mut tv = libc::timeval {
+        tv_sec: 0,
+        tv_usec: 0,
+    };
+    let mut size = std::mem::size_of::<libc::timeval>();
+    let name = c"kern.boottime";
+    // SAFETY: `kern.boottime` answers one `timeval`; the buffer and its size are that.
+    let done = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            (&mut tv as *mut libc::timeval).cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (done == 0 && tv.tv_sec > 0).then_some(tv.tv_sec)
+}
+/// When this computer started (Unix seconds): `btime` of `/proc/stat`.
+#[cfg(target_os = "linux")]
+pub fn boot_time() -> Option<i64> {
+    std::fs::read_to_string("/proc/stat")
+        .ok()?
+        .lines()
+        .find_map(|l| l.strip_prefix("btime "))
+        .and_then(|v| v.trim().parse().ok())
+}
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn boot_time() -> Option<i64> {
+    None
 }
 
 /// The acts of `duty.jsonl` left half done for at least `ACT_SECONDS`. The duty officer's own by
@@ -209,7 +255,23 @@ pub fn assess(
         _ => None,
     };
     if let Some(code) = owner_finding {
-        out.push(finding(code, Vec::new(), first(code)));
+        let mut f = finding(code, Vec::new(), first(code));
+        // Review round 2 of PR #852: one 5 s miss of a background job on a busy machine is not an
+        // outage: `owner_not_answering` fails only when the previous run, still current, missed too.
+        if code == OWNER_NOT_ANSWERING {
+            let missed_before = previous.is_some_and(|p| {
+                p["checked_at"]
+                    .as_i64()
+                    .is_some_and(|at| at <= now && now - at <= STALE_SECONDS)
+                    && p["findings"]
+                        .as_array()
+                        .is_some_and(|a| a.iter().any(|f| f["code"] == OWNER_NOT_ANSWERING))
+            });
+            if !missed_before {
+                f["severity"] = "warn".into();
+            }
+        }
+        out.push(f);
     }
     if !acts.is_empty() {
         let ids = acts
@@ -265,8 +327,9 @@ pub fn read(root: &Path) -> Option<Value> {
         .filter(|v| v["version"] == VERSION)
 }
 
-/// The findings a reader shows now: from a report no older than `STALE_SECONDS`, the owner's own
-/// codes left out when the reader is the owner (it answers, whatever an earlier run saw). `None`:
+/// The findings a reader shows now: from a report no older than `STALE_SECONDS`, the codes the
+/// owner says itself left out when the reader is the owner (`owner_says`: its state, which it
+/// answers whatever an earlier run saw, and its own watch's gone runs and duplicates). `None`:
 /// the watchdog is off, never ran, or its report is stale, which is not the same as nothing found.
 pub fn current(root: &Path, now: i64, owner_running: bool) -> Option<Vec<Value>> {
     if is_off(root) {
@@ -282,7 +345,7 @@ pub fn current(root: &Path, now: i64, owner_running: bool) -> Option<Vec<Value>>
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|f| !(owner_running && f["code"].as_str().is_some_and(owner_code)))
+            .filter(|f| !(owner_running && f["code"].as_str().is_some_and(owner_says)))
             .cloned()
             .collect(),
     )
@@ -325,7 +388,7 @@ pub async fn once(root: &Path, now: i64) -> Value {
         std::time::Duration::from_secs(crate::control::PROBE_SECONDS),
     )
     .await;
-    let owner = owner_state(&probe, run.as_ref(), crate::bugs::alive, now);
+    let owner = owner_state(&probe, run.as_ref(), crate::bugs::alive, boot_time(), now);
     let acts = unfinished_acts(&crate::duty::journal(root), now, |id| run_open(root, id));
     let watch: Value = switchboard_core::private_fs::read_private(
         &root.join(crate::session_watch::FILE),
@@ -394,37 +457,61 @@ mod tests {
     fn the_owner_is_answering_starting_stopped_down_or_silent() {
         let now = 10_000;
         let answers = Probe::Answers { version: None };
-        assert_eq!(owner_state(&answers, None, |_| false, now), "answers");
+        assert_eq!(owner_state(&answers, None, |_| false, None, now), "answers");
         assert_eq!(
-            owner_state(&Probe::NoAnswer, Some(&run(false, 0)), |_| true, now),
+            owner_state(&Probe::NoAnswer, Some(&run(false, 0)), |_| true, None, now),
             "not_answering"
         );
         // Quit through its drain: stopped. Ended without it: down (a crash).
         for probe in [Probe::NoDescriptor, Probe::OwnerGone, Probe::Refused] {
             assert_eq!(
-                owner_state(&probe, Some(&run(true, 0)), |_| false, now),
+                owner_state(&probe, Some(&run(true, 0)), |_| false, None, now),
                 "stopped"
             );
             assert_eq!(
-                owner_state(&probe, Some(&run(false, 0)), |_| false, now),
+                owner_state(&probe, Some(&run(false, 0)), |_| false, None, now),
                 "down"
             );
         }
         // Its process runs and has published no port: starting for two minutes, then silent.
         let alive = Some(run(false, now - 30));
         assert_eq!(
-            owner_state(&Probe::NoDescriptor, alive.as_ref(), |_| true, now),
+            owner_state(&Probe::NoDescriptor, alive.as_ref(), |_| true, None, now),
             "starting"
         );
         let long = Some(run(false, now - 600));
         assert_eq!(
-            owner_state(&Probe::NoDescriptor, long.as_ref(), |_| true, now),
+            owner_state(&Probe::NoDescriptor, long.as_ref(), |_| true, None, now),
             "not_answering"
         );
         assert_eq!(
-            owner_state(&Probe::NoDescriptor, None, |_| true, now),
+            owner_state(&Probe::NoDescriptor, None, |_| true, None, now),
             "stopped"
         );
+        // A pid another process holds after a reboot: a run started before this boot is down.
+        let before_boot = Some(run(false, now - 600));
+        assert_eq!(
+            owner_state(
+                &Probe::NoDescriptor,
+                before_boot.as_ref(),
+                |_| true,
+                Some(now - 300),
+                now
+            ),
+            "down"
+        );
+        assert_eq!(
+            owner_state(
+                &Probe::NoDescriptor,
+                before_boot.as_ref(),
+                |_| true,
+                Some(now - 900),
+                now
+            ),
+            "not_answering"
+        );
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        assert!(boot_time().is_some_and(|b| b > 0 && b <= crate::session_watch::now()));
     }
 
     #[test]
@@ -502,6 +589,18 @@ mod tests {
             (down[0]["code"].clone(), down[0]["severity"].clone()),
             (json!(OWNER_DOWN), json!("fail"))
         );
+        // Review round 2: one miss warns, two runs in a row fail.
+        let once = assess("not_answering", &[], &Value::Null, None, now);
+        assert_eq!(once[0]["severity"], "warn");
+        let before = json!({"checked_at": now - 300, "findings": once});
+        let twice = assess("not_answering", &[], &Value::Null, Some(&before), now);
+        assert_eq!(twice[0]["severity"], "fail");
+        let stale = json!({"checked_at": now - 3600, "findings": once});
+        assert_eq!(
+            assess("not_answering", &[], &Value::Null, Some(&stale), now)[0]["severity"],
+            "warn",
+            "a miss an hour ago is not the run before"
+        );
         // The owner's finding keeps the time it was first seen.
         let earlier = json!({"findings": [{"code": OWNER_DOWN, "first_seen": now - 900}]});
         let kept = assess("down", &[], &Value::Null, Some(&earlier), now);
@@ -511,6 +610,27 @@ mod tests {
             assess("stopped", &[], &Value::Null, None, now)[0]["severity"],
             "warn"
         );
+    }
+
+    #[test]
+    fn a_running_owner_never_reads_back_what_it_already_lists_itself() {
+        // Review round 2 of PR #852: a gone board run and a duplicate come from the owner's own
+        // watch, which Needs attention already lists with their acts.
+        let root = tempfile::tempdir().unwrap();
+        let now = 100_000;
+        let findings = [OWNER_DOWN, ACT_UNFINISHED, BOARD_RUN_GONE, DUPLICATE_SESSION]
+            .map(|code| json!({"code": code, "severity": "warn", "count": 1, "ids": [], "first_seen": now}));
+        let report = json!({"version": VERSION, "checked_at": now, "findings": findings});
+        std::fs::write(root.path().join(FILE), report.to_string()).unwrap();
+        let codes = |running| -> Vec<String> {
+            current(root.path(), now, running)
+                .unwrap()
+                .iter()
+                .map(|f| f["code"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(codes(true), [ACT_UNFINISHED]);
+        assert_eq!(codes(false).len(), 4);
     }
 
     #[tokio::test]

@@ -7325,9 +7325,12 @@ async fn execute(
                         .into_iter()
                         .map(|(id, _)| id),
                 );
-                let resumable =
-                    resumable::recent(&root, session_watch::now() - resumable::WINDOW_SECONDS);
                 let now = session_watch::now();
+                let mut resumable = resumable::recent(&root, now - resumable::WINDOW_SECONDS);
+                // SB-508: a session the person started that ended outside Switchboard (a
+                // reboot, a crash, a closed terminal) in the last day, seen live by the ledger;
+                // a live one or one Switchboard closed is listed once, by the rows themselves.
+                resumable.extend(live_ledger::ended_rows(&root, now));
                 let monitors: HashMap<String, Value> = tree["live"]
                     .as_array()
                     .into_iter()

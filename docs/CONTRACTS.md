@@ -3703,7 +3703,9 @@ when its folder or `<config>/projects/<folder>/<id>.jsonl` is gone: never a fres
 place. On the Sessions page (SP-2) a session is one row: a live process with a waiting stop is
 `waiting` (`limit`, with `probe_at`) and no stop row; a ready stop not live, an ended Claude launch
 with its session id and every ledger line carry `continue` (ledger rows read `closed_idle`,
-`closed_idle_window`, `closed_duplicate`, `closed_stuck`, `closed_restart`; a `restart_back` line hides
+`closed_idle_window`, `closed_duplicate`, `closed_stuck`, `closed_restart`, and `ended_seen` for a
+session the ledger of live sessions saw in the last day that is no longer live (SB-508,
+`live_ledger::ended_rows`, reason `seen_live`); a `restart_back` line hides
 its session's ledger row). FD-291: each open stop carries `transcript_at`, the newest write of its
 transcript in any config folder it may live in (`machine_sessions::transcript_at`); a live session
 whose transcript was written more than 120 s after its stop, or whose process is `busy` 120 s after
@@ -3889,7 +3891,12 @@ the person's own sign-in off (SB-403) only sessions in Switchboard's own homes a
 a host word, a pid and times only: never a transcript line, a prompt or a credential.
 `resumable::locate` takes the newest by time of the resumable line (`at`), the launch records
 (`last_turn_at`, else `launched_at`) and the ledger (`last_seen`), and a limit stop only when none
-names the session, so `sessions continue <id>` (and every continuation that goes through `locate`) resumes such
+names the session; a launch record that names no config folder (no `home_dir` and no
+`config_dir`, which a resume outside the data folder now records) ranks below every source that
+names one, since its folder is only a guess (test
+`resumable::tests::a_launch_record_that_names_no_config_never_beats_a_source_that_does`). A session
+that ended outside Switchboard and was seen in the last day is listed on the Sessions page as
+`ended_seen` with *Continue* (above), so `sessions continue <id>` (and every continuation that goes through `locate`) resumes such
 a session as itself; `continue_as`'s refusals are unchanged (a live process, a folder or a transcript
 gone). Tests `live_ledger::tests::*`,
 `resumable::tests::a_session_nobody_closed_or_launched_is_found_in_the_live_ledger`.
@@ -3905,7 +3912,8 @@ no store lock. It reads `owner-run.json` (`bugs::last_run`) and probes the owner
 within `control::PROBE_SECONDS`, 5; never an operation): `owner` is `answers`, `starting` (its run
 record is not clean, its process runs, it started under 2 minutes ago and has no port yet),
 `stopped` (it ended through its drain, or never wrote a run record), `down` (not clean, its process
-gone: a crash) or `not_answering` (its process runs or its port took the connection, and it did not
+gone: a crash; a run that started before this boot, `watchdog::boot_time` from `kern.boottime` or
+`/proc/stat`, counts as gone whatever now holds its pid) or `not_answering` (its process runs or its port took the connection, and it did not
 prove itself in time; also an unreadable descriptor). It reads `duty.jsonl` (`duty::journal`): an
 intent with no outcome for at least 10 minutes (`ACT_SECONDS`) is an act left
 half done (`watchdog::unfinished_acts`). The duty officer's acts are read by its own rule
@@ -3918,15 +3926,16 @@ run `gone` for 30 minutes (`GONE_SECONDS`) and a `duplicate` for 15 (`DUPLICATE_
 its `first_seen`, else the file's `at`; a gone launch that is not a dispatched run is history, as in
 Needs attention, and is not counted. The answer is written to `<data>/watchdog.json` (0600, each
 run): `{version: 1, checked_at, checked_by, owner, owner_version, findings: [{code, severity, count,
-ids, first_seen}]}`, codes `owner_down` and `owner_not_answering` (`severity: fail`),
-`owner_stopped`, `act_unfinished`, `board_run_gone`, `duplicate_session` (`warn`); an owner
+ids, first_seen}]}`, codes `owner_down` (`severity: fail`), `owner_not_answering` (`warn` on a first miss,
+`fail` when the previous report, no older than 15 minutes, missed too: one slow 5 s look of a
+background job is not an outage), `owner_stopped`, `act_unfinished`, `board_run_gone`, `duplicate_session` (`warn`); an owner
 finding keeps the `first_seen` of the previous report. Off (`<data>/watchdog` holds `off`), or over
 a data folder with neither `owner-run.json` nor `control.json`, a run writes nothing and answers
 `{checked: false, reason: off | no_owner_record}`. It never acts and sends nothing: an agent relays
 what it says.
 
 **Readers.** `watchdog::current(root, now, owner_running)` answers the findings of a report no older
-than 15 minutes (`STALE_SECONDS`), without the owner codes when the reader is the running owner;
+than 15 minutes (`STALE_SECONDS`), without the codes the running owner says itself when it is the reader (`owner_says`: the owner codes, and `board_run_gone` and `duplicate_session`, which come from its own watch and which Needs attention already lists as `session_gone` and `session_duplicate` with their acts);
 `None` when the watchdog is off, never ran or is stale. Needs attention (`attention::Inputs.watchdog`)
 lists one item per finding, first, `reason: watchdog` with `code`, `count`, `ids`, `since` (its
 `first_seen`), `severity` and a fixed sentence (`WATCHDOG_*` in `attention.rs`); `action` is

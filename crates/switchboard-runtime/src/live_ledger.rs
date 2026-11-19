@@ -191,6 +191,33 @@ pub fn observe(root: &Path, alive: &HashSet<u32>, now: i64) {
     }
 }
 
+/// SB-508: how long after its last sighting the Sessions page lists a session that ended.
+pub const ENDED_LISTED_SECONDS: i64 = 86_400;
+
+/// SB-508: the ledger's sessions seen within `ENDED_LISTED_SECONDS`, as the Sessions page's
+/// resumable lines (`reason: seen_live`), newest first. The rows drop every session still live
+/// (`last_seen` is refreshed only hourly) and every one already listed, so only the ended stay.
+pub fn ended_rows(root: &Path, now: i64) -> Vec<Value> {
+    let ledger = read(root);
+    let mut rows: Vec<(i64, Value)> = ledger
+        .sessions
+        .iter()
+        .filter(|(_, e)| {
+            let age = now - e.last_seen;
+            (0..=ENDED_LISTED_SECONDS).contains(&age)
+        })
+        .map(|(id, e)| {
+            (
+                e.last_seen,
+                serde_json::json!({"session": id, "config": e.config, "cwd": e.cwd,
+                    "reason": "seen_live", "at": e.last_seen, "by": "ledger"}),
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| b.0.cmp(&a.0));
+    rows.into_iter().map(|(_, v)| v).collect()
+}
+
 /// Where `session` can be resumed from (its config folder and working folder), when it was seen
 /// live in the last `resumable::WINDOW_SECONDS`.
 pub fn locate(root: &Path, session: &str, now: i64) -> Option<(PathBuf, String)> {
@@ -371,6 +398,18 @@ mod tests {
             keys,
             ["config", "cwd", "first_seen", "host", "last_seen", "pid"]
         );
+        // The Sessions page's lines: seen within a day, newest first.
+        let rows = ended_rows(root.path(), 2000);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            (
+                rows[0]["session"].clone(),
+                rows[0]["reason"].clone(),
+                rows[0]["cwd"].clone()
+            ),
+            (json!(S1), json!("seen_live"), json!("/work/a"))
+        );
+        assert!(ended_rows(root.path(), 1000 + ENDED_LISTED_SECONDS + 1).is_empty());
         // A broken file reads as empty and is replaced by the next write.
         std::fs::write(root.path().join(FILE), b"{").unwrap();
         assert_eq!(read(root.path()), Ledger::default());

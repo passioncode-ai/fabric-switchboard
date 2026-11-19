@@ -176,6 +176,7 @@ enum Command {
     /// minutes, that no board run has been gone for 30 and no session has run in two processes
     /// for 15. It only reports, in Needs attention and the health report; it never acts. Without
     /// a subcommand: the switch, its job and the last report.
+    #[command(args_conflicts_with_subcommands = true)]
     Watchdog {
         /// Check once now, as the job does: needs no running Switchboard and writes the report.
         #[arg(long)]
@@ -6598,6 +6599,16 @@ mod in_place_tests {
 #[cfg(test)]
 mod help_tests {
     use clap::CommandFactory;
+
+    /// Review round 2 of PR #852: `--once` checks and changes nothing, so a switch beside it is
+    /// refused, never ignored.
+    #[test]
+    fn watchdog_once_refuses_a_switch_beside_it() {
+        use clap::Parser;
+        assert!(super::Cli::try_parse_from(["switchboard", "watchdog", "--once", "off"]).is_err());
+        assert!(super::Cli::try_parse_from(["switchboard", "watchdog", "--once"]).is_ok());
+        assert!(super::Cli::try_parse_from(["switchboard", "watchdog", "off"]).is_ok());
+    }
 
     /// SB-68: every command and every argument says what it is in `--help`.
     #[test]
