@@ -1090,3 +1090,35 @@ research notes); the ones still in force that the board cites are seeded below w
   минуту через свитчборд а не через запросы напрямую к сессиям и на удаленный свитчборд в рамках
   организации то же самое».
 
+### DEC-0036: Who holds Switchboard's access is answered as access-grants/1, holders never named
+
+- **Date:** 2026-11-19
+- **Status:** Accepted (built on branch `sb-573-access-grants`: SB-573, #874). The number is
+  assigned by pull request creation time: DEC-0034 is #871's, DEC-0035 #872's, DEC-0037 reserved.
+- **Context:** fabric-agent-contract DEC-0187 (`main` `320c7ab9`) asks every product that issues
+  access to answer `access.grants.list` as `access-grants/1`, so Fabric Dashboards shows each
+  agent's Access tab and one Access page (FD-351, board request `d4a3e8ac` in thread `747c6bb0`,
+  2026-11-19, which names Switchboard's seats on other machines and accounts given to an agent).
+  Switchboard's records were not made for it: a seat names its machine as ssh knows it
+  (`user@host`, which can hold a person's name), an account given to an agent names that agent in
+  the person's words, the journal of assignments keeps its newest 256 events of every kind, and no
+  act records which agent called.
+- **Decision:**
+  - Issuer `fabric-switchboard.default`, the product's name and its default instance.
+  - A machine holder is `m-` and 16 hex of the SHA-256 of its machine group's name (aliases read
+    as their machine), lowercased: stable, opaque, never the name.
+  - An agent holder is the name the person gave when it is a service key; any other name is
+    `unresolved`, its words shown only when they hold an agent's word and no `@`, else hidden.
+  - Giving an account to an agent or taking it back is kept in `assignments.jsonl` (the newest
+    1000 lines), so a grant taken back stays listable (AG-5); an account given before is listed
+    with the earliest time it can have been given, and the answer says so.
+  - An act is the operator's when the operator's words were recorded with it, else an agent's;
+    `via` is `agent` and `agent` is `unrecorded-caller.unknown`, a valid service key that names no
+    agent, because FAC-SEM-185 asks one whenever `via` is `agent` and Switchboard does not know the
+    caller. A seat that came back without a recorded call back is left out and counted in
+    `degraded`, never given a revocation time Switchboard does not know.
+  - No `limitUsd` or `spentDayUsd`: no grant is metered here. No `doors` until an operation takes
+    `$defs/revokeInput` and operations have dotted names (SB-574, SB-478).
+- **Consequences:** a host joins Switchboard's grants with every other product's without a label
+  or address. `unrecorded-caller.unknown` and the hidden label read as unknown, not as a guess.
+  Recording the caller and the doors are SB-574.

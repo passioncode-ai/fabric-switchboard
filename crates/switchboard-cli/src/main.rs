@@ -629,6 +629,12 @@ enum Command {
         #[command(subcommand)]
         command: Backup,
     },
+    /// Who holds the access this Switchboard issued (fabric-agent-contract DEC-0187): seats on
+    /// other machines and accounts given to an agent, as `access-grants/1`. Reads only.
+    Access {
+        #[command(subcommand)]
+        command: Access,
+    },
     /// The guide a coding agent follows to set Switchboard up; with --status, where the setup
     /// stands: each step done, the agent's to do (with its command), the person's, or optional.
     /// Reads only; safe to repeat.
@@ -2096,6 +2102,29 @@ enum AnthropicCommand {
     },
 }
 #[derive(Subcommand)]
+enum Access {
+    /// The grants as `access-grants/1`: the seats moved, handed over or delegated to another
+    /// machine, and the accounts given to an agent, each with its holder, the account it opens
+    /// and who issued it when. Never a credential, a label, an e-mail or an ssh name.
+    Grants {
+        /// Only grants this agent holds, by its service key <id>.<instance>.
+        #[arg(long)]
+        holder: Option<String>,
+        /// Only grants that open this agent, by its service key (none of Switchboard's does).
+        #[arg(long)]
+        subject: Option<String>,
+        /// Revoked and expired grants too.
+        #[arg(long)]
+        include_revoked: bool,
+        /// The nextCursor of the previous page.
+        #[arg(long)]
+        cursor: Option<String>,
+        /// Grants per page (1 to 500).
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+}
+#[derive(Subcommand)]
 enum Backup {
     /// The backup folder and the backups in it, newest first.
     List,
@@ -3516,6 +3545,24 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             launch_id: launch_id.clone(),
         },
         Command::Current => Operation::CurrentAccounts,
+        Command::Access {
+            command:
+                Access::Grants {
+                    holder,
+                    subject,
+                    include_revoked,
+                    cursor,
+                    limit,
+                },
+        } => Operation::AccessGrants {
+            input: switchboard_runtime::access_grants::ListInput {
+                holder: holder.clone(),
+                subject: subject.clone(),
+                include_revoked: *include_revoked,
+                cursor: cursor.clone(),
+                limit: *limit,
+            },
+        },
         Command::Backup { command } => match command {
             Backup::List => Operation::Backups,
             Backup::Now => Operation::BackupNow,
@@ -6967,6 +7014,7 @@ mod mcp_parity {
             Not("SB-399: Fabric's claim bookkeeping marks a session that holds its task; an agent's own waits come through its hooks"),
         ),
         ("provenance", Tool("switchboard_provenance")),
+        ("access grants", Tool("switchboard_access_grants")),
         ("current", Tool("switchboard_status")),
         ("rotation status", Tool("switchboard_rotation")),
         ("rotation set", Tool("switchboard_rotation_set")),

@@ -1,4 +1,5 @@
 //! One store/proxy/control owner shared by the desktop and CLI.
+pub mod access_grants;
 pub mod account_handover;
 pub mod account_send;
 pub mod agent_catalog;
@@ -391,6 +392,12 @@ pub enum Operation {
     Seats {
         #[serde(default)]
         limit: Option<usize>,
+    },
+    /// SB-573 (fabric-agent-contract DEC-0187): who holds the access this Switchboard issued
+    /// (seats on other machines, accounts given to an agent), as `access-grants/1`. Reads only.
+    AccessGrants {
+        #[serde(default)]
+        input: access_grants::ListInput,
     },
     /// SB-327: read another machine's Switchboard over ssh: its accounts, groups and
     /// organizations. Reads only, on both machines.
@@ -1737,6 +1744,8 @@ impl Runtime {
                 | Operation::SurrenderDelegated { .. }
                 | Operation::RecallAccount { .. }
                 | Operation::Seats { .. }
+                // SB-573: seats.jsonl, assignments.jsonl, remote-usage.json and the snapshot.
+                | Operation::AccessGrants { .. }
                 // SB-355: `ssh -G` and the live reads run outside the store; its writes are
                 // their own short calls.
                 | Operation::Machines { .. }
@@ -5939,7 +5948,18 @@ async fn execute(
             {
                 return Err(account_send::MOVED_AWAY.into());
             }
+            let before = store.snapshot()?.assigned_to.get(&id).cloned();
             store.assign_to_agent(&id, to.as_deref())?;
+            // SB-573: kept so a grant taken back stays listable (DEC-0187 AG-5). A failed write
+            // costs the record, never the act.
+            let after = store.snapshot()?.assigned_to.get(&id).cloned();
+            if after != before && (after.is_some() || before.is_some()) {
+                if access_grants::record_assignment(root, monitor::now(), &id, after.as_deref())
+                    .is_err()
+                {
+                    oplog::event("assignment_record", &[("failed", oplog::Field::Flag(true))]);
+                }
+            }
             Ok(Value::Null)
         }
         // Only the offline CLI reaches this arm (`Runtime::execute` answers a quota check
@@ -7539,6 +7559,14 @@ async fn execute(
         Operation::Seats { limit } => Ok(json!({
             "seats": seats::recent(root, limit.unwrap_or(50).clamp(1, 1000)),
         })),
+        Operation::AccessGrants { input } => {
+            input.check()?;
+            let snapshot = store.snapshot()?;
+            let root = root.to_owned();
+            Ok(blocking::run(move || {
+                access_grants::list(&root, &snapshot, &input, monitor::now())
+            }))
+        }
         Operation::Targets { probe } => {
             let root = root.to_owned();
             blocking::run(move || -> Result<Value, String> {
@@ -12857,6 +12885,58 @@ mod owner_tests {
         let snapshot = runtime.store.snapshot().unwrap();
         assert!(snapshot.elsewhere.is_empty() && snapshot.is_assigned(&b.id));
         assert!(snapshot.accounts.iter().any(|a| a.id == b.id && a.enabled));
+        // SB-573: every give and take-back is kept, so access.grants.list lists a grant taken
+        // back too (DEC-0187 AG-5); a refused give records nothing.
+        let lines = access_grants::assignments(root.path());
+        let kinds: Vec<(&str, Option<&str>)> = lines
+            .iter()
+            .map(|l| (l.event.as_str(), l.to.as_deref()))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                ("assigned", Some("Frame Agent on Studio")),
+                ("taken_back", None),
+                ("assigned", Some("Frame Agent")),
+            ]
+        );
+        let all = runtime
+            .execute(Operation::AccessGrants {
+                input: access_grants::ListInput {
+                    include_revoked: true,
+                    ..Default::default()
+                },
+            })
+            .await
+            .unwrap();
+        assert_eq!(all["protocol"], "access-grants/1");
+        let grants = all["grants"].as_array().unwrap();
+        assert_eq!(grants.len(), 2, "{all}");
+        assert_eq!(grants[0]["revoked"]["reason"], "Taken back.");
+        assert_eq!(grants[1]["holder"]["label"], "Frame Agent");
+        assert!(grants[1].get("revoked").is_none());
+        // The seat moved to studio.local came home when the account was given: left out.
+        assert!(all["degraded"][0].as_str().unwrap().contains("seat"));
+        assert!(!all.to_string().contains("studio.local"));
+        let now = runtime
+            .execute(Operation::AccessGrants {
+                input: access_grants::ListInput::default(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(now["grants"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            runtime
+                .execute(Operation::AccessGrants {
+                    input: access_grants::ListInput {
+                        limit: Some(0),
+                        ..Default::default()
+                    },
+                })
+                .await
+                .unwrap_err(),
+            access_grants::LIMIT_INVALID
+        );
     }
     #[tokio::test]
     async fn failed_or_unreadable_activation_is_journaled_as_failed() {

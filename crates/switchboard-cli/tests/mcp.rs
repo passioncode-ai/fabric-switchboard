@@ -234,6 +234,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_account_recall",
             "switchboard_seats",
             "switchboard_remote",
+            "switchboard_access_grants",
             "switchboard_machines",
             "switchboard_machine_set",
             "switchboard_mcp_homes",
@@ -1735,6 +1736,39 @@ async fn an_account_is_given_to_an_agent_and_taken_back_from_the_cli() {
         .map(|e| e["detail"].as_str().unwrap())
         .collect();
     assert_eq!(details, ["assigned", "override", "cleared"]);
+    // SB-573 (DEC-0187): the give and the take-back are one grant, revoked, in
+    // access-grants/1; the name the person gave is shown as an agent's, never a label or e-mail.
+    let out = run(&["--json", "access", "grants", "--include-revoked"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let grants: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let answer = &grants["data"];
+    assert_eq!(answer["protocol"], "access-grants/1");
+    assert_eq!(answer["issuer"], "fabric-switchboard.default");
+    let list = answer["grants"].as_array().unwrap();
+    assert_eq!(list.len(), 1, "{answer}");
+    assert_eq!(
+        list[0]["holder"],
+        json!({"kind": "unresolved", "label": "Frame Agent on Studio"})
+    );
+    assert_eq!(list[0]["subject"]["ref"], id.as_str());
+    assert_eq!(list[0]["revoked"]["reason"], "Taken back.");
+    assert!(!answer.to_string().contains('@'), "{answer}");
+    let now: Value = serde_json::from_slice(&run(&["--json", "access", "grants"]).stdout).unwrap();
+    assert_eq!(now["data"]["grants"], json!([]));
+    let refused = run(&["access", "grants", "--holder", "Frame Agent"]);
+    assert!(!refused.status.success());
+    // The same answer from a read-only MCP server, which lists the tool as a read.
+    let mut agent = Agent::start(data.path(), data.path(), &[], true);
+    agent.request("initialize", json!({"protocolVersion": "2025-06-18"}));
+    let (error, value) = agent.tool("switchboard_access_grants", json!({"includeRevoked": true}));
+    assert!(!error, "{value}");
+    assert_eq!(value["grants"], answer["grants"]);
+    let (error, value) = agent.tool("switchboard_access_grants", json!({"limit": 0}));
+    assert!(error, "{value}");
 }
 
 /// SB-375: an agent host keeps one server for the whole session. Once an update replaces the

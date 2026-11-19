@@ -156,6 +156,13 @@ const ALLOWLIST = {
   'The session host could not start.': 'SB-450: hosted starts print to the CLI or go to the boot-resume journal',
   'The session host stopped before the session started.': 'SB-450: hosted starts print to the CLI or go to the boot-resume journal',
   'The session host did not answer within ten seconds.': 'SB-450: hosted starts print to the CLI or go to the boot-resume journal',
+  // runtime access_grants.rs (SB-573): refusals of access.grants.list's input, answered to the
+  // CLI and MCP caller that sent it (Fabric Dashboards reads it); no window page calls it, and
+  // a failed assignments.jsonl write is logged, never returned.
+  'holder and subject are a service key <id>.<instance>, such as frame-agent.default.': 'SB-573: access grants input, CLI and MCP only',
+  'limit is a whole number from 1 to 500.': 'SB-573: access grants input, CLI and MCP only',
+  'That cursor is not one this answer gave. Ask without it.': 'SB-573: access grants input, CLI and MCP only',
+  'Assignment record unavailable.': 'SB-573: a failed assignments.jsonl write is logged as assignment_record and never returned',
   'Project already here.': 'swallowed by backup restore',
   'Organization already here.': 'swallowed by backup restore (SB-109)',
   'Nothing to restore.': 'swallowed by backup restore (SB-109)',
