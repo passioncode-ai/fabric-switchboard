@@ -732,7 +732,13 @@ mod tests {
     /// back; giving it back restores how it was, so a seat switched off here stays off.
     #[test]
     fn a_called_back_seat_stays_off_and_a_give_back_restores_how_it_was() {
-        let (_r, _f, store) = store_with_group();
+        let (root, _f, store) = store_with_group();
+        let schema = || {
+            let disk: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(root.path().join("accounts.json")).unwrap())
+                    .unwrap();
+            disk["schema_version"].as_u64().unwrap()
+        };
         let a = store
             .add_delegated(
                 "seat".into(),
@@ -749,6 +755,11 @@ mod tests {
         assert!(d.surrendered_at.is_some());
         assert_eq!(d.enabled_before, Some(true));
         assert_eq!(
+            schema(),
+            17,
+            "written at 17 only while a call back is recorded"
+        );
+        assert_eq!(
             store.update_fields(&a.id, None, Some(true)).unwrap_err(),
             SURRENDERED,
             "nothing here turns it on while it is called back"
@@ -764,6 +775,7 @@ mod tests {
         let s = store.snapshot().unwrap();
         assert!(s.accounts[0].enabled, "given back as it was: on");
         assert!(s.delegated[&a.id].surrendered_at.is_none());
+        assert_eq!(schema(), 16);
 
         // Switched off here before the call back: given back, it stays off.
         store.update_fields(&a.id, None, Some(false)).unwrap();
