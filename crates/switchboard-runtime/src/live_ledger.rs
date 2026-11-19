@@ -89,13 +89,33 @@ pub fn merge(
         version: VERSION,
         sessions: previous.sessions.clone(),
     };
+    // One session in two processes (a duplicate) is one entry: the process the ledger already
+    // names when it is still one of them, else the lowest pid, so it is not rewritten each minute.
+    let mut one: BTreeMap<&str, &Observed> = BTreeMap::new();
     for s in seen {
+        let kept_pid = previous.sessions.get(&s.session).map(|e| e.pid);
+        one.entry(s.session.as_str())
+            .and_modify(|chosen| {
+                if kept_pid != Some(chosen.pid) && (kept_pid == Some(s.pid) || s.pid < chosen.pid) {
+                    *chosen = s;
+                }
+            })
+            .or_insert(s);
+    }
+    // `last_seen` of every live session is refreshed together, once any is an hour old (or in
+    // the future after a clock set back), so the refresh is one write an hour, not one a session.
+    let refresh = one.values().any(|s| {
+        previous
+            .sessions
+            .get(&s.session)
+            .is_some_and(|e| now - e.last_seen >= REFRESH_SECONDS || e.last_seen > now)
+    });
+    for s in one.into_values() {
         let config = s.config.to_string_lossy().into_owned();
         let entry = match previous.sessions.get(&s.session) {
             Some(old) if old.pid == s.pid && old.config == config && old.cwd == s.cwd => {
                 let mut kept = old.clone();
-                // A clock set back writes it again too, so `last_seen` never stays in the future.
-                if now - old.last_seen >= REFRESH_SECONDS || old.last_seen > now {
+                if refresh {
                     kept.last_seen = now;
                 }
                 kept
@@ -258,6 +278,20 @@ mod tests {
         // A clock set back never leaves `last_seen` in the future.
         let back = merge(&first, &[seen(S1, 10, "/work/a")], host, 900).unwrap();
         assert_eq!(back.sessions[S1].last_seen, 900);
+        // One session in two processes keeps the process the ledger names: no write each minute.
+        let twice = [seen(S1, 9, "/work/a"), seen(S1, 10, "/work/a")];
+        assert!(merge(&first, &twice, host, 1120).is_none());
+        let fresh = merge(&Ledger::default(), &twice, host, 1000).unwrap();
+        assert_eq!(fresh.sessions[S1].pid, 9, "else the lowest pid");
+        // Two sessions refresh together once one of them is an hour old: one write, not two.
+        let both = merge(&first, &[seen(S2, 20, "/work/b")], host, 2000).unwrap();
+        let live = [seen(S1, 10, "/work/a"), seen(S2, 20, "/work/b")];
+        let hour = merge(&both, &live, host, 1000 + 3600).unwrap();
+        assert_eq!(
+            (hour.sessions[S1].last_seen, hour.sessions[S2].last_seen),
+            (4600, 4600)
+        );
+        assert!(merge(&hour, &live, host, 2000 + 3600).is_none());
     }
 
     #[test]

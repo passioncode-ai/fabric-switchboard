@@ -99,31 +99,57 @@ pub fn transcript(config: &Path, cwd: &str, session: &str) -> PathBuf {
         .join(format!("{session}.jsonl"))
 }
 
-/// Where a session can be resumed from: its config folder and working folder, from the newest
-/// end recorded here, else a launch record naming it (its home), else the ledger of live sessions
-/// (SB-508: a session the person started in a terminal or an editor, seen live in the last week),
-/// else a limit stop (the person's own Claude folder).
+/// Where a session can be resumed from: its config folder and working folder, from the newest by
+/// time of the end recorded here (`at`), a launch record naming it (its home; its last turn, else
+/// its launch) and the ledger of live sessions (SB-508: a session the person started in a terminal
+/// or an editor, seen live in the last week; `last_seen`), so a session resumed elsewhere since its
+/// end is found where it ran last; else a limit stop (the person's own Claude folder).
 pub fn locate(root: &Path, session: &str, now: i64) -> Option<(PathBuf, String)> {
+    let mut found: Vec<(i64, PathBuf, String)> = Vec::new();
     if let Some(v) = recent(root, now - WINDOW_SECONDS)
         .into_iter()
         .find(|v| v["session"] == session)
     {
         // A session host's line names the launch only: its record says the rest.
         if let (Some(config), Some(cwd)) = (v["config"].as_str(), v["cwd"].as_str()) {
-            return Some((PathBuf::from(config), cwd.to_owned()));
+            let at = v["at"].as_i64().unwrap_or(0);
+            found.push((at, PathBuf::from(config), cwd.to_owned()));
         }
     }
     for r in crate::launches::recent_records(root, now - WINDOW_SECONDS) {
-        if r["provider_session_id"] == session {
-            let config = match r["home_dir"].as_str() {
-                Some(home) => root.join(home),
-                None => crate::person::claude_dir()?,
-            };
-            return Some((config, r["working_directory"].as_str()?.to_owned()));
+        if r["provider_session_id"] != session {
+            continue;
+        }
+        let config = match r["home_dir"].as_str() {
+            Some(home) => Some(root.join(home)),
+            None => crate::person::claude_dir(),
+        };
+        if let (Some(config), Some(cwd)) = (config, r["working_directory"].as_str()) {
+            let at = r["last_turn_at"]
+                .as_i64()
+                .or(r["launched_at"].as_i64())
+                .unwrap_or(0);
+            found.push((at, config, cwd.to_owned()));
         }
     }
-    if let Some(found) = crate::live_ledger::locate(root, session, now) {
-        return Some(found);
+    if let Some(entry) = crate::live_ledger::read(root).sessions.get(session) {
+        if entry.last_seen >= now - WINDOW_SECONDS {
+            found.push((
+                entry.last_seen,
+                PathBuf::from(&entry.config),
+                entry.cwd.clone(),
+            ));
+        }
+    }
+    // The newest wins; on a tie the order above (an end, a launch, the ledger).
+    let mut best: Option<(i64, PathBuf, String)> = None;
+    for candidate in found {
+        if best.as_ref().is_none_or(|b| candidate.0 > b.0) {
+            best = Some(candidate);
+        }
+    }
+    if let Some((_, config, cwd)) = best {
+        return Some((config, cwd));
     }
     let stops = crate::recovery::read(root).ok()?;
     let stop = stops.iter().find(|s| s.session == session)?;
@@ -168,7 +194,8 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
         return Err(NO_TRANSCRIPT.into());
     }
     let program = crate::launch::find_program("claude").ok_or(NO_CLAUDE)?;
-    let bypass = crate::launch::bypass_args(root, switchboard_core::Provider::Claude, &[]);
+    // SB-515: the permission choice as Fabric Sessions asks it (D-7), the one answer it reads.
+    let bypass = crate::session_accounts::resume_flags(root);
     let mut script = crate::duty::resume_script_for(
         &config,
         &cwd,
@@ -289,7 +316,16 @@ mod tests {
             locate(root.path(), session, 5000),
             Some((PathBuf::from("/h/.claude-work"), "/w/mine".to_owned()))
         );
-        // An end Switchboard recorded still wins over the ledger.
+        // An end Switchboard recorded later wins over the ledger; an earlier one does not.
+        record(
+            root.path(),
+            json!({"session": session, "config": "/h/.claude", "cwd": "/w/old", "reason": "idle", "at": 3500}),
+        );
+        assert_eq!(
+            locate(root.path(), session, 5000),
+            Some((PathBuf::from("/h/.claude-work"), "/w/mine".to_owned())),
+            "seen live after that end: it ran there last"
+        );
         record(
             root.path(),
             json!({"session": session, "config": "/h/.claude", "cwd": "/w/other", "reason": "idle", "at": 4500}),

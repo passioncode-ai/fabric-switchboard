@@ -215,7 +215,8 @@ fix}`. `state` is `ok`, `warn`, `fail` or `unknown` (never read as ok: `errors_t
 while usage counts are off). Checks: `owner`, `sign_in`, `accounts`, `sessions_stuck`,
 `sessions_duplicate`, `sessions_gone`, `crashes` (a crash in the last day fails, in the week warns),
 `errors_today` (50 or more warn), `watchdog` (what the watchdog found: `fail` when Switchboard is
-down or silent, `unknown` when the watchdog is off or its report is older than 15 minutes).
+down or silent; absent where no watchdog job runs, `unknown` only when its installed job's report
+is older than 15 minutes).
 `fix.tool` names the tool that repairs it. Counts and kinds
 only: no account, folder, session id or text.
 ### `switchboard_bugs`: no arguments

@@ -31,8 +31,8 @@ pub const ACT_SECONDS: i64 = 600;
 pub const GONE_SECONDS: i64 = 1800;
 /// A session in two processes this long.
 pub const DUPLICATE_SECONDS: i64 = 900;
-/// Intents older than this are history, not a finding.
-const ACT_WINDOW: i64 = 86_400;
+/// A dispatched run's stop intent older than this is history, not a finding.
+const STOP_WINDOW: i64 = 86_400;
 /// An owner that started this recently may not have published its port yet.
 const STARTING_SECONDS: i64 = 120;
 
@@ -107,31 +107,54 @@ pub fn owner_state(
     }
 }
 
-/// The intents of `duty.jsonl` with no outcome, newest per session (per launch for a dispatched
-/// run's stop), at least `ACT_SECONDS` and less than a day old. Pure, for tests.
-pub fn unfinished_acts(lines: &[Value], now: i64) -> Vec<Value> {
-    let dispatch = |l: &Value| l["action"] == crate::dispatch::JOURNAL_ACTION;
-    let mut open: Vec<Value> = Vec::new();
-    for line in lines {
+/// The acts of `duty.jsonl` left half done for at least `ACT_SECONDS`. The duty officer's own by
+/// its own rule (`duty::interrupted`: the newest intent per session with no outcome that settles
+/// it, under an hour old, which is as long as its next check finishes a cut act), so a warning
+/// never outlives what the owner can still settle. A dispatched run's stop by `launch_id`: an
+/// intent with no outcome line under a day old whose run is still open (`run_open`: its record
+/// has no end and its process runs), since the dispatch pass records some ends without a journal
+/// line. Pure, for tests.
+pub fn unfinished_acts(lines: &[Value], now: i64, run_open: impl Fn(&str) -> bool) -> Vec<Value> {
+    let mut open: Vec<Value> = crate::duty::interrupted(lines, now)
+        .into_iter()
+        .filter(|o| o["at"].as_i64().is_some_and(|at| now - at >= ACT_SECONDS))
+        .collect();
+    let mut stops: Vec<&Value> = Vec::new();
+    for line in lines
+        .iter()
+        .filter(|l| l["action"] == crate::dispatch::JOURNAL_ACTION)
+    {
+        stops.retain(|o| o["launch_id"] != line["launch_id"]);
         if line["phase"] == "intent" {
-            if dispatch(line) {
-                open.retain(|o| !(dispatch(o) && o["launch_id"] == line["launch_id"]));
-            } else {
-                open.retain(|o| dispatch(o) || o["session"] != line["session"]);
-            }
-            open.push(line.clone());
-        } else if dispatch(line) {
-            open.retain(|o| !(dispatch(o) && o["launch_id"] == line["launch_id"]));
-        } else {
-            open.retain(|o| !crate::duty::settles(line, o));
+            stops.push(line);
         }
     }
-    open.retain(|o| {
-        o["at"]
-            .as_i64()
-            .is_some_and(|at| now - at >= ACT_SECONDS && now - at < ACT_WINDOW)
-    });
+    open.extend(
+        stops
+            .into_iter()
+            .filter(|o| {
+                o["at"]
+                    .as_i64()
+                    .is_some_and(|at| now - at >= ACT_SECONDS && now - at < STOP_WINDOW)
+            })
+            .filter(|o| o["launch_id"].as_str().is_some_and(&run_open))
+            .cloned(),
+    );
     open
+}
+
+/// SB-510: whether a dispatched run's stop is still open: its record has no end and its home's
+/// process runs (unknown counts as running, as the session watch reads it).
+fn run_open(root: &Path, id: &str) -> bool {
+    if !crate::launches::valid_id(id) {
+        return false;
+    }
+    let Some(record) = crate::launches::get(root, id) else {
+        return false;
+    };
+    record["ended"].is_null()
+        && crate::launches::own_home(root, &record)
+            .is_some_and(|home| crate::launch::session_running(&home).unwrap_or(true))
 }
 
 /// The kept watch's findings of `kind` (with `dispatch` for a gone run) that have stood at least
@@ -265,6 +288,28 @@ pub fn current(root: &Path, now: i64, owner_running: bool) -> Option<Vec<Value>>
     )
 }
 
+/// What the health report's `watchdog` check reads (SB-510 review round 1).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Watched {
+    /// No job runs here (off, never installed, Windows, `serve`, a development build, another data
+    /// folder) and no current report: no check, since nothing is expected to watch.
+    NotWatched,
+    /// The job is installed and on, and its report is missing or older than `STALE_SECONDS`.
+    Stale,
+    /// A current report's findings, as `current` answers them.
+    Current(Vec<Value>),
+}
+
+/// `Watched` for a reader: a current report wherever it came from; else `Stale` only when the
+/// job is installed (`job_installed`) and the watchdog is on.
+pub fn watched(root: &Path, now: i64, owner_running: bool, job_installed: bool) -> Watched {
+    match current(root, now, owner_running) {
+        Some(findings) => Watched::Current(findings),
+        None if job_installed && !is_off(root) => Watched::Stale,
+        None => Watched::NotWatched,
+    }
+}
+
 /// One run: the owner probed, the journal and the watch read, the report written. Off, or over a
 /// folder no owner ever ran in, nothing is written.
 pub async fn once(root: &Path, now: i64) -> Value {
@@ -281,11 +326,14 @@ pub async fn once(root: &Path, now: i64) -> Value {
     )
     .await;
     let owner = owner_state(&probe, run.as_ref(), crate::bugs::alive, now);
-    let acts = unfinished_acts(&crate::duty::journal(root), now);
-    let watch: Value = std::fs::read(root.join(crate::session_watch::FILE))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or(Value::Null);
+    let acts = unfinished_acts(&crate::duty::journal(root), now, |id| run_open(root, id));
+    let watch: Value = switchboard_core::private_fs::read_private(
+        &root.join(crate::session_watch::FILE),
+        4 * 1024 * 1024,
+    )
+    .ok()
+    .and_then(|b| serde_json::from_slice(&b).ok())
+    .unwrap_or(Value::Null);
     let previous = read(root);
     let findings = assess(owner, &acts, &watch, previous.as_ref(), now);
     let version = match &probe {
@@ -399,12 +447,16 @@ mod tests {
             outcome("done"),
             intent("cut", now - 1200),
             intent("young", now - 120),
+            // Past the hour the duty officer still finishes a cut act: nothing settles it now.
+            intent("past_the_hour", now - 5400),
             intent("ancient", now - 2 * 86_400),
             stop("L-done", now - 2000, true),
             stop("L-done", now - 1990, false),
             stop("L-cut", now - 900, true),
+            // The dispatch pass recorded its end without a journal line.
+            stop("L-ended", now - 900, true),
         ];
-        let open = unfinished_acts(&lines, now);
+        let open = unfinished_acts(&lines, now, |id| id != "L-ended");
         let names: Vec<&str> = open
             .iter()
             .map(|o| o["session"].as_str().or(o["launch_id"].as_str()).unwrap())
@@ -412,7 +464,7 @@ mod tests {
         assert_eq!(names, ["cut", "L-cut"]);
         // A newer intent of the same session stands for the older one.
         let again = vec![intent("s", now - 5000), intent("s", now - 100)];
-        assert!(unfinished_acts(&again, now).is_empty());
+        assert!(unfinished_acts(&again, now, |_| true).is_empty());
     }
 
     #[test]
@@ -504,7 +556,17 @@ mod tests {
         assert_eq!(as_owner.len(), 1);
         assert_eq!(as_owner[0]["code"], ACT_UNFINISHED);
         // Stale after fifteen minutes: no answer, never "nothing found".
-        assert!(current(root.path(), now + STALE_SECONDS + 1, false).is_none());
+        let later = now + STALE_SECONDS + 1;
+        assert!(current(root.path(), later, false).is_none());
+        // The health check: unknown only where an installed job's report went stale.
+        assert!(
+            matches!(watched(root.path(), now, false, false), Watched::Current(f) if f.len() == 2)
+        );
+        assert_eq!(watched(root.path(), later, false, true), Watched::Stale);
+        assert_eq!(
+            watched(root.path(), later, false, false),
+            Watched::NotWatched
+        );
         let state = status(root.path(), None, now);
         assert_eq!(
             (
@@ -519,6 +581,10 @@ mod tests {
         assert!(is_off(root.path()));
         assert_eq!(once(root.path(), now + 300).await["reason"], "off");
         assert!(current(root.path(), now, false).is_none());
+        assert_eq!(
+            watched(root.path(), later, false, true),
+            Watched::NotWatched
+        );
         assert_eq!(read(root.path()).unwrap()["checked_at"], now);
         set(root.path(), true).unwrap();
         assert!(!is_off(root.path()));

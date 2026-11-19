@@ -5494,6 +5494,8 @@ fn dispatch_remote(
     let start = remote_dispatch::Start {
         launch_id: &launch_id,
         provider,
+        // SB-515: the run's mode goes with it (before, only the record here kept it).
+        permissions,
         identity: &identity,
         request_body: &body,
         workflow: workflow_id,
@@ -5782,11 +5784,24 @@ async fn execute(
                 let root = root.to_owned();
                 blocking::run(move || bugs::list(&root, monitor::now()))
             };
-            let watchdog = watchdog::current(root, monitor::now(), runtime.is_some());
+            let watchdog = {
+                let host = runtime.and_then(|r| r.watchdog_job.lock().ok().and_then(|h| h.clone()));
+                let root = root.to_owned();
+                let running = runtime.is_some();
+                blocking::run(move || {
+                    let host = host.or_else(|| {
+                        shell::install::is_default_root(&root)
+                            .then(|| watchdog_job::Host::process(None))
+                            .flatten()
+                    });
+                    let installed = host.is_some_and(|h| watchdog_job::state(&h) == "installed");
+                    watchdog::watched(&root, monitor::now(), running, installed)
+                })
+            };
             Ok(health::report(&health::Inputs {
                 attention: &attention,
                 bugs: &bugs,
-                watchdog: watchdog.as_deref(),
+                watchdog: &watchdog,
                 owner_running: runtime.is_some(),
                 version: env!("CARGO_PKG_VERSION"),
                 now: monitor::now(),

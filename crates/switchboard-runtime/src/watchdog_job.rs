@@ -5,7 +5,8 @@
 //! never a development build, `serve`, another `--data-dir` or a test, which passes a `Host` with
 //! a temporary home and a recording runner. On macOS it is the LaunchAgent
 //! `~/Library/LaunchAgents/ai.passioncode.fabric-switchboard.watchdog.plist` (`StartInterval`
-//! 300), Switchboard's first own launchd label; on Linux the systemd user units
+//! 300), the first label Switchboard itself loads with `launchctl` (the app's login item is the
+//! autostart plugin's); on Linux the systemd user units
 //! `~/.config/systemd/user/fabric-switchboard-watchdog.{service,timer}`. Windows has no job yet
 //! (SB-543). `switchboard watchdog off` and `switchboard uninstall` take it out; the app's next
 //! start writes it again only while the setting is on.
@@ -17,6 +18,9 @@ pub const MACOS_PLIST: &str =
 pub const LINUX_DIR: &str = ".config/systemd/user";
 pub const LINUX_UNIT: &str = "fabric-switchboard-watchdog";
 const LAUNCHCTL: &str = "/bin/launchctl";
+/// The job runs the CLI through `/bin/sh` with the CLI as `$0`, so a CLI that is gone (the app
+/// moved to the Trash) ends the run quietly instead of failing every five minutes.
+pub const WRAPPER: &str = r#"[ -x "$0" ] || exit 0; exec "$0" watchdog --once"#;
 const SYSTEMCTL: &str = "systemctl";
 
 /// Runs a program with its arguments and answers whether it succeeded; tests pass their own.
@@ -81,7 +85,7 @@ fn xml(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// The LaunchAgent: `<program> watchdog --once` at load and every 300 s, in the background, its
+/// The LaunchAgent: `<program> watchdog --once` (through `WRAPPER`) at load and every 300 s, in the background, its
 /// output discarded (the report is the file it writes).
 pub fn plist(program: &Path) -> String {
     format!(
@@ -93,9 +97,10 @@ pub fn plist(program: &Path) -> String {
   <string>{LABEL}</string>
   <key>ProgramArguments</key>
   <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
     <string>{}</string>
-    <string>watchdog</string>
-    <string>--once</string>
+    <string>{}</string>
   </array>
   <key>StartInterval</key>
   <integer>{}</integer>
@@ -114,6 +119,7 @@ pub fn plist(program: &Path) -> String {
 </dict>
 </plist>
 "#,
+        xml(WRAPPER),
         xml(&program.to_string_lossy()),
         crate::watchdog::INTERVAL_SECONDS
     )
@@ -132,16 +138,18 @@ fn unit_word(text: &str) -> String {
 /// The systemd user service the timer starts.
 pub fn service(program: &Path) -> String {
     format!(
-        "[Unit]\nDescription=Fabric Switchboard watchdog\n\n[Service]\nType=oneshot\nExecStart={} watchdog --once\nNice=10\n",
+        "[Unit]\nDescription=Fabric Switchboard watchdog\n\n[Service]\nType=oneshot\nExecStart=/bin/sh -c {} {}\nNice=10\n",
+        unit_word(WRAPPER),
         unit_word(&program.to_string_lossy())
     )
 }
 
-/// The systemd user timer: five minutes after boot, then every five minutes.
+/// The systemd user timer: five minutes after the person's service manager starts (a user unit
+/// never sees the machine's boot), then every five minutes.
 pub fn timer() -> String {
     let every = crate::watchdog::INTERVAL_SECONDS;
     format!(
-        "[Unit]\nDescription=Fabric Switchboard watchdog, every five minutes\n\n[Timer]\nOnBootSec={every}s\nOnUnitActiveSec={every}s\n\n[Install]\nWantedBy=timers.target\n"
+        "[Unit]\nDescription=Fabric Switchboard watchdog, every five minutes\n\n[Timer]\nOnStartupSec={every}s\nOnUnitActiveSec={every}s\n\n[Install]\nWantedBy=timers.target\n"
     )
 }
 
@@ -186,7 +194,9 @@ fn write(path: &Path, text: &str) -> Result<(), ()> {
     if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(());
     }
-    let temporary = path.with_extension("tmp");
+    // A dot name: launchd and systemd never read a half-written file as a job of their own.
+    let name = path.file_name().ok_or(())?.to_string_lossy().into_owned();
+    let temporary = path.with_file_name(format!(".{name}.tmp"));
     std::fs::write(&temporary, text)
         .and_then(|()| std::fs::rename(&temporary, path))
         .map_err(|_| {
@@ -242,7 +252,18 @@ pub fn install(host: &Host) -> &'static str {
                 (host.run)(LAUNCHCTL, &["bootout".into(), service]);
             }
             let plist = files[0].0.to_string_lossy().into_owned();
-            if (host.run)(LAUNCHCTL, &["bootstrap".into(), target, plist]) {
+            let bootstrap = || {
+                (host.run)(
+                    LAUNCHCTL,
+                    &["bootstrap".into(), target.clone(), plist.clone()],
+                )
+            };
+            // Right after a bootout launchd may still be taking the old job down (error 5): one
+            // more try a second later.
+            if bootstrap() || {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                bootstrap()
+            } {
                 "installed"
             } else {
                 "failed"
@@ -374,8 +395,15 @@ mod tests {
         let text = std::fs::read_to_string(&file).unwrap();
         assert!(text.contains(&format!("<string>{LABEL}</string>")));
         assert!(text.contains(
-            "<string>/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard</string>\n    <string>watchdog</string>\n    <string>--once</string>"
+            "<string>/bin/sh</string>\n    <string>-c</string>\n    <string>[ -x \"$0\" ] || exit 0; exec \"$0\" watchdog --once</string>\n    <string>/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard</string>\n  </array>"
         ));
+        // No temporary file is left beside it.
+        let left: Vec<_> = std::fs::read_dir(file.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(left.len(), 1, "{left:?}");
         assert!(text.contains("<key>StartInterval</key>\n  <integer>300</integer>"));
         assert_eq!(
             ran(),
@@ -421,10 +449,10 @@ mod tests {
         let dir = home.path().join(LINUX_DIR);
         let unit = std::fs::read_to_string(dir.join(format!("{LINUX_UNIT}.service"))).unwrap();
         assert!(
-            unit.contains("ExecStart=\"/opt/Fabric Switchboard/switch%%board\" watchdog --once\n")
+            unit.contains("ExecStart=/bin/sh -c \"[ -x \\\"$$0\\\" ] || exit 0; exec \\\"$$0\\\" watchdog --once\" \"/opt/Fabric Switchboard/switch%%board\"\n")
         );
         let timer = std::fs::read_to_string(dir.join(format!("{LINUX_UNIT}.timer"))).unwrap();
-        assert!(timer.contains("OnUnitActiveSec=300s"));
+        assert!(timer.contains("OnStartupSec=300s\nOnUnitActiveSec=300s"));
         assert!(timer.contains("WantedBy=timers.target"));
         assert_eq!(
             ran(),

@@ -739,8 +739,8 @@ saved OpenRouter key (SB-107); any other agent on an API-key account or a paid k
 subscription sign-in.
 Removing an account or a project drops what pinned it. When a workflow's executor hits its limit,
 the automatic fallback walks the chain that applies (0.6.8, SB-73: Claude Code and Codex;
-Kimi Code on saved Kimi accounts since SB-99: its first turn runs as `kimi -p`, without approvals,
-then `kimi -c` resumes it only when that first turn succeeded; Hermes on the saved OpenRouter key since
+Kimi Code on saved Kimi accounts since SB-99: its first turn runs as `kimi -p`, without approvals
+(`--auto` on both turns since SB-515), then `kimi -c` resumes it only when that first turn succeeded; Hermes on the saved OpenRouter key since
 SB-107; OpenCode on the same key and its default model since SB-119; an agent disabled on the Agents
 page is skipped as `agent_disabled` (SB-120); other agents and keyed pins are skipped until the
 project grant they need can be checked, SB-96); `switchboard continue` still hands a workflow over by hand.
@@ -817,7 +817,7 @@ switchboard agents status                 # what is installed, which take over w
 switchboard agents disable kimi-code      # keep an agent out of fallback chains and continue
 switchboard agents enable kimi-code
 switchboard agents default opencode       # the machine's default agent; `auto` clears it
-switchboard agents permissions ask        # sessions Switchboard starts keep their permission prompts; `bypass` is the default
+switchboard agents permissions ask        # sessions Switchboard starts keep their permission prompts; `bypass` is the default (SB-515: every agent, Kimi Code, Hermes, OpenCode and the catalog agents too)
 switchboard agents models                 # the recommended OpenRouter models, then every model that can call tools
 ```
 

@@ -22,9 +22,9 @@ const ERRORS_WARN: u64 = 50;
 pub struct Inputs<'a> {
     pub attention: &'a Value,
     pub bugs: &'a Value,
-    /// SB-510: the watchdog's current findings (`watchdog::current`); `None` when it is off,
-    /// never ran or its report is stale, which reads as unknown, never as ok.
-    pub watchdog: Option<&'a [Value]>,
+    /// SB-510: what the watchdog found (`watchdog::watched`): no check where no job watches,
+    /// `unknown` only when an installed job's report is stale.
+    pub watchdog: &'a crate::watchdog::Watched,
     pub owner_running: bool,
     pub version: &'a str,
     pub now: i64,
@@ -168,10 +168,13 @@ pub fn report(inputs: &Inputs) -> Value {
     };
     checks.push(errors);
     // SB-510: what the watchdog, outside the owner, found: the owner stopped or silent, an act
-    // left half done, a board run gone or a session in two processes for too long.
-    checks.push(match inputs.watchdog {
-        None => check("watchdog", "lifecycle", "unknown", 0, None),
-        Some(findings) => {
+    // left half done, a board run gone or a session in two processes for too long. Where no job
+    // watches there is no check: an absent watchdog is not an unknown state of this Switchboard.
+    use crate::watchdog::Watched;
+    match inputs.watchdog {
+        Watched::NotWatched => {}
+        Watched::Stale => checks.push(check("watchdog", "lifecycle", "unknown", 0, None)),
+        Watched::Current(findings) => {
             let state = if findings.is_empty() {
                 "ok"
             } else if findings.iter().any(|f| f["severity"] == "fail") {
@@ -180,15 +183,15 @@ pub fn report(inputs: &Inputs) -> Value {
                 "warn"
             };
             let n = findings.len() as u64;
-            check(
+            checks.push(check(
                 "watchdog",
                 "lifecycle",
                 state,
                 n,
                 (n > 0).then_some("switchboard_watchdog"),
-            )
+            ));
         }
-    });
+    }
     let state = worst(checks.iter().map(|c| c["state"].as_str().unwrap_or("")));
     json!({
         "schema": SCHEMA,
@@ -208,7 +211,7 @@ mod tests {
         report(&Inputs {
             attention: &attention,
             bugs: &bugs,
-            watchdog: Some(&[]),
+            watchdog: &crate::watchdog::Watched::NotWatched,
             owner_running: owner,
             version: "0.7.102",
             now: 10 * 86_400 + 100,
@@ -340,27 +343,39 @@ mod tests {
     }
 
     #[test]
-    fn the_watchdogs_findings_set_its_check_and_no_report_is_unknown() {
+    fn the_watchdogs_check_is_absent_where_no_job_watches_and_unknown_only_when_stale() {
+        use crate::watchdog::Watched;
         let now = 10 * 86_400 + 100;
-        let with = |watchdog: Option<&[Value]>| {
+        let with = |watchdog: Watched| {
             report(&Inputs {
                 attention: &json!({"items": []}),
                 bugs: &json!({"crashes": [], "counting": true, "errors": []}),
-                watchdog,
-                owner_running: false,
+                watchdog: &watchdog,
+                owner_running: true,
                 version: "0.7.121",
                 now,
             })
         };
-        assert_eq!(state_of(&with(Some(&[])), "watchdog"), "ok");
-        assert_eq!(state_of(&with(None), "watchdog"), "unknown");
-        let acts = [json!({"code": "act_unfinished", "severity": "warn", "ids": ["S1"]})];
-        assert_eq!(state_of(&with(Some(&acts)), "watchdog"), "warn");
-        let down = [
+        let has = |r: &Value| {
+            r["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["id"] == "watchdog")
+        };
+        // No job here (off, Windows, serve, a development build): no check, and the report is ok.
+        let none = with(Watched::NotWatched);
+        assert!(!has(&none));
+        assert_eq!(none["state"], "ok");
+        assert_eq!(state_of(&with(Watched::Current(vec![])), "watchdog"), "ok");
+        assert_eq!(state_of(&with(Watched::Stale), "watchdog"), "unknown");
+        let acts = vec![json!({"code": "act_unfinished", "severity": "warn", "ids": ["S1"]})];
+        assert_eq!(state_of(&with(Watched::Current(acts)), "watchdog"), "warn");
+        let down = vec![
             json!({"code": "owner_down", "severity": "fail", "ids": []}),
             json!({"code": "act_unfinished", "severity": "warn", "ids": ["S1"]}),
         ];
-        let r = with(Some(&down));
+        let r = with(Watched::Current(down));
         assert_eq!(state_of(&r, "watchdog"), "fail");
         assert_eq!(r["state"], "fail");
         // Counts and codes only: a session id the report holds never leaves.
