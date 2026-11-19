@@ -9,7 +9,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - Releases are checked more strictly and recover from outside failures (SB-563). A release now starts only after a nightly run on its commit that actually ran the checks: the extra nightly run that each night skips the checks (one of two scheduled times, for daylight saving) now cancels itself instead of reading as passed. The release waits up to two hours for that run, builds on the same runner images it tested, and no longer runs the test suites a second time. An old or repeated version tag is refused before anything is built, releases publish one at a time, and after each one a last step proves the update feed offers the new version with a package whose signature verifies. Linux package downloads retry, and a release that failed only because a package mirror, a registry or GitHub's runner failed is run once more by itself.
-- The app's threads get the 16 MiB stack the command line has run on since 0.6.61 (SB-558): the threads of its async runtime on every system, and its main thread on Windows, where it was 1 MiB. The Windows test steps give each test thread the same. The nightly checks of 0.7.123 failed on Windows on Arm when one test overflowed its 2 MiB thread.
+
+## 0.7.124
+
+- 0.7.124 carries 0.7.123's changes, which were tagged but never published: one test overflowed its 2 MiB thread on Windows on Arm, so the nightly checks failed and the release stopped. The Windows test steps now give each test thread 16 MiB.
+- The app's async runtime threads, on every system, and its main thread on Windows (1 MiB before) get the 16 MiB stack the command line has run on since 0.6.61 (SB-558). The app runs its account owner on these threads, as the command line does.
 
 ## 0.7.123
 

@@ -79,16 +79,16 @@ structure: refactors A1 to A7, B1 to B3 and the splits).
 
 | Item | What | Row | State |
 |---|---|---|---|
-| W1.1 | The session pool keeps a share for board work; counting per session (quiet, limit-stopped, waiting and held sessions count out); a refused board start's wait and reason visible without the one-hour cutoff (03 §16) | SB-417 | in review: PR #818 |
-| W1.2 | Turning an account off: a person's switch no automatic process clears; six leaks closed (Claude Code renewal, elsewhere mark, recall, lease, call-back undo, restore); Kimi accounts too; "off since" on every surface (01 §3, 04 §3) | SB-418, DEC-0027 | building |
-| W1.3 | A restore saves every managed switching policy as off, against DEC-0008 (`core/backup.rs:722-727`; SCN-030) (01) | new row | next |
-| W1.4 | Money paths without a ceiling: Hermes on a named Anthropic key, a chain pinning another group's key (SB-96), a folder moved out of a capped group (SB-216), the machine ceiling and the pay-per-token meter (02) | SB-96, SB-216, new row | next |
-| W1.5 | MCP annotations: `switchboard_account_remove` not destructive, write tools idempotent, network tools `openWorldHint: false` (`mcp.rs:226-246`); plugin hooks silent without `switchboard` on PATH (04) | new row | next |
-| W1.6 | Groups fed from the default group ([06](06-default-feed.md)) | SB-419, DEC-0028 | merged (#824) |
+| W1.1 | The session pool keeps a share for board work; counting per session (quiet, limit-stopped, waiting and held sessions count out); a refused board start's wait and reason visible without the one-hour cutoff (03 §16) | SB-417 | released in 0.7.117 (PR #818); window follow-up PR #825 in 0.7.119 |
+| W1.2 | Turning an account off: a person's switch no automatic process clears; six leaks closed (Claude Code renewal, elsewhere mark, recall, lease, call-back undo, restore); Kimi accounts too; "off since" on every surface (01 §3, 04 §3) | SB-418, DEC-0027 | in review (PR #821) |
+| W1.3 | A restore saves every managed switching policy as off, against DEC-0008 (`core/backup.rs:723-725`; SCN-030) (01) | SB-569 | next |
+| W1.4 | Money paths without a ceiling: Hermes on a named Anthropic key, a chain pinning another group's key (SB-96), a folder moved out of a capped group (SB-216), the machine ceiling and the pay-per-token meter (02) | SB-96, SB-216, SB-570 | next |
+| W1.5 | MCP annotations: `switchboard_account_remove` not destructive, write tools idempotent, network tools `openWorldHint: false` (`mcp.rs:237-249`, `DELETES` at `mcp.rs:263`); plugin hooks silent without `switchboard` on PATH (04) | SB-571 (SB-517 in 0.7.122 added the `DELETES` list it builds on) | next |
+| W1.6 | Groups fed from the default group ([06](06-default-feed.md)) | SB-419, DEC-0028 | released in 0.7.119 (PR #824) |
 | W4.4 | Saved launches run from the Sessions page, the menu-bar icon, the CLI and MCP ([07](07-saved-launches.md)) | SB-454 | designed |
 | W4.5 | One owner per session concern: route, environment, remote launch, continuity, admission with host load, a sessions and load feed for Observatory ([08](08-session-map.md)) | SB-450 to SB-455, SB-461 to SB-464 | designed |
 | W4.6 | Moving accounts between machines: the machine chosen, its groups read from it, several at once, the program it runs ([09](09-machine-moves.md)) | SB-473 to SB-476 | in this change |
-| W1.7 | Key-leak audit: where every key flows (vault, argv, environment, logs, files, answers), read-only, report in `docs/reports/2026-11-17-secret-flows/` | new row | next |
+| W1.7 | Key-leak audit: where every key flows (vault, argv, environment, logs, files, answers), read-only, report in `docs/reports/2026-11-17-secret-flows/` | SB-572 | audit done (private report); P0 fixed by SB-420 in 0.7.119; P1s SB-425 to SB-427 open |
 
 ### W10. Launch, fleet and lifecycle ([10](10-launch-fleet-lifecycle.md), the operator's order of 2026-11-19)
 
@@ -109,7 +109,7 @@ run on a teammate's machine (SB-403 S5) needs the person: install, tailnet, firs
 ### W3. The test suite holds under load (05 A1 to A6)
 
 A1 step durations and a test-name list, A2 Windows builds of the proxy tests and `src-tauri` in
-both Windows checks (SB-406 item 7), A3 SB-416 at its cause (an injectable clock): in review (PR #817).
+both Windows checks (SB-406 item 7), A3 SB-416 at its cause (an injectable clock): released in 0.7.116 (PR #817).
 Then A4 and A5 (29 wall-time assertions to paused time, a nightly stress run under load), A6
 golden answers for every read surface on the CLI and MCP.
 
@@ -157,12 +157,12 @@ prepared to the last step a person must take and named with its link. Also (oper
 
 | Wave | Items | State |
 |---|---|---|
-| W0 | PR #815 (SB-414, SB-408), #816 (SB-410, SB-415) | done: merged; tag `v0.7.115` was never published (a .deb test failed on Windows, nightly 44156588020); 0.7.116 (#822, tag `v0.7.116` at `5e9b0c40`) carries it with the test limited to Unix; its release run waited on GitHub macOS runners on 2026-11-17 evening |
-| W1 | W1.1 merged (#818 `aada621c`, SB-417), its window follow-ups in PR #825; W1.2 building (branch `account-off`, SB-418, DEC-0027); W1.6 in review (PR #824, SB-419, DEC-0028: round 1 found two P1, being fixed); W1.7 key-leak audit done (private report, published only after its fixes ship): P0 fix in PR #826 (SB-420), the other P1s next; W1.3 to W1.5 next; SB-421 (named Linux users at the proxy, board request c3dfcc4e, an organization's VM) building on branch `proxy-named-users` | in progress |
+| W0 | PR #815 (SB-414, SB-408), #816 (SB-410, SB-415) | done: merged; tag `v0.7.115` was never published (a .deb test failed on Windows, nightly 44156588020); 0.7.116 (#822, tag `v0.7.116` at `5e9b0c40`) carries it with the test limited to Unix; published 2026-11-17 |
+| W1 | W1.1 released in 0.7.117 (#818 `aada621c`, SB-417), its window follow-ups in 0.7.119 (#825); W1.2 in review (PR #821, SB-418, DEC-0027); W1.6 released in 0.7.119 (#824 `ce62f8c9`, SB-419, DEC-0028); W1.7 key-leak audit done (private report, published only after its fixes ship): P0 fixed in 0.7.119 (#826, SB-420), the P1s SB-425 to SB-427 open (SB-572); W1.3 to W1.5 next (SB-569, SB-570, SB-571); SB-421 (named Linux users at the proxy, board request c3dfcc4e, an organization's VM) in review (PR #832, DEC-0029) | in progress |
 | W2 | devices of an organization | planned |
 | W3 | A1 to A3 merged (#817 `84e7e352`); A4 to A6 next | in progress |
 | W4 | structure | planned |
 | W5 | Fabric Sessions | planned |
 | W6 | docs and board | done: #823 `3ba78af8` (two review rounds, no P0/P1); left: "under Groups" in folder-rule messages to check, the MCP and onboarding wording to also name a group's sources |
 | W7 | acceptance by the person | planned |
-| W10 | launch, fleet and lifecycle | W10.0: #848 (SB-505) merged `07f60d03`; #838, #830 in review; W10.2 and W10.3 building (SB-515, SB-517, SB-518) |
+| W10 | launch, fleet and lifecycle | W10.0: #848 (SB-505) merged `07f60d03`; #838 (SB-455) and #830 (SB-423) released in 0.7.121; W10.2: SB-515 released in 0.7.121 (#850), SB-517 in 0.7.122 (#855); W10.3: SB-518 merged (#856), ships in 0.7.124 |
