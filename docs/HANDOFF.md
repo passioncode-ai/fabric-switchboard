@@ -2,6 +2,15 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-18: SB-450 sessions continued after a restart, SB-451 launch records name their process's session, on branch `boot-resume`
+
+- **Asked.** Fabric Dashboards' board request 737b04e6 (thread a9844103): after the Mac rebooted nothing continued the sessions (SB-450); launch 38e41114 recorded another session's id and a transcript that never existed (SB-451). The coordinator added SB-455 (no login `PATH` in launch scripts, a likely cause of SB-451); it landed separately in #838, and this branch's own one-line PATH change was dropped when main was merged (2026-11-19).
+- **Built.** `crates/switchboard-runtime/src/boot_resume.rs`: the one-minute watch keeps `boot-live.json` (live launched sessions per boot, written on change, `stopped_at` at the drain); the first pass after a restart continues each session the restart cut through `resumable::continue_as` hosted and `session_host::start_detached` (moved out of the CLI's `hosted::spawn`, now the one way a host starts), at most five, inside the session pool, with `boot-resume.jsonl` intents and outcomes; switch `boot-resume.json` (CLI `boot-resume on|off`, MCP `switchboard_boot_resume`, Settings → *Sessions after a restart*, SCN-105). `resumable::being_continued` and a lock in `continue_as` keep two continuations of one session from starting. `launches::reconcile` corrects a record from its own process's `sessions/<pid>.json` on every fresh watch read and before `sessions show`.
+- **Decisions.** [DEC-0030](DECISIONS.md#dec-0030-the-sessions-a-restart-of-this-computer-cut-are-continued-once-hosted): the rule written precisely for Fabric Dashboards to retire `ai.passioncode.resume-after-boot`; a session must have been live at the owner's last look before the boot (the ledger), since a Terminal launch records no end of its own and the transcript window alone would continue sessions the person closed; the first restart after updating continues nothing. A cut intent is settled, never repeated.
+- **Checks.** See the PR: the Studio gate (`./scripts/check.sh`, EXIT line). Copylot report ids in [strings.md](brand/strings.md#sessions-after-a-restart-scn-105-sb-450-dec-0030).
+- **Not done.** A live restart on a Mac (the rule is proved on synthetic data folders and a fake clock); Fabric Dashboards is told on thread a9844103 once a release carries it.
+
+**Exact next task.** Review the `boot-resume` pull request and merge it once its gate reads EXIT 0 on the merged head; after the release, reply on thread a9844103 with DEC-0030's rule so Fabric Dashboards removes `ai.passioncode.resume-after-boot`.
 
 ## 2026-11-19: release 0.7.122 (SB-549, SB-550, SB-517) and the seat for a teammate's Mac
 

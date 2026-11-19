@@ -99,7 +99,7 @@ Behaviour and decisions: [PLAN-0.4](PLAN-0.4.md). Code: `crates/switchboard-core
 - **Statistics (SB-145, SB-147).** The proxy counts each relayed request under `day\taccount\tpool\tclient\tfolder` (`switchboard_proxy::stats`: UTC day, account id, pool, client family from `user-agent` such as `claude-code`, `codex`, `opencode`, `hermes`, else `other`, and the group folder the request came from, empty when unknown; a 0.6.52 key without the folder still reads): `requests`, `ok`, `limited`, `failed`, and `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` as the provider reported them in its own response. The folder (SB-147) is the folder whose own capability the request presented, else the deepest group folder holding the folder the request names (`stats::folder_hint`: the newest Codex `<cwd>`, or Claude Code's `Working directory:` line in the body's first MiB; a byte scan, nothing of the body kept), else that named folder itself (SB-157: a session outside every group, or an agent Switchboard launched on a key), which the statistics resolve through Git to the repository whose checkout holds it (`ProjectIndex::with_strays`). The owner passes every group folder with its pool (`ProxyHandle::set_stat_folders`) wherever it sets the folders' capabilities. A 429 that moved (SB-98) counts once on the refusing account; a network failure counts as failed. `ProxyHandle::take_statistics()` hands the counts over and clears them. The owner adds them to `statistics.json` (0600, `{version: 1, tallies}`, 90 days, at most 50 000 rows) every pass, writing at most every 15 min and at stop; an unreadable file starts empty. `Statistics { days? }` (1 to 90, default 30; read fast path, offline reads the file) answers `{days, from, to, since, total, groups[{pool, name}], projects[{project, name, groups[{pool, name}]}], accounts[{account_id, label, provider, kind}], agents[{agent}], routes[group, project, project_name, account and agent], by_day[{day, groups[{pool, requests, tokens}]}]}`, each row with the counts, busiest first, and `switching` (WF-5.3, SB-367: `digest::switching_shares` over the daily operations digests of the last seven closed UTC days: `days` counted, `rotations`, `rotations_failed`, `automatic_switch_failed_share` (`rotation` failed over every outcome), `limit_stops` (`recovery_hook` ok), `limit_stops_resumed` (`recovery_continued` ok), `limit_stop_resumed_share`; a share with nothing to divide is null, never 0; test `digest::tests::switching_shares_read_the_closed_days_and_say_null_when_nothing_happened`). A project (`statistics::ProjectIndex`, built from `roots::tree` per group) is a repository with all its checkouts, keyed by its `origin` identity, or a folder outside Git keyed by its path (DEC-0089 AT-6, AT-7, AT-15); `project: ""` holds requests that named no folder. Not counted: an off-project Codex request passed through on the person's own sign-in (SB-143), and anything that does not go through the proxy. No prompt, answer or header value is kept; folder paths stay in this file on this computer.
 - Only `Owner::native` reads the ordinary CLIs' sign-in; `Owner::start` (tests, smoke) reports current accounts as unavailable.
 - `switchboard mcp [--read-only]`: stdio JSON-RPC 2.0 per the tool table in PLAN-0.4. Tool failures are results with `isError: true`; protocol faults are JSON-RPC errors (-32700 parse/oversize > 1 MiB, -32600 invalid, -32601 method, -32602 unknown tool or `arguments` not an object).
-- **MCP arguments, read forms and refusals (SB-517).** Every `tools/call` is checked against the tool's `inputSchema` before its handler runs (`mcp::validate`: `type`, `required`, `additionalProperties: false`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength`, `items`, `minItems`, `maxItems`; `every_schema_stays_inside_the_checked_keywords` keeps every schema inside that set). A fault answers `isError: true` with `structuredContent.error = {code: "invalid_arguments", field, message}` and runs nothing. A `decision` stays the four fields `spend::Decision` reads (`by`, `instruction`, `at`, `source`; the runtime denies any other), so the schema check and the runtime refuse the same bodies. Twelve write tools have a read form (`mcp::READ_FORMS`; `mcp::writes` decides per call from the fields given): a read-only server lists them with read annotations and a sentence saying so, and answers that form. A write tool, or a write form, on a read-only server answers `isError: true` with `error.code` `read_only` instead of "Unknown tool.". The full server lists and annotates every tool as before. `switchboard_launch_keys` only reads and is listed as a read. A tool that would answer a refusal as data (`{state: "refused", reason}`, as `remote_dispatch::start` and a dispatch at capacity answer the CLI) answers an MCP caller `isError: true` with `error.code` its `reason`; no tool returns that shape yet (dispatch has no MCP tool, SB-482), so the mapping guards the tools to come, and the CLI's JSON is unchanged. The window's *Remove* of a Kimi Code account and of the OpenRouter key have tools: `switchboard_kimi_remove {id}` (`Operation::KimiRemove`) and `switchboard_openrouter_remove {pool?, decision?}` (`Operation::AgentKeyRemove`, `by: mcp`, wrapped in the operator's words when given), both annotated `destructiveHint` and `idempotentHint` and answering `{removed}`. Calls wait out a held store lock for up to 8 s, asking the owner first (`STORE_WAIT`, SB-181).
+- **MCP arguments, read forms and refusals (SB-517).** Every `tools/call` is checked against the tool's `inputSchema` before its handler runs (`mcp::validate`: `type`, `required`, `additionalProperties: false`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength`, `items`, `minItems`, `maxItems`; `every_schema_stays_inside_the_checked_keywords` keeps every schema inside that set). A fault answers `isError: true` with `structuredContent.error = {code: "invalid_arguments", field, message}` and runs nothing. A `decision` stays the four fields `spend::Decision` reads (`by`, `instruction`, `at`, `source`; the runtime denies any other), so the schema check and the runtime refuse the same bodies. Thirteen write tools have a read form (`mcp::READ_FORMS`; `mcp::writes` decides per call from the fields given): a read-only server lists them with read annotations and a sentence saying so, and answers that form. A write tool, or a write form, on a read-only server answers `isError: true` with `error.code` `read_only` instead of "Unknown tool.". The full server lists and annotates every tool as before. `switchboard_launch_keys` only reads and is listed as a read. A tool that would answer a refusal as data (`{state: "refused", reason}`, as `remote_dispatch::start` and a dispatch at capacity answer the CLI) answers an MCP caller `isError: true` with `error.code` its `reason`; no tool returns that shape yet (dispatch has no MCP tool, SB-482), so the mapping guards the tools to come, and the CLI's JSON is unchanged. The window's *Remove* of a Kimi Code account and of the OpenRouter key have tools: `switchboard_kimi_remove {id}` (`Operation::KimiRemove`) and `switchboard_openrouter_remove {pool?, decision?}` (`Operation::AgentKeyRemove`, `by: mcp`, wrapped in the operator's words when given), both annotated `destructiveHint` and `idempotentHint` and answering `{removed}`. Calls wait out a held store lock for up to 8 s, asking the owner first (`STORE_WAIT`, SB-181).
 - Desktop: `agent_setup() -> { cli_path, bundled_cli, linked_cli, can_link, commands }`; `link_cli()` creates `~/.local/bin/switchboard` → bundled CLI and never replaces a file or a foreign link. The macOS build embeds the signed CLI at `Contents/MacOS/switchboard`, byte-identical to the archived CLI.
 
 ## Other agents (0.6)
@@ -1324,6 +1324,26 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   (`launches::tests::a_nested_session_in_the_same_home_never_overwrites_its_parent`). The hook
   sends `source` only for those three values; an owner from before it refuses the field, and the
   hook sends the start once more without it, which that owner records as before.
+- **The session a launch's own process holds wins (SB-451, 2026-11-18).** A start hook reaches the
+  owner in the order its processes run it, and a session's id can change with no start hook:
+  launch 38e41114 (0.7.117, a hosted console in the `tokens` group) recorded a session whose
+  transcript never existed while its process held another, so its history, its continuation and
+  every reader of its transcript looked at the wrong one. `launches::reconcile` corrects a record
+  from the process table: each launch's own process is the earliest Claude Code process the scan
+  joins to it (through its home's `.session-pid` or its host, two parents up; a session it runs
+  itself, a nested `claude -p`, is a child and starts later), and its session is the one that
+  process's `sessions/<pid>.json` names. A record naming another gets `provider_session_id` and
+  `transcript` (the session's `projects/<folder>/<id>.jsonl` in that file's config folder, or
+  null while it is not written) from it, the session it named moves to `nested_sessions`, and
+  `session_corrected_at` says when; logged once per pass as `launch_session_corrected` with a
+  count. It runs on every fresh read of the session watch (each minute, and a tree read older than
+  15 s) and before `sessions show <launch_id>` answers; a scan that could not read the process
+  table corrects nothing. A record that ended, was launched before this boot, or whose process
+  started more than 60 s before its `launched_at` is never corrected (`launches::may_correct`: that
+  process cannot be its own, a stale marker or a reused pid joined it). Its own turns count from
+  the correction on. Evidence:
+  `a_record_naming_another_session_than_its_own_process_holds_is_corrected`,
+  `a_record_a_process_could_not_belong_to_is_never_corrected`.
 - **Where it went.** `continued_as` is set once, where the successor is known, and only to a
   launch that started: a launch naming a
   `parent` sets `{kind: "launch", id}` on it; a continuation of a workflow sets it on the latest
@@ -3456,7 +3476,7 @@ WF-3.1). Code: [attention.rs](../crates/switchboard-runtime/src/attention.rs).
   | `session_duplicate` | the one-minute watch's `duplicate` finding (SB-388) | `switchboard_session_close_copy` | `close_copy` |
   | `session_stuck` | the watch's `stuck` finding: a board run quiet for 30 minutes, its log included (SB-379, SB-407); `launch_id` the run's | `switchboard_dispatch_stop` | `dispatch_stop` |
   | `session_gone` | the watch's `gone` finding of a dispatched run here: its process ended with no end recorded (SB-407); `launch_id` the run's; `action.if_gone: true` | `switchboard_dispatch_stop` with `if_gone` | `dispatch_stop` |
-  | `session_continuable` | the watch's `gone` finding of a launch that is not a dispatched run, whose Claude Code session (`session_id`, the record's `provider_session_id`) was cut in a turn: its folder is here, no live process holds it, its transcript was written more than `CUT_MARGIN_SECONDS` (30) after the record's `last_turn_at` (else its start) and its last lines are not the person's `/exit` or `/quit` (`session_watch::cut_turn`); a session closed on purpose in the last day (a `resumable.jsonl` line, a duty officer's act in `duty.jsonl`; `session_watch::closed_on_purpose`) is not offered, since a Terminal launch records no end of its own (`session_watch::offer`, SB-509; tests `only_a_turn_cut_by_the_process_ending_is_offered_never_a_session_ended_on_purpose`, `a_session_closed_on_purpose_is_not_offered`); offered once per session: `continue-offers.json` records it when first offered and takes it once the session runs again or is continued (`session_watch::continued`), so it is never offered again; `action.command` `switchboard sessions continue <session>` | `switchboard_session_continue` | `continue_session` |
+  | `session_continuable` | the watch's `gone` finding of a launch that is not a dispatched run, whose Claude Code session (`session_id`, the record's `provider_session_id`) was cut in a turn: its folder is here, no live process holds it, its transcript was written more than `CUT_MARGIN_SECONDS` (30) after the record's `last_turn_at` (else its start) and its last lines are not the person's `/exit` or `/quit` (`session_watch::cut_turn`); a session closed on purpose in the last day at or after its launch began (a `resumable.jsonl` line, a duty officer's act in `duty.jsonl`; `session_watch::closed_on_purpose`, compared with the finding's `launched_at` by `session_watch::closed_since`: a close before the launch was the session closed and then continued as it) is not offered, since a Terminal launch records no end of its own (`session_watch::offer`, SB-509; tests `only_a_turn_cut_by_the_process_ending_is_offered_never_a_session_ended_on_purpose`, `a_session_closed_on_purpose_is_not_offered`); offered once per session: `continue-offers.json` records it when first offered and takes it once the session runs again or is continued (`session_watch::continued`), so it is never offered again; `action.command` `switchboard sessions continue <session>` | `switchboard_session_continue` | `continue_session` |
   | `token_rotated` | `proxy-rotated.json` names when the proxy took a new port and token because its port was taken (SB-269), and the live Claude Code or Codex sessions started before then that run through the proxy (a `managed` launch, a Claude Code session in a folder whose route `bindings.json` records, a Codex session in a group folder while the Codex route is on) are listed with `count`, `sessions` (`pid`, `agent`, `folder`, `launch_id`) and `since` (the rotation); the file is removed once the process table shows none (`token_rotation::sessions`, SB-509). Nothing restarts by itself: the fix is a restart wave the person or agent plans and applies; `action.command` `switchboard sessions restart plan` | `switchboard_sessions_restart_plan` | `restart_wave` |
   | `dispatch_refused` | board runs refused `at_capacity` that still wait (SB-412, SB-417: since the pool last admitted a board start, with no one-hour cutoff): one item with `count`, `since` (the first refusal that waits), `last_at` (the newest), `newest_request`, `freed` and `freed_at` (a session ended since, read by the one-minute watch) | `switchboard_capacity` | `open_capacity` |
   | `machine_unreachable` | a machine group's last `failures >= 3` reads (a minute apart) failed (SB-550); `label` and `machine` the machine's name, `machine_pool` its group, `failures`, `code` (the last `reason`); `since` the last read that worked, or null | `switchboard_machines` | `open_machines` |
@@ -3926,6 +3946,101 @@ the item offered *Close the quiet copy* and the press was refused. Tests
 quiet copy* on the item). Tests `duty::tests::a_person_closes_the_copy_quiet_longest_and_never_a_working_one`,
 `session_watch::tests::a_copy_of_a_live_session_a_quiet_board_run_and_a_vanished_launch_are_found`,
 `attention::tests::a_copy_of_a_live_session_and_a_quiet_board_run_come_first`.
+
+## Sessions after a restart (SB-450, DEC-0030)
+
+Code: `crates/switchboard-runtime/src/boot_resume.rs`, `session_watch::watch`,
+`resumable::being_continued`, `session_host::start_detached`, `launches::continued_by_boot`,
+`Operation::BootResume`; CLI `switchboard boot-resume [on|off]`; MCP `switchboard_boot_resume`;
+the window's `boot_resume` command (Settings → Sessions after a restart, SCN-105).
+
+- **The ledger.** Each fresh pass of the one-minute session watch, when it read the process table,
+  computes the live launched sessions (`boot_resume::seen_of`: for each launch id, its earliest-started
+  Claude Code row, the rule of `launches::reconcile`, whose pid a `sessions/<pid>.json` pairs with a
+  session; a nested `claude -p` joined to the same launch is not its session) and writes `<data>/boot-live.json` (0600:
+  `boot`, `at`, `sessions: [{session, launch_id}]`, `stopped_at`) when the boot or that set
+  changed, `stopped_at` was set, or, while that set is not empty, its `at` is 30 minutes old
+  (`REFRESH_SECONDS`); with no such session running nothing is written. The owner's drain sets `stopped_at` on a ledger of this boot,
+  and no watch pass of that owner writes the ledger after it (`boot_resume::observe` checks the drained data folders).
+  A home's `.session-pid` written before this boot, or older than the process now holding its pid
+  by more than 60 s (`launch::marker_outlived`), joins no process to its launch, and a
+  `sessions/<pid>.json` last written more than 60 s before its process started is not that
+  process's session (`fabric_sessions_core::machine_sessions::written_before_start`, applied to
+  the live session pairs and to `session_files`, which the duty officer, the session pool and the
+  launch records read): after a restart a reused pid never reads as an old session. A process's
+  start is `pbi_start_tvsec` on macOS and, on Linux, `btime` of `/proc/stat` plus field 22 of
+  `/proc/<pid>/stat` over the clock-tick rate (`machine_sessions::stat_start_ticks`, the reader of
+  SB-445), never the modification time of `/proc/<pid>`, which is when its procfs entry was made;
+  a start that cannot be read keeps the file.
+  Boot time: `sysctl kern.boottime` (macOS), `btime` of `/proc/stat` (Linux), read once a process.
+- **The pass.** Once per owner process, the first watch pass that read the process table decides
+  (more than `MAX_AFTER_BOOT_SECONDS`, 6 hours, after the boot it continues nothing and journals
+  one `too_late` line for that boot):
+  with `boot-resume.json` saying on (absent: on) and a ledger from an earlier boot it runs
+  `boot_resume::run`; a pass that could not read the table waits for the next one. `run` it first settles each
+  intent of this boot with no outcome (`continued` when a live process holds the session or it is
+  `being_continued`, else `interrupted`), then continues what `boot_resume::candidates` admits,
+  the rule of DEC-0030 (Claude, launched before the boot, its record naming that session, not
+  continued, not a dispatched board run (`dispatch`), and either no end or an `exited` end with a
+  shutdown signal's exit code (129, 137, 143) recorded between the ledger's `at` and the boot (an
+  in-place or headless launch, or a host, records its own end as the machine stops); with the
+  person's own sign-in off (SB-403 S3), only a record with `home_dir` (Switchboard's own home),
+  and its continuation refused (`not_ours`) when `resumable::locate` finds it outside the data
+  folder; cut in a turn (SB-509's rule: transcript written more than
+  `session_watch::CUT_MARGIN_SECONDS` after `last_turn_at`, else `launched_at`, and its last
+  lines not the person's `/exit`), not closed on purpose at or after its launch began
+  (`session_watch::closed_on_purpose` since 2 hours before the boot, each session's latest close,
+  and a duty officer's close intent not finished yet, compared by `session_watch::closed_since`
+  with the record's `launched_at`: a close before it was the session closed and then continued as
+  this launch); in the ledger, the
+  ledger at most 2 hours older than the boot and its last look neither older than that nor older
+  than the transcript's last write minus 120 s, the last look being `stopped_at`, or, with none
+  (no drain: a crash, a power cut), the ledger's `at` plus `REFRESH_SECONDS`; transcript last written in `[boot - 7200, boot]`
+  in any config folder (`machine_sessions::transcript_at`); not live, not waiting on a limit stop
+  (`recovery::live_stop_sessions`: recovery continues those), not `being_continued`, not named by
+  a launch since the boot, not in this boot's journal), newest transcript first, at most 5 (the
+  rest `over_limit`). Each needs `capacity::reserve(Start::Interactive)`, every reservation held
+  until the pass ends (a started session takes seconds to show in the process table); a refusal
+  writes `at_capacity` for it and every one after. A continuation is `resumable::continue_as` with `How
+  {in_place: true, hosted: true, by: {surface: recovery, by: boot-resume, parent: <launch>}}`, then
+  `session_host::start_detached(root, launch, script, launch::agent_cli(), 40, 120)`; when that
+  wait ends unanswered the pass looks once more 2 s later, a host that runs then is a
+  continuation, and one that never came up ends the new launch `not_started`. A started one gives the cut launch `ended: {kind:
+  reboot, at}` (unless an end was recorded) and `continued_as: {kind: launch, id}`; the
+  Sessions page reads that end as “Cut by a computer restart, continued after it” (`why:
+  reboot`), and MCP `switchboard_sessions` names `reboot` among the ends.
+- **The journal.** `<data>/boot-resume.jsonl` (0600, the newest 500 lines within 256 KiB; a
+  file grown past that is read up to 4 MiB and cut to its newest lines, never emptied): `at`, `boot`, `session`,
+  `launch_id`, `folder`, `phase` (`intent` before a start; `outcome` after) and `outcome`
+  (`continued` with `new_launch_id`, `failed` with `reason`, `interrupted`, `at_capacity`,
+  `over_limit`, and `too_late` with no session). Logged once a pass as `boot_resume` with the counts.
+- **Never twice (SB-507).** `continue_as` serializes continuations with an in-process mutex
+  (`resumable::CONTINUING`: one owner, one continuation at a time; it does not span processes) and
+  refuses (`LIVE`) a session `resumable::being_continued` names, beside the live-process check it
+  had: a session host runs it (its launch's `provider_session_id`; a host descriptor written before this
+  boot is ignored, `session_host::live_hosts`, whatever process holds its pid now); a launch named it in the last
+  `JUST_STARTED_SECONDS` (120) with no end; a Terminal resume marked it in the last 120 s
+  (`<data>/resuming/<session>`, 0600, its start time, written by `resumable::mark_resuming` before
+  the duty officer's restart, a restart wave's resume and a person's Terminal Continue open their
+  window, taken back when the window did not open, marks older than a day removed on the next
+  write); the duty officer's restart of it is begun and not finished (`duty::restart_open`: a
+  `restart` intent with no outcome in the last hour, which its act or the next check finishes by
+  resuming it); or a running restart wave holds it (`restarts::in_wave`). The watch runs the duty
+  officer and the restart wave before this pass, so a resume they start that minute is seen. Fabric
+  Dashboards' temporary `ai.passioncode.resume-after-boot` applies the same rule until 2026-11-25;
+  either one finds the other's continuation through the live process, and Switchboard also through
+  its host or launch record.
+- **Reading.** `Operation::BootResume {on}` (no store lock) saves `on` when given and answers
+  `settings`, `boot_time`, `last_look` (`boot`, `at`, `sessions` count, `stopped_at`),
+  `window_minutes` (120), `max_per_boot` (5), `recent` (the newest 20 outcome lines) and
+  `supported` (false on Windows, where no boot time is read, so no ledger is kept and nothing is
+  continued). An unreadable `boot-resume.json` is
+  `boot_resume::UNREADABLE`.
+- **Hosted starts.** `session_host::start_detached` is the one way a host starts: `launch --hosted`
+  and `sessions continue --hosted` (`hosted::spawn`, the CLI's own executable) and this pass (the
+  installed CLI). It runs `<cli> --data-dir <root> session-host --launch-id … --program <script>
+  --rows … --cols …` in a session of its own with nothing on its stdio, waits up to 10 s for the
+  socket, and reaps the host on a thread.
 
 ## Pay-per-token group (SB-401, DEC-0023)
 

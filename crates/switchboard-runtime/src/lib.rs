@@ -13,6 +13,7 @@ pub mod attribution;
 pub(crate) mod balancing;
 mod bindings;
 mod blocking;
+pub mod boot_resume;
 pub mod bugs;
 pub mod capacity;
 mod carry;
@@ -531,6 +532,12 @@ pub enum Operation {
         run: bool,
         #[serde(default)]
         dry_run: bool,
+    },
+    /// SB-450: continuing the sessions a restart of this computer cut: the switch (`on` changes
+    /// it), this boot, the last look before it and what was continued.
+    BootResume {
+        #[serde(default)]
+        on: Option<bool>,
     },
     /// SB-388: close the newer of two processes holding one Claude Code session
     /// (`duty::close_copy`); the older keeps working.
@@ -1711,6 +1718,8 @@ impl Runtime {
                 | Operation::Capacity { .. }
                 // SB-384: the process table and its own two small files.
                 | Operation::Duty { .. }
+                // SB-450: its own small files.
+                | Operation::BootResume { .. }
                 // SB-388: the process table, the session files and one signal.
                 | Operation::SessionCloseCopy { .. }
                 // SB-379: the process table, session files and the day's launch records.
@@ -3894,6 +3903,8 @@ impl Owner {
         digest::save_open(&runtime.root);
         let _ = runtime.store.flush();
         drop(transaction);
+        // SB-450: the sessions this owner last saw live stay the ones a restart would cut.
+        boot_resume::owner_stopped(&runtime.root, monitor::now());
         // W3 part 2: this run ended through its drain; the next start finds no crash.
         bugs::end(&runtime.root);
         let millis = started.elapsed().as_millis() as u64;
@@ -7349,6 +7360,15 @@ async fn execute(
                 Ok(answer)
             })
         }
+        Operation::BootResume { on } => {
+            let root = root.to_owned();
+            blocking::run(move || {
+                if let Some(on) = on {
+                    boot_resume::save(&root, &boot_resume::Settings { on })?;
+                }
+                boot_resume::status(&root)
+            })
+        }
         Operation::SessionCloseCopy { session_id, pid } => {
             let root = root.to_owned();
             blocking::run(move || duty::close_copy(&root, &session_id, pid, session_watch::now()))
@@ -9151,7 +9171,13 @@ async fn execute(
                     )
                 }
                 Some(id) => {
-                    let mut shown = crate::blocking::run(|| launches::show(root, &id))?;
+                    let mut shown = crate::blocking::run(|| {
+                        // SB-451: the record names its process's own session before it is shown.
+                        if !cfg!(test) {
+                            session_watch::refresh(root, session_watch::now());
+                        }
+                        launches::show(root, &id)
+                    })?;
                     shown["launch"] = label_session(&snapshot, shown["launch"].take());
                     Ok(shown)
                 }

@@ -2366,6 +2366,8 @@ export function sessionWhyText(row: Pick<SessionRow, 'why' | 'quiet_minutes' | '
     case 'closed_duplicate': return t('Closed as a second copy');
     case 'closed_stuck': return t('Closed after it stopped making progress');
     case 'closed_restart': return t('Ended by a restart and not back, can continue');
+    // SB-450: a launch the computer's restart cut, which Switchboard continued after it.
+    case 'reboot': return t('Cut by a computer restart, continued after it');
     // FD-291: a stop the session went past, and one whose history no folder holds any more.
     case 'moved_on': return t('Went on after its limit stop and ended, can continue');
     case 'no_transcript': return t('Stopped on a limit, its history is gone');

@@ -12,7 +12,7 @@ import { demo, demoFirstRun, native, nativeAdapter, onMachinesChanged, onProject
 import type { CardState, AccountGroup } from './ui-logic';
 import { feedView, feedBadge, feedMoveLine, feedNotice, feedPriority, feedArrows, statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, machineChoices, remoteGroupChoices, movableAccounts, remoteUsageView, machineReadLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dispatchRefusedLine, defaultBoardShare, dispatchStopLineText, dispatchExtendLineText, dispatchStopNotice, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, FeedStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey, OwnSignIn } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, FeedStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey, OwnSignIn, BootResumeStatus, BootResumeLine } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -756,6 +756,42 @@ function dutySection() {
   actions.append(button(set.on ? t('Turn off') : t('Turn on'), () => { void mutate(async () => { dutyState = await adapter.duty({ on: !set.on }); }, set.on ? t('The duty officer is off.') : t('The duty officer is on.'), 'duty-toggle'); }, 'button', 'duty-toggle'));
   if (set.on && state.supported) actions.append(button(t('Check now'), () => { void mutate(async () => { await adapter.duty({ run: true }); dutyState = await adapter.duty(null); }, t('Sessions checked.'), 'duty-run'); }, 'button', 'duty-run'));
   section.append(actions);
+  return section;
+}
+/** SB-450 (DEC-0030): whether the sessions a restart of this computer cut are continued. */
+let bootResumeState: BootResumeStatus | null = null; let bootResumeLoading = false; let bootResumeError = '';
+function loadBootResume() {
+  if (bootResumeLoading) return;
+  bootResumeLoading = true; const stamp = clock.stamp();
+  void adapter.bootResume(null).then((s) => { if (clock.accepts(stamp) || !bootResumeState) { bootResumeState = s; bootResumeError = ''; } }, (e) => { if (clock.accepts(stamp) || !bootResumeState) bootResumeError = t(safeError(e, 'read')); }).finally(() => { bootResumeLoading = false; render(); });
+}
+function bootResumeLineText(line: BootResumeLine): string {
+  const folder = folderName(line.folder ?? '');
+  switch (line.outcome) {
+    case 'continued': return t('Continued in {folder} after the restart.', { folder });
+    case 'at_capacity': return t('Not continued in {folder}: the session pool was full.', { folder });
+    case 'over_limit': return t('Not continued in {folder}: five sessions were already continued.', { folder });
+    case 'interrupted': return t('Not continued in {folder}: Switchboard stopped while starting it.', { folder });
+    case 'too_late': return t('Nothing was continued: Switchboard first ran more than six hours after the restart.');
+    default: return t('Not continued in {folder}: it could not start.', { folder });
+  }
+}
+function bootResumeSection() {
+  const section = el('div', 'fold-content');
+  section.append(el('p', 'surface-note', t('After this computer restarts, Switchboard continues the Claude Code sessions the restart cut in the middle of a turn: those it launched that were working and wrote in the two hours before. It leaves alone the sessions that waited for you, those you or Switchboard closed, and board runs. While Switchboard leaves your own sign-in alone, only sessions in its own homes are continued. Each opens as itself in a session you can attach to from Fabric Dashboards. At most five after one restart.')));
+  if (bootResumeError) { section.append(el('p', 'form-error', bootResumeError)); return section; }
+  if (!bootResumeState) { if (!bootResumeLoading) loadBootResume(); section.append(el('p', 'form-note', t('Reading the setting…'))); return section; }
+  const state = bootResumeState;
+  if (!state.supported) section.append(el('p', 'form-note', t('On this system sessions are not continued after a restart.')));
+  const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = state.settings.on; box.dataset.focus = 'boot-resume';
+  box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { bootResumeState = await adapter.bootResume(wanted); }, wanted ? t('Sessions a restart cuts will be continued.') : t('Sessions a restart cuts are left as they are.'), 'boot-resume'); });
+  option.append(box, el('span', '', t('Continue my sessions after a restart')));
+  section.append(option);
+  const recent = state.recent.slice(0, 5);
+  if (recent.length) {
+    section.append(el('h3', 'fold-part-heading', t('After the last restarts')));
+    const list = el('ul', 'watch-findings'); for (const line of recent) list.append(el('li', 'account-meta', `${date(line.at)} · ${bootResumeLineText(line)}`)); section.append(list);
+  }
   return section;
 }
 /** SB-403 S3 (DEC-0025, SCN-095): whether Switchboard reads or changes the person's own Claude Code and Codex sign-in here. */
@@ -4049,6 +4085,7 @@ function renderSettings(main: HTMLElement) {
     foldSection({ key: 'balancing', title: t('Balancing between groups'), state: onOff(balancingState?.on), body: () => snapshot ? [balancingSection()] : reading() }),
     foldSection({ key: 'session-limit', title: t('Coding sessions'), state: capacityState ? (capacityState.cap === null ? t('No limit') : t('{used} of {cap} working', { used: capacityState.used, cap: capacityState.cap })) : undefined, body: () => [capacitySection()] }),
     foldSection({ key: 'session-duty', title: t('Session duty officer'), state: onOff(dutyState?.settings.on), body: () => [dutySection()] }),
+    foldSection({ key: 'boot-resume', title: t('Sessions after a restart'), state: onOff(bootResumeState?.settings.on), body: () => [bootResumeSection()] }),
     foldSection({ key: 'own-sign-in', title: t('Your own sign-in'), state: onOff(ownSignInState?.on), body: () => [ownSignInSection()] }),
     foldSection({ key: 'codex-route', title: t('Codex in group folders'), state: onOff(codexRouteState?.on), body: () => snapshot ? [codexRouteSection()] : reading() }),
     foldSection({ key: 'terminals', title: t('Terminals in organization folders'), state: shell === 'on' || shell === 'default_on' || shell === 'inactive' ? t('On') : shell === 'off' || shell === 'default_off' ? t('Off') : undefined, body: () => snapshot ? [shellHookSection()] : reading() }),
