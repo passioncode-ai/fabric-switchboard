@@ -6906,7 +6906,7 @@ mod mcp_parity {
             "agents openrouter model",
             Tool("switchboard_openrouter_model"),
         ),
-        ("agents openrouter remove", Not(PERSON)),
+        ("agents openrouter remove", Tool("switchboard_openrouter_remove")),
         (
             "agents openrouter list",
             Tool("switchboard_openrouter_status"),
@@ -6930,7 +6930,7 @@ mod mcp_parity {
         ("kimi relogin", Tool("switchboard_kimi_login")),
         ("kimi launch", Not(LAUNCH)),
         ("kimi rename", Tool("switchboard_kimi_rename")),
-        ("kimi remove", Not(PERSON)),
+        ("kimi remove", Tool("switchboard_kimi_remove")),
         ("recovery register", Not(HOST)),
         ("recovery claim", Not(HOST)),
         ("recovery hook", Not(HOST)),

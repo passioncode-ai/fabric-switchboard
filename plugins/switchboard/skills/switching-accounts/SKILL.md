@@ -99,6 +99,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_kimi_accounts` | no | Kimi Code subscription accounts: tier, 5-hour / 7-day / monthly usage, and the ordinary `kimi`'s sign-in; never a token |
 | `switchboard_kimi_login` | yes | start, follow, finish or cancel a Kimi Code sign-in, or sign an account in again; the person signs in, only when the operator asks |
 | `switchboard_kimi_rename` | yes | rename a Kimi Code account, only when the operator asks |
+| `switchboard_kimi_remove` / `switchboard_openrouter_remove` | yes / yes | the window's *Remove* of a Kimi Code account or of the OpenRouter key (a group's with `pool`); deletes what cannot be restored, only when the operator asks |
 | `switchboard_handovers_set` | yes | whether hand-overs open in Fabric's console, only when the operator asks |
 | `switchboard_openrouter_models` | no | OpenRouter's model list, recommended first; no key used |
 | `switchboard_project_suggestions` | no | folders still joining a group, and those added or taken out in the last day |
@@ -114,9 +115,13 @@ first write call, or when a result field is unclear.
 
 **Degraded paths: say it once, then fall back; never loop:**
 
-- **Only the 38 read tools are listed**: the server runs `--read-only` (an isolated
-  session gets that set, since a route change cannot reach it). Report reads; for a
-  change, tell the operator which tool is missing and why. Do not work around it.
+- **Only the read tools are listed**: the server runs `--read-only` (an isolated
+  session gets that set, since a route change cannot reach it). The 39 read tools and the
+  read form of 13 write tools answer; a change is refused with `error.code` `read_only`.
+  Report reads; for a change, tell the operator which tool is refused and why. Do not
+  work around it.
+- **`error.code` `invalid_arguments`**: the arguments do not match the tool's schema;
+  `error.field` names the one to fix. Fix it once and call again.
 - **No `switchboard_*` tool, or the server failed to connect**: use the CLI
   (`references/cli.md`), for example `switchboard --json status` and
   `switchboard usage`.

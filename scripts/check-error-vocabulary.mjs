@@ -105,6 +105,7 @@ const ALLOWLIST = {
   'No launch has that id. List them with switchboard sessions --history.': 'SB-212 sessions show: CLI and MCP only',
   'Only a launch can name who launched it.': 'SB-212 Launched wraps only launches; the window never sends it',
   'Give from 1 to 64 launch ids.': 'SB-423 sessions --history --launch and MCP launch_ids: CLI and MCP only',
+  'Choose a reasoning level: none, minimal, low, medium, high, xhigh, max or ultra.': 'SB-535 agents launch --anthropic --reasoning: CLI only, the window passes no effort (src-tauri main.rs launch_agent effort: None)',
   // runtime launch.rs (SB-247): a dispatched run is started and stopped only by `switchboard
   // dispatch`, Fabric's command; the window sends neither.
   'The dispatched session did not start: its program could not be run.': 'SB-247 dispatch: CLI only',
