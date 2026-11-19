@@ -1024,7 +1024,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let s = snapshot();
         let mut now = 1000;
-        let fail = |_: &str, _: &Program<'_>, _: bool| -> Result<Remote, String> {
+        let fail = |_: &str, _: &Program<'_>, _: Ask| -> Result<Remote, String> {
             Err(UNREACHABLE.into())
         };
         for _ in 0..BACKOFF_AFTER {
