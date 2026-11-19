@@ -472,13 +472,15 @@ fn view(user: &NamedUser, store: &Store) -> Value {
 }
 
 /// The group named `group`: its pool id, or its name; `default` is the default group.
-fn group_pool(store: &Store, group: &str) -> Result<String, String> {
+/// The group's pool and when it was made (None for the default group), which the entry keeps so
+/// a later group that takes the same id never serves it (security round 2, P2-2).
+fn group_pool(store: &Store, group: &str) -> Result<(String, Option<i64>), String> {
     let group = group.trim();
     if group.is_empty() {
         return Err(NO_GROUP.into());
     }
     if group == "default" {
-        return Ok("default".into());
+        return Ok(("default".into(), None));
     }
     let snapshot = store.snapshot()?;
     // M5-09: a machine group, by its id or the machine's name, is never lent here.
@@ -500,7 +502,7 @@ fn group_pool(store: &Store, group: &str) -> Result<String, String> {
     if project.tokens {
         return Err(TOKENS_GROUP.into());
     }
-    Ok(project.pool.clone())
+    Ok((project.pool.clone(), Some(project.created_at)))
 }
 
 fn normal_folder(folder: &str) -> Result<String, String> {
@@ -549,9 +551,21 @@ pub(crate) fn execute(
     write_to: Option<&str>,
     by: Option<&str>,
 ) -> Result<Value, String> {
-    let answer = change(
-        store, root, runtime, action, who, group, folders, write_to, by,
-    );
+    if cfg!(windows) {
+        return Err(UNSUPPORTED.into());
+    }
+    // Security round 2 (P2-1): one change of the list at a time, the window's, MCP's and the
+    // CLI's alike, so a disallow or a rotation is never lost to another call's older read.
+    let answer = if matches!(action, None | Some("list")) {
+        change(
+            store, root, runtime, action, who, group, folders, write_to, by,
+        )
+    } else {
+        let _held = list_lock(root)?;
+        change(
+            store, root, runtime, action, who, group, folders, write_to, by,
+        )
+    };
     // M5-11: the proxy reads the list from memory on the request path; after a change it reads
     // the file again now, so a disallow or a rotation reaches every open connection at once.
     if !matches!(action, None | Some("list")) {
@@ -560,6 +574,67 @@ pub(crate) fn execute(
         }
     }
     answer
+}
+
+/// Security round 2 (P2-1): the lock every change of `proxy-users.json` holds from its read to
+/// its write (`<data>/proxy-users.lock`, 0600). Not taken: nothing is changed.
+fn list_lock(root: &Path) -> Result<std::fs::File, String> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join(LOCK))
+        .map_err(|_| users::UNWRITTEN.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    file.lock().map_err(|_| users::UNWRITTEN.to_string())?;
+    Ok(file)
+}
+
+/// The lock file of [`list_lock`].
+pub const LOCK: &str = "proxy-users.lock";
+
+/// Security round 2 (P2-2): a group removed takes its named users with it, so a later group that
+/// takes the same id never serves them (the entry's `group_created_at` refuses them besides).
+/// Answers how many were taken off the list.
+pub(crate) fn forget_group(root: &Path, pool: &str, runtime: Option<&crate::Runtime>) -> usize {
+    // Nobody was ever named here: nothing to take off, and no lock file to make.
+    if std::fs::symlink_metadata(root.join(users::FILE)).is_err() {
+        return 0;
+    }
+    let removed = (|| -> Result<usize, String> {
+        let _held = list_lock(root)?;
+        let mut list = users::load(root)?;
+        let before = list.len();
+        list.retain(|u| u.pool != pool);
+        let removed = before - list.len();
+        if removed > 0 {
+            users::save(root, &list)?;
+        }
+        Ok(removed)
+    })();
+    crate::oplog::event(
+        "proxy_user",
+        &[
+            ("action", crate::oplog::Field::Code("group_removed")),
+            (
+                "outcome",
+                crate::oplog::Field::Code(if removed.is_ok() { "done" } else { "failed" }),
+            ),
+            (
+                "removed",
+                crate::oplog::Field::Number(*removed.as_ref().unwrap_or(&0) as i64),
+            ),
+        ],
+    );
+    if let Some(runtime) = runtime {
+        runtime.proxy.reload_users();
+    }
+    removed.unwrap_or(0)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -591,7 +666,7 @@ fn change(
             if account.uid == 0 {
                 return Err(ROOT_USER.into());
             }
-            let pool = group_pool(store, group.unwrap_or_default())?;
+            let (pool, group_created_at) = group_pool(store, group.unwrap_or_default())?;
             let mut folders = folders
                 .iter()
                 .map(|f| normal_folder(f))
@@ -635,6 +710,7 @@ fn change(
                 added_by: surface(by),
                 settings: before.as_ref().and_then(|b| b.settings.clone()),
                 settings_sha256: before.as_ref().and_then(|b| b.settings_sha256.clone()),
+                group_created_at,
             };
             if existing.is_none() && list.len() >= users::MAX_USERS {
                 return Err(TOO_MANY.into());
@@ -967,6 +1043,7 @@ mod tests {
             added_by: "cli".into(),
             settings: None,
             settings_sha256: None,
+            group_created_at: None,
         };
         let account = Account {
             uid: 4242,
@@ -1231,6 +1308,77 @@ mod tests {
         assert!(allow("default").is_ok());
     }
 
+    /// Security round 2 (P2-1): a change of the list waits for the one in progress, so a
+    /// disallow or a rotation is never written over by another call's older read.
+    #[test]
+    fn a_change_of_the_list_waits_for_the_one_in_progress() {
+        let (_dir, store) = store();
+        let root = store.root().to_owned();
+        let held = list_lock(&root).unwrap();
+        std::thread::scope(|scope| {
+            let change = scope.spawn(|| {
+                execute(
+                    &store,
+                    &root,
+                    None,
+                    Some("disallow"),
+                    Some("agent-not-listed"),
+                    None,
+                    &[],
+                    None,
+                    None,
+                )
+            });
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            assert!(
+                !change.is_finished(),
+                "the change ran beside the one in progress"
+            );
+            drop(held);
+            assert_eq!(change.join().unwrap(), Err(NOT_LISTED.into()));
+        });
+    }
+
+    /// Security round 2 (P2-2): removing a group takes its named users off the list, and an
+    /// entry records when its group was made.
+    #[test]
+    fn a_group_removed_takes_its_named_users_with_it() {
+        let Some(other) = another_account() else {
+            return;
+        };
+        let (dir, store) = store();
+        let root = store.root().to_owned();
+        let folder = dir.path().join("team");
+        std::fs::create_dir_all(&folder).unwrap();
+        let group = store
+            .save_project(None, "Team", &[folder.canonicalize().unwrap()], &[])
+            .unwrap();
+        execute(
+            &store,
+            &root,
+            None,
+            Some("allow"),
+            Some(other.name.as_str()),
+            Some(&group.pool),
+            &[],
+            None,
+            None,
+        )
+        .unwrap();
+        let listed = users::load(&root).unwrap();
+        assert_eq!(listed[0].group_created_at, Some(group.created_at));
+        assert_eq!(forget_group(&root, "another-group", None), 0);
+        assert_eq!(forget_group(&root, &group.pool, None), 1);
+        assert!(users::load(&root).unwrap().is_empty());
+        // Nothing named: nothing to take off, and no lock file made.
+        let (_dir, empty) = store_with_nothing();
+        assert_eq!(forget_group(empty.root(), &group.pool, None), 0);
+        assert!(!empty.root().join(LOCK).exists());
+    }
+    fn store_with_nothing() -> (tempfile::TempDir, std::sync::Arc<Store>) {
+        store()
+    }
+
     fn record_proxy(root: &Path, token: &str) {
         switchboard_core::private_fs::private_write(
             &root.join("proxy.json"),
@@ -1311,6 +1459,7 @@ mod tests {
                 added_by: "cli".into(),
                 settings: Some(settings.display().to_string()),
                 settings_sha256: None,
+                group_created_at: None,
             }],
         )
         .unwrap();

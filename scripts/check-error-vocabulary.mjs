@@ -75,7 +75,8 @@ const ALLOWLIST = {
   "This account of the computer may not use Switchboard's proxy now. Ask the person who runs Switchboard to allow it with switchboard proxy allow-user.": 'SB-421: an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
   "This account may use Switchboard's proxy only with its own capability. Use the settings file Switchboard wrote for it.": 'SB-421: an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
   "This account may use only the Claude Code route of the group it was allowed for.": 'SB-421: an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
-  "The pay-per-token group and another machine's group are never served to another user of this computer.": 'M5-09 (SB-421): an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
+  "Another user of this computer is served only by a group's subscriptions, never by an API key or another machine's accounts.": 'M5-09 (SB-421): an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
+  "The group this account was allowed for is gone. Ask the person who runs Switchboard to allow it again with switchboard proxy allow-user.": 'SB-421 security round 2 (P2-2): an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
   "Unknown action: use list, allow, disallow or rotate.": 'SB-421: the window sends only list and disallow; a CLI or MCP typo',
   // SB-518 (DEC-0032): monitor::probe's internal refusal when a provider hold began before its
   // request; check_as answers it as USAGE_RATE_LIMITED, which src/adapter.ts shows verbatim.

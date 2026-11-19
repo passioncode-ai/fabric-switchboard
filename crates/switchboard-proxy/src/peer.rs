@@ -197,9 +197,13 @@ fn union_address(bytes: &[u8], at: usize, vflag: u8) -> Option<IpAddr> {
 #[cfg(target_os = "linux")]
 fn owner_on(local: SocketAddr, peer: SocketAddr) -> Option<u32> {
     // Both tables, read as one: a connection listed in both with two owners is nobody's.
+    // Security round 2 (P3): `/proc/self/net` first, which a systemd unit hardened with
+    // `ProcSubset=pid` still shows (`/proc/net` is hidden there); the same network namespace.
     let mut tables = String::new();
-    for path in ["/proc/net/tcp", "/proc/net/tcp6"] {
-        if let Ok(table) = std::fs::read_to_string(path) {
+    for name in ["tcp", "tcp6"] {
+        let read = std::fs::read_to_string(format!("/proc/self/net/{name}"))
+            .or_else(|_| std::fs::read_to_string(format!("/proc/net/{name}")));
+        if let Ok(table) = read {
             tables.push_str(&table);
         }
     }
@@ -1068,6 +1072,7 @@ mod tests {
                 added_by: "cli".into(),
                 settings: None,
                 settings_sha256: None,
+                group_created_at: None,
             }],
         )
         .unwrap();
@@ -1105,6 +1110,7 @@ mod tests {
                 added_by: "cli".into(),
                 settings: None,
                 settings_sha256: None,
+                group_created_at: None,
             }],
         )
         .unwrap();
@@ -1151,6 +1157,7 @@ mod tests {
             added_by: "cli".into(),
             settings: None,
             settings_sha256: None,
+            group_created_at: None,
         };
         let me = own.wrapping_add(1);
         crate::users::save(root.path(), &[named(account_name(own))]).unwrap();

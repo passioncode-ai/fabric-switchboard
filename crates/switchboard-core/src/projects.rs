@@ -919,6 +919,13 @@ impl Store {
         Ok(s.project_of_pool(pool)
             .map_or((false, false), |p| (p.off, p.tokens)))
     }
+    /// SB-421 security round 2 (P2-2): when the group `pool` was made (None: no such group), read
+    /// from the published metadata (no lock): a named user of the host is served only by the
+    /// group it was allowed for, never by a later group that took its id.
+    pub fn pool_created_at(&self, pool: &str) -> Result<Option<i64>, String> {
+        let s = self.published()?;
+        Ok(s.project_of_pool(pool).map(|p| p.created_at))
+    }
     /// SB-401: the pay-per-token group's pool, the group made (no folder, switched off) when it
     /// does not exist yet. A Claude API key the person adds without naming another group goes
     /// here, never to the default group, where every folder in no group would run on it.

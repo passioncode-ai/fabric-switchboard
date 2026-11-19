@@ -46,7 +46,7 @@ Core implementer: crates/switchboard-core only. UI implementer: src/, index.html
 
 A separate loopback control server dispatches typed metadata/account operations, usage and native login/launch. Commands cannot query credentials. It authenticates before decoding a bounded body, denies browser Origins and wrong Host, and has no arbitrary URL/proxy primitive. CLI must not fall back to writing an already owned Store when a live control call is refused.
 
-Peer account (2026-11-19 audit M3-13, with SB-421): the control listener answers a connection only when its peer runs as the owner's own account, as the proxy does since SB-273: `control::ControlHandle::start` wraps its listener in `switchboard_proxy::peer::OwnUser` with nobody named (`Users::none`), so another account's connection is closed before a byte of it is read, on a host where other users run agents (DEC-0029) as anywhere; the 0600 descriptor is no longer the only barrier. Windows compares the peer's token user (SB-274). Test `control::tests::the_control_listener_closes_another_accounts_connection`.
+Peer account (2026-11-19 audit M3-13, with SB-421): the control listener answers a connection only when its peer runs as the owner's own account, as the proxy does since SB-273: `control::ControlHandle::start` wraps its listener in `switchboard_proxy::peer::OwnUser` with nobody named (`Users::none`), so another account's connection is closed before a byte of it is read, on a host where other users run agents (DEC-0029) as anywhere; the 0600 descriptor is no longer the only barrier. Windows compares the peer's token user (SB-274), which needs the client's process to be openable by the owner: a command run elevated against an owner that is not may be refused (an elevated command is not a supported way to reach the owner). Test `control::tests::the_control_listener_closes_another_accounts_connection`.
 
 Version skew (2026-10-08, found by fabric-dashboards FD-25): an update installs a newer bundle (CLI included) while the earlier owner keeps running from a temporary copy until it restarts, so the CLI can send an operation the owner cannot decode. Since 0.6.12 the identity answer (`GET /v1/hello`) carries the owner's version in the `x-switchboard-version` header (a header, because an earlier client refuses unknown fields in the `{proof}` body). A 400 then reads `CONTROL_OWNER_OLDER` (restart Switchboard to finish its update) when the owner is older or sends no version, `CONTROL_OWNER_NEWER` when the CLI is older, the plain refusal when both match; 429 reads `CONTROL_BUSY`. Every refusal of the listener is logged as `control_refused` with its status and a code (`unsafe_request`, `unauthorized`, `busy`, `too_large`, `body_timeout`, `unknown_operation`), never the request (`a_malformed_request_is_named_by_which_side_is_older`, `the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew`). A request the owner took 5 s or longer to answer is logged as `control_slow` with the operation's tag and the milliseconds, never its arguments (SB-174, `an_operation_kind_is_its_tag_and_never_its_arguments`; a launch from outside the window, which arrives wrapped as `launched`, is tagged by what it launches, `launch` or `continue`, SB-220), so a client's stall can be told apart from a wait on the way to the owner. Since 0.7.0 it also carries `lock_ms`, the milliseconds the request waited in all for the store's metadata lock, when it took that lock at all (H-2): the store tells its observer each take (`Store::observe_lock_waits`, zero when the lock was free), and the control handler adds the takes of the request's own task, its blocking sections included, not those of tasks it spawns (`a_slow_request_names_how_long_it_waited_for_the_stores_lock`, `an_operation_counts_the_time_it_waited_for_the_stores_lock`, `the_lock_observer_is_told_each_take_and_how_long_it_waited`). A `control_slow` with a large `lock_ms` is a wait behind the store's metadata lock; one with a small `lock_ms` is time spent elsewhere (the owner transaction, the store's credential lock, which a credential writer holds across its Keychain calls and `lock_ms` does not count, the Keychain, the machine). A credential read of a second or more is logged by the next background pass as `vault_slow` with the slowest read's milliseconds; since 0.6.81 such a read no longer holds the account metadata, so `snapshot()` and every read built on it (recovery, hand-overs, agents) answer while it runs (SB-185, `a_slow_credential_read_does_not_hold_the_metadata`).
 
@@ -3006,7 +3006,7 @@ subscriptions. SB-273 closes their connections, and the agents' key never reache
   and a read only when it changed), so a change made by hand reaches open connections within that
   (`disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_closed`). The accept loop
   still admits one connection at a time and asks the password database for a named uid's name
-  each time (SB-456, open). A uid listed with a name is admitted only while
+  each time (SB-456, open). The file is read one reader at a time outside the cache's lock, so a request never waits on a read and reads land in the order they ran (security round 2); on Linux the socket table is read from `/proc/self/net/tcp{,6}` first, which a systemd unit hardened with `ProcSubset=pid` still shows, else `/proc/net`. A uid listed with a name is admitted only while
   the password database still gives the uid that name: a uid handed to a new account is refused
   (security round 1 P2-4, `a_listed_uid_is_admitted_only_under_its_recorded_name`).
   The owner is the one socket whose local address and port are the peer's and whose foreign ones
@@ -3025,6 +3025,17 @@ subscriptions. SB-273 closes their connections, and the agents' key never reache
   unprivileged process read only its own account's sockets (SB-330), so there another account's
   connection still reads as nobody's and is closed: the feature serves Linux hosts (and macOS
   before 27, which lists every socket's owner).
+- **One change at a time (security round 2, P2-1).** Every change of the list (allow,
+  disallow, rotate, and a removed group's entries) holds `<data>/proxy-users.lock` (0600) from its
+  read to its write, so two calls at once (the window, MCP, the CLI) never lose a disallow or a
+  rotation to an older read (`a_change_of_the_list_waits_for_the_one_in_progress`).
+- **Its group, the one made then (P2-2).** An entry keeps when its group was made
+  (`group_created_at`, from `Project::created_at`; none for the default group). Removing a group
+  takes its entries off the list (`proxy_users::forget_group`,
+  `a_group_removed_takes_its_named_users_with_it`), and a request is served only while the group
+  that holds the id is the one made then (`Store::pool_created_at`), else 403 `NAMED_USER_GONE`:
+  a group made later with the same name never serves a user allowed for the old one
+  (`a_later_group_with_the_same_id_never_serves_a_named_account`).
 - **Its capability.** `users::user_token(token, pool, uid, salt)`: SHA-256 of
   `switchboard-user:<pool>:<uid>:<salt>:<session token>`, 64 hex. From a named account's connection
   the relay compares only that value (as the bearer or `X-Switchboard-Capability`, in constant
@@ -3033,7 +3044,11 @@ subscriptions. SB-273 closes their connections, and the agents' key never reache
   `NAMED_USER_CAPABILITY`; its own capability on another group, on Codex or on `/codex/_auto` with
   403 `NAMED_USER_GROUP`; a listed group that is the pay-per-token group or a machine group (a
   list edited by hand), or a store that cannot be read, with 403 `NAMED_USER_KIND` before any key
-  is read (M5-09, `a_hand_edited_list_never_lends_the_pay_per_token_group`); an account taken off the list while its connection stayed open with 401
+  is read (M5-09, `a_hand_edited_list_never_lends_the_pay_per_token_group`), and so is a request
+  whose group would answer it with an API-key account (one outside the pay-per-token group): a
+  named user spends only a group's subscriptions (security round 2); its
+  `x-switchboard-launch-group` header is ignored, since its sessions are not Switchboard's
+  launches; an account taken off the list while its connection stayed open with 401
   `NAMED_USER_REFUSED` (`a_named_account_is_served_only_with_its_own_capability_on_its_group`,
   `disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_closed`). An admitted request
   is official: a Claude Code session, so a subscription account serves it, SB-98's one move to the

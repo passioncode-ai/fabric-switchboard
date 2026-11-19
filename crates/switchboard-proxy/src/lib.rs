@@ -235,7 +235,10 @@ pub const NAMED_USER_GROUP: &str =
 /// 2026-11-19 audit M5-09: a list edited by hand that names the pay-per-token group or a machine
 /// group serves nothing (`proxy allow-user` refuses both).
 pub const NAMED_USER_KIND: &str =
-    "The pay-per-token group and another machine's group are never served to another user of this computer.";
+    "Another user of this computer is served only by a group's subscriptions, never by an API key or another machine's accounts.";
+/// Security round 2 (P2-2): the group the account was allowed for was removed, or another group
+/// took its id since.
+pub const NAMED_USER_GONE: &str = "The group this account was allowed for is gone. Ask the person who runs Switchboard to allow it again with switchboard proxy allow-user.";
 fn valid_token(token: &str) -> bool {
     token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -844,6 +847,17 @@ fn named_user(
     {
         return Err((StatusCode::FORBIDDEN, NAMED_USER_KIND));
     }
+    // Security round 2 (P2-2): only the group it was allowed for, the one made then: a group
+    // removed since, or a later group with its id, serves it nothing. The default group is
+    // never removed.
+    if user.pool != "default" {
+        let made = g.store.pool_created_at(&user.pool);
+        let same =
+            matches!(&made, Ok(Some(at)) if user.group_created_at.is_none_or(|was| was == *at));
+        if !same {
+            return Err((StatusCode::FORBIDDEN, NAMED_USER_GONE));
+        }
+    }
     if let Ok(mut counts) = g.user_requests.lock() {
         *counts.entry(uid).or_default() += 1;
     }
@@ -1041,6 +1055,12 @@ async fn relay_as(
     if agent && account.kind != AuthKind::ApiKey {
         return error(StatusCode::FORBIDDEN, AGENT_SUBSCRIPTION_REFUSED);
     }
+    // SB-421 security round 2: a named account is served by a group's subscriptions only
+    // (DEC-0029): an API key in its group (one outside the pay-per-token group) never spends for
+    // it. SB-98's move to the next account keeps the kind, so it never reaches one either.
+    if named.is_some() && account.kind == AuthKind::ApiKey {
+        return error(StatusCode::FORBIDDEN, NAMED_USER_KIND);
+    }
     if operation == "chat/completions" && account.kind != AuthKind::ApiKey {
         return error(
             StatusCode::NOT_FOUND,
@@ -1110,9 +1130,11 @@ async fn relay_as(
             .is_some_and(|pools| !pools.contains(&pool))
     });
     // SB-452: the group the session was launched for, as its launch's settings file says.
+    // A named account's sessions are not Switchboard's launches: its header names nothing.
     let launched_for = parts
         .headers
         .get(LAUNCH_GROUP_HEADER)
+        .filter(|_| named.is_none())
         .and_then(|v| v.to_str().ok())
         .map(str::trim)
         .filter(|p| !p.is_empty() && *p != pool)

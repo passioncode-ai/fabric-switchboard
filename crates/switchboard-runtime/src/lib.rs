@@ -9270,6 +9270,9 @@ async fn execute(
             if let Some(rt) = runtime {
                 rt.suggestions_changed();
             }
+            // SB-421 security round 2 (P2-2): the other users of this host allowed for it go
+            // with it, so a group made later with the same id never serves them.
+            proxy_users::forget_group(root, &project.pool, runtime);
             Ok(json!({"removed": project.pool, "name": project.name}))
         }
         Operation::RemoveProjectRule { path, provider } => {

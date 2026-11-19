@@ -2777,6 +2777,7 @@ fn name_this_account(root: &std::path::Path, pool: &str, folders: &[&str]) -> us
         added_by: "cli".into(),
         settings: None,
         settings_sha256: None,
+        group_created_at: None,
     };
     users::save(root, std::slice::from_ref(&user)).unwrap();
     user
@@ -3046,6 +3047,56 @@ async fn a_hand_edited_list_never_lends_the_pay_per_token_group() {
         .unwrap();
     assert_eq!(answer.status(), 403);
     assert!(answer.text().await.unwrap().contains(NAMED_USER_KIND));
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
+    p.shutdown().await;
+    up.abort();
+}
+
+/// SB-421 security round 2 (P2-2): a named account is served only by the group it was allowed
+/// for, the one made then: a group made later with the same id (the old one removed, its entry
+/// left behind) serves it nothing, before any account is read.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[tokio::test]
+async fn a_later_group_with_the_same_id_never_serves_a_named_account() {
+    let (root, s) = store();
+    let folder = root.path().join("team");
+    std::fs::create_dir_all(&folder).unwrap();
+    let group = s
+        .save_project(None, "Team", &[folder.canonicalize().unwrap()], &[])
+        .unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = hits.clone();
+    let (url, up) = fixture(Router::new().route(
+        "/v1/messages",
+        post(move || {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                "{}"
+            }
+        }),
+    ))
+    .await;
+    let p = start_as_service(s.clone(), url).await;
+    // The entry names a group made at another time than the one that holds the id now.
+    let mut user = name_this_account(s.root(), &group.pool, &[]);
+    user.group_created_at = Some(group.created_at - 1);
+    users::save(s.root(), std::slice::from_ref(&user)).unwrap();
+    p.reload_users();
+    let own = p.user_capability(&group.pool, user.uid, &user.salt);
+    let answer = reqwest::Client::new()
+        .post(format!(
+            "http://{}/claude/{}/v1/messages",
+            p.address(),
+            group.pool
+        ))
+        .bearer_auth(&own)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(answer.status(), 403);
+    assert!(answer.text().await.unwrap().contains(NAMED_USER_GONE));
     assert_eq!(hits.load(Ordering::SeqCst), 0);
     p.shutdown().await;
     up.abort();

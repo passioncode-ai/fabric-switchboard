@@ -22,6 +22,8 @@ const OWNED: &[&str] = &[
     "proxy.json",
     // Other accounts of this computer the proxy serves (SB-421).
     "proxy-users.json",
+    // One change of that list at a time (SB-421 security round 2).
+    "proxy-users.lock",
     "renewal-state.json",
     "usage-holds.json",
     // The provider-wide holds after a 429 and the person's usage check mode (SB-518).

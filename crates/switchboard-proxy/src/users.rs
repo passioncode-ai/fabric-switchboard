@@ -49,6 +49,11 @@ pub struct NamedUser {
     /// path is replaced only while it still holds exactly them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings_sha256: Option<String>,
+    /// Security round 2 (P2-2): when the group it was allowed for was made (`Project::
+    /// created_at`; None for the default group). A group deleted since, or a new one that took
+    /// its id, serves it nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_created_at: Option<i64>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -155,12 +160,16 @@ type Cached = Option<(Option<Stamp>, Arc<Vec<NamedUser>>)>;
 pub struct Users {
     root: Option<PathBuf>,
     cache: Mutex<Cached>,
+    /// Security round 2 (P3): one read of the file at a time, outside `cache`, so the request
+    /// path's `find_cached` never waits on file I/O and reads land in the order they ran.
+    loading: Mutex<()>,
 }
 impl Users {
     pub fn new(root: &Path) -> Self {
         Self {
             root: Some(root.to_owned()),
             cache: Mutex::new(None),
+            loading: Mutex::new(()),
         }
     }
     /// A list that is always empty: a system where another account's connection is never let in.
@@ -168,25 +177,34 @@ impl Users {
         Self {
             root: None,
             cache: Mutex::new(None),
+            loading: Mutex::new(()),
         }
     }
     pub fn current(&self) -> Arc<Vec<NamedUser>> {
         let Some(root) = &self.root else {
             return Arc::default();
         };
-        let now = stamp(&root.join(FILE));
-        let Ok(mut cache) = self.cache.lock() else {
+        let Ok(_loading) = self.loading.lock() else {
             return Arc::default();
         };
-        if let Some((seen, users)) = cache.as_ref() {
-            if *seen == now {
-                return users.clone();
+        let now = stamp(&root.join(FILE));
+        {
+            let Ok(cache) = self.cache.lock() else {
+                return Arc::default();
+            };
+            if let Some((seen, users)) = cache.as_ref() {
+                if *seen == now {
+                    return users.clone();
+                }
             }
         }
         let users = Arc::new(match now {
             None => Vec::new(),
             Some(_) => load(root).unwrap_or_default(),
         });
+        let Ok(mut cache) = self.cache.lock() else {
+            return Arc::default();
+        };
         *cache = Some((now, users.clone()));
         users
     }
@@ -234,6 +252,7 @@ mod tests {
             added_by: "cli".into(),
             settings: None,
             settings_sha256: None,
+            group_created_at: None,
         }
     }
 
