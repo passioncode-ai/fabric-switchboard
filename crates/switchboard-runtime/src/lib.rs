@@ -3838,6 +3838,8 @@ impl Owner {
         if native_sources && default_store {
             bugs::begin(&runtime.root, monitor::now());
         }
+        // SB-549: a Keychain refusal an older version recorded may no longer hold.
+        item_size::forget_older(&runtime.root, env!("CARGO_PKG_VERSION"));
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
         oplog::event(
             "owner_started",
