@@ -7992,7 +7992,7 @@ async fn execute(
                     taken.remote_id.clone(),
                     taken.sender_key.clone(),
                 );
-                let _ = blocking::run(move || {
+                let finished = blocking::run(move || {
                     account_send::recall_finish(
                         &machine,
                         &account_send::Taken {
@@ -8009,6 +8009,23 @@ async fn execute(
                         &account_send::ssh_runner,
                     )
                 });
+                // SB-560 (M3-03): a row there that could not be removed is tried again.
+                if finished["proved"] != true {
+                    remote_removals::add(
+                        root,
+                        remote_removals::Pending {
+                            account: id.clone(),
+                            machine: from.clone(),
+                            remote_id: taken.remote_id.clone(),
+                            sender_key: taken.sender_key.clone(),
+                            program: program.clone(),
+                            data_dir: remote_data_dir.clone(),
+                            since: monitor::now(),
+                            tries: 0,
+                            last_try: None,
+                        },
+                    );
+                }
                 let pool = local_pool(&store, &id);
                 record_seat(
                     root,
