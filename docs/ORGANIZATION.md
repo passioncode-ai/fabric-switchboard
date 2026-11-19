@@ -162,7 +162,10 @@ between their registered devices and never reads the sign-in. The teammate accep
 window or through their coding agent, and picks the group whose folders the seat serves. The seat
 keeps every rule of a delegated seat: it stays in that group, the teammate never signs in with it
 or passes it on, a lease ends it when the administrator's computer stops renewing it, and the
-administrator calls it back at any time. The teammate keeps their own subscription in Claude Desktop
+administrator calls it back at any time. The administrator also sets how much of the
+subscription's 5-hour and weekly windows the seat may use; the teammate's Switchboard stops at that
+ceiling and says why, and uses the seat only when the teammate's own accounts in that group have no
+room left. The teammate keeps their own subscription in Claude Desktop
 and in the ordinary Claude Code.
 
 Delegation over ssh (`accounts send --delegate`, [DEC-0025](DECISIONS.md#dec-0025-a-subscription-is-delegated-to-a-teammates-machine-as-a-guest-under-a-lease))

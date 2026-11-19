@@ -1125,6 +1125,13 @@ research notes); the ones still in force that the board cites are seeded below w
     minutes by its sender; past it switched off with its credential kept 30 days, then removed;
     called back only by its sender, the credential coming back as the one live copy; the
     revocation against an uncooperative teammate is signing the subscription out at the provider.
+  - The owner sets each relayed seat's usage ceiling per window (the 5-hour and the weekly window at
+    least) and its place in the teammate's rotation (by default the last resort, chosen only when no
+    other account of the group has room) when offering it; both travel in the offer, the receiving
+    Switchboard refuses a request above the ceiling before it reaches the provider and says why, and
+    the seat's reports carry its windows back to the owner.
+  - The program's path on the teammate's computer is never assumed (`/Applications`,
+    `~/Applications` or elsewhere): the relay calls no program on another computer.
   - Until the relay ships, a teammate works on a seat signed in on their own computer (ORGANIZATION
     section 4) or on their own subscription; nothing is delegated to their computer.
 - **What DEC-0025 still covers:** the guest rules, the lease and its lapse, call back, `own-sign-in

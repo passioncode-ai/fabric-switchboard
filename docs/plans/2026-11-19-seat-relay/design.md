@@ -149,9 +149,9 @@ One JSON object per message, at most 64 KiB encoded (open question Q6).
 
 | Kind | From | To | Payload (inside `ct`) | Expires |
 |---|---|---|---|---|
-| `seat.offer` | an administrator's device | a member's device in the same organization | provider, the credential, a suggested group name, the organization, `lease_until`, the sender's settings for the seat (rules the guest keeps, DEC-0025) | 7 days |
-| `lease.extend` | the sender of that thread | its recipient | `lease_until` | 1 hour |
-| `usage.report` | the recipient of that thread | its sender only | seat state (`pending`, `active`, `off_lease`, `declined`, `removed`), usage windows as percentages and reset times, check time, session counts by state | 1 hour |
+| `seat.offer` | an administrator's device | a member's device in the same organization | provider, the credential, a suggested group name, the organization, `lease_until`, the usage ceiling and the rotation place (section 9a), the sender's settings for the seat (rules the guest keeps, DEC-0025) | 7 days |
+| `lease.extend` | the sender of that thread | its recipient | `lease_until`; a changed ceiling or rotation place, when the owner changed them | 1 hour |
+| `usage.report` | the recipient of that thread | its sender only | seat state (`pending`, `active`, `off_lease`, `declined`, `removed`), usage windows as percentages and reset times, check time, the ceiling in force and the requests it refused since the last report, session counts by state | 1 hour |
 | `seat.recall` | the sender of that thread | its recipient | a reason code | 7 days |
 | `seat.surrender` | the recipient of that thread | its sender only | the live credential (the recipient's renewals rotate the refresh token), or `declined` or `removed` with no credential | 7 days |
 
@@ -202,6 +202,39 @@ The seat on the recipient is a DEC-0025 guest, with `sender_device` in place of 
   its state changes (at most one a minute).
 - Own sign-in off (`own-sign-in off`) is recommended at accept and offered in the same step, as in
   DEC-0025; it is not required.
+
+## 9a. The seat's usage ceiling and its place in rotation
+
+The owner sets, at delivery, how much of the subscription the seat may use, and the receiving
+Switchboard enforces it. This is what keeps a shared subscription from being spent by one guest.
+
+- The offer carries `ceiling`: a percentage per provider window, at least the 5-hour and the
+  weekly window (for example 80 % of the 5-hour window and 70 % of the week, the figures chosen for
+  the first teammate seat), and `rotation`: `last_resort` or `normal`. The window and the CLI ask
+  for both when offering; `last_resort` is the default.
+- `last_resort`: in its group the seat is chosen, by hand or by automatic switching, only when no
+  other account of that group has room under its own limits. The teammate's own subscriptions in
+  that group always go first. A teammate's own sign-in outside Switchboard is never read (own
+  sign-in off), so only accounts the group holds count.
+- The receiving Switchboard treats the ceiling as the seat's limit: automatic switching moves off
+  it at the ceiling, and the proxy refuses a request on it at or above the ceiling of any window
+  with a clear local answer (status 429, error code `SEAT_CEILING`, the window, the ceiling, the
+  reset time, and a sentence: "This seat is shared by your organization; it may use {n} % of its
+  {window}, and that is reached. It resets {time}."). Nothing goes to the provider for that request.
+- Unknown is not zero: the receiver checks the seat's usage before its first request and whenever
+  its last check is older than 5 minutes when a request arrives; a seat whose usage could not be
+  read is not used until a check works, and the refusal says so (`SEAT_USAGE_UNKNOWN`).
+- `usage.report` carries every window's figure, the ceiling in force and the count of refused
+  requests, so the owner's row shows the seat against its ceiling.
+- The owner changes the ceiling or the rotation place on the seat's row; the change travels in the
+  next `lease.extend` and the report that follows confirms it. A lower ceiling applies at once on
+  receipt; nothing waits for the provider.
+- An ssh-delegated seat between the operator's own machines may take the same ceiling later; it
+  is not part of SB-575.
+
+The program's path on the teammate's computer is never assumed: Switchboard may be installed under
+`/Applications` or under `~/Applications` (or anywhere on Linux and Windows). The relay calls no
+program on the other computer, so nothing in this design depends on where it is installed.
 
 ## 10. Polling, cadence and backoff
 
@@ -295,6 +328,7 @@ lands: `device.status`, `device.register`, `device.trust`, `device.rotate`, `sea
 | A member's device is compromised | read a seat's credential once its offer was delivered | the same as DEC-0025: the provider sign-out ends every copy; only seats offered to that device are exposed |
 | An administrator's device is compromised | offer the organization's seats, recall them | Vesta's role check limits it to that organization; the audit log shows every offer; revoking the device at Vesta stops it |
 | A member leaves the organization | keep using a seat | Vesta refuses the thread's messages once the membership ends; the lease lapses within its length; the credential is removed 30 days later; the provider sign-out ends it at once |
+| A guest spends the shared subscription | use the organization's seat up | the owner's ceiling per window, enforced before any request reaches the provider; `last_resort` keeps the teammate's own accounts first; the owner sees the figures and lowers the ceiling or calls the seat back |
 | Flooding a mailbox | exhaust a device's inbox or the owner's time | Vesta rate limits per sender device and per organization; the recipient caps envelopes per fetch and their size |
 | A version downgrade | make a side accept a weaker format | `v` is signed; an unknown version is refused, never read as an older one |
 | Clock skew | expire messages early or late | five minutes of tolerance; order comes from `seq`, not the clock |
@@ -357,7 +391,8 @@ label or the provider account's e-mail, a session's content.
   - W3 the relay client against Vesta's mailbox (needs section 14 items 2 to 4), the cadence and
     the failure states.
   - W4 the seat flow: offer, accept into a group, extend, report, recall, surrender, decline,
-    expiry, on the guest rules that exist today.
+    expiry, on the guest rules that exist today; the usage ceiling and the last-resort place
+    (section 9a).
   - W5 surfaces: the window's offer and accept, the machine group *via PassionCode.ai*, Needs
     attention, MCP tools, CLI, scenarios (SCN-102 rewritten for the relay, a new one for the
     teammate's accept), strings checked with Copylot, CHANGELOG.
@@ -389,4 +424,9 @@ label or the provider account's e-mail, a session's content.
   thread are refused.
 - The fake Vesta asserts that no stored row contains the planted credential, label, folder or
   e-mail; the relay's log lines pass the planted-identifier test of [ANALYTICS.md](../../ANALYTICS.md).
+- Ceiling: a request at or above the ceiling of any window is refused locally with `SEAT_CEILING`
+  and never reaches the provider (a fake provider counts calls); a seat with unknown usage is not
+  used; a `last_resort` seat is chosen only when every other account of its group is out of room;
+  a lower ceiling from `lease.extend` applies at once; `usage.report` carries the ceiling and the
+  refused count.
 - Guest rules: the existing `delegation::tests` run over a relayed guest as over an ssh-delegated one.

@@ -194,7 +194,8 @@ a seat for a teammate goes through PassionCode.ai (SB-575, [design](plans/2026-1
 ```sh
 # On the other machine (one of yours)
 switchboard own-sign-in off                 # Switchboard never reads or changes your own sign-in here (own-sign-in on, or no argument to read it)
-# ~/.ssh/authorized_keys, the one line for the sending machine's ssh key (replace an older one; keep the quotes):
+# ~/.ssh/authorized_keys, the one line for the sending machine's ssh key (replace an older one; keep the quotes;
+# use that machine's own program path: the app may be in /Applications or ~/Applications, and accounts send --remote names it):
 #   command="'/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard' ssh-serve --sender-key <its settings signer key> --pool <group id>",restrict ssh-ed25519 AAAA… sender
 # On the machine that holds the subscription
 switchboard accounts send ACCOUNT_UUID --to user@host --pool <group there> --delegate [--lease-hours 48]
