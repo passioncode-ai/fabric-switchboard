@@ -625,6 +625,16 @@ fn restarts(lines: &[Value], session: &str, now: i64) -> usize {
         .count()
 }
 
+/// SB-505: whether `line` is the outcome of `intent`: the same session, act and process, whatever
+/// its stamp (before 0.7.121 the two stamps could differ by the check's duration). A person's
+/// close of a copy, or another check's act on the session, settles nothing.
+fn settles(line: &Value, intent: &Value) -> bool {
+    line.get("outcome").is_some()
+        && line["session"] == intent["session"]
+        && line["action"] == intent["action"]
+        && line["pid"] == intent["pid"]
+}
+
 /// The outcome lines that record an act once (SB-505). Before 0.7.121 an intent was stamped later
 /// than its outcome, so a check longer than a second left the pair unmatched and the next check
 /// wrote a second outcome (`finished_at`) for an act already done. Such a line, written when no
@@ -638,8 +648,8 @@ fn outcomes(lines: &[Value]) -> impl Iterator<Item = &Value> {
             open.push(line);
             continue;
         }
-        let had = open.iter().any(|o| o["session"] == line["session"]);
-        open.retain(|o| o["session"] != line["session"]);
+        let had = open.iter().any(|o| settles(line, o));
+        open.retain(|o| !settles(line, o));
         if had || line.get("finished_at").is_none() {
             kept.push(line);
         }
@@ -673,13 +683,9 @@ pub fn status(root: &Path, now: i64) -> Result<Value, String> {
         })
         .collect();
     // An intent line is bookkeeping for a cut act (SB-397 W0.1); the outcome line is the act.
-    let recent: Vec<Value> = lines
-        .iter()
-        .rev()
-        .filter(|l| l["phase"] != "intent")
-        .take(20)
-        .cloned()
-        .collect();
+    // SB-505: without the second outcome an older owner wrote for one act.
+    let kept: Vec<&Value> = outcomes(&lines).collect();
+    let recent: Vec<Value> = kept.into_iter().rev().take(20).cloned().collect();
     let watched: Vec<&Seen> = seen
         .iter()
         .filter(|s| s.kind == "interactive" && !s.dashboards)
@@ -798,7 +804,7 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
                 crate::resumable::record(
                     root,
                     json!({"session": s.session, "config": s.config, "cwd": s.cwd, "reason": reason,
-                        "at": now, "by": "duty"}),
+                        "at": at, "by": "duty"}),
                 );
             }
             crate::oplog::event(
@@ -886,11 +892,11 @@ pub fn interrupted(lines: &[Value], now: i64) -> Vec<Value> {
         .iter()
         .filter(|l| l["action"] != crate::dispatch::JOURNAL_ACTION)
     {
-        // SB-505: an outcome settles the open intent of its session written before it, whatever
-        // its stamp (before 0.7.121 the two stamps could differ by the check's duration).
-        open.retain(|o| o["session"] != line["session"]);
         if line["phase"] == "intent" {
+            open.retain(|o| o["session"] != line["session"]);
             open.push(line.clone());
+        } else {
+            open.retain(|o| !settles(line, o));
         }
     }
     // An intent younger than `SETTLE_SECONDS` may belong to a check still running beside this one
@@ -1136,7 +1142,7 @@ mod tests {
     #[test]
     fn an_intent_without_its_outcome_is_an_act_cut_by_a_quit() {
         let intent = |session: &str, at: i64| json!({"at": at, "phase": "intent", "action": "close", "session": session, "pid": 1});
-        let outcome = |session: &str, at: i64| json!({"at": at, "action": "close", "outcome": "closed", "session": session});
+        let outcome = |session: &str, at: i64| json!({"at": at, "action": "close", "outcome": "closed", "session": session, "pid": 1});
         let lines = vec![
             intent("S1", 100),
             outcome("S1", 100),
@@ -1776,23 +1782,37 @@ mod tests {
         // stamped later than its outcome, and the next check finished the act a second time.
         let lines = vec![
             json!({"at": 1003, "phase": "intent", "action": "close", "session": "S1", "pid": 1}),
-            json!({"at": 1000, "action": "close", "outcome": "closed", "session": "S1"}),
+            json!({"at": 1000, "action": "close", "outcome": "closed", "session": "S1", "pid": 1}),
         ];
         assert!(interrupted(&lines, 2000).is_empty(), "nothing is open");
     }
 
     #[test]
+    fn another_line_of_the_session_does_not_settle_a_cut_act() {
+        let lines = vec![
+            json!({"at": 1000, "phase": "intent", "action": "restart", "session": "S1", "pid": 7}),
+            // The person closed a copy of the same session meanwhile.
+            json!({"at": 1001, "session": "S1", "pid": 8, "by": "person"}),
+            // Another check's close of another process of it.
+            json!({"at": 1002, "action": "close", "outcome": "closed", "session": "S1", "pid": 9}),
+        ];
+        let open = interrupted(&lines, 2000);
+        assert_eq!(open.len(), 1, "the cut restart is still finished");
+        assert_eq!(open[0]["pid"], 7);
+    }
+
+    #[test]
     fn a_second_outcome_of_one_act_is_not_counted_as_another_restart() {
         let lines = vec![
-            json!({"at": 103, "phase": "intent", "action": "restart", "session": "s-1"}),
-            json!({"at": 100, "action": "restart", "outcome": "restarted", "session": "s-1"}),
+            json!({"at": 103, "phase": "intent", "action": "restart", "session": "s-1", "pid": 1}),
+            json!({"at": 100, "action": "restart", "outcome": "restarted", "session": "s-1", "pid": 1}),
             // The phantom a later check wrote before SB-505.
             json!({"at": 103, "action": "restart", "outcome": "restarted", "session": "s-1",
-                "finished_at": 200}),
+                "pid": 1, "finished_at": 200}),
             // An act a quit really cut, finished by the next owner: counted.
-            json!({"at": 300, "phase": "intent", "action": "restart", "session": "s-1"}),
+            json!({"at": 300, "phase": "intent", "action": "restart", "session": "s-1", "pid": 2}),
             json!({"at": 300, "action": "restart", "outcome": "restarted", "session": "s-1",
-                "finished_at": 400}),
+                "pid": 2, "finished_at": 400}),
         ];
         assert_eq!(restarts(&lines, "s-1", 500), 2);
     }
