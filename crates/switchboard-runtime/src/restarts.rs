@@ -904,7 +904,8 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
     let Some(program) = crate::launch::find_program("claude") else {
         return ("failed", Some("cannot_resume"));
     };
-    let bypass = crate::launch::bypass_args(root, switchboard_core::Provider::Claude, &[]);
+    // SB-515: the permission choice as Fabric Sessions asks it (D-7), the one answer it reads.
+    let bypass = crate::session_accounts::resume_flags(root);
     let prompt = e.caller.then(|| caller_prompt(wave));
     let mut script = crate::duty::resume_script_for(
         &e.config,
