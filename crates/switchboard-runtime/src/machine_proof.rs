@@ -167,8 +167,10 @@ enum Answer {
     Proved(String),
     /// A Switchboard that does not know the challenge (older than 0.7.104).
     Unsupported,
-    /// No answer, or a refusal of the challenge.
+    /// No answer.
     Failed,
+    /// SB-560: a Switchboard that knows the challenge refused it (its vault locked, say).
+    Refusal,
     /// An answer whose signature does not hold for this challenge (M2-10).
     Invalid,
 }
@@ -191,8 +193,15 @@ fn challenge(target: &str, program: &Program<'_>, run: &Run<'_>) -> Answer {
         let unknown = output
             .lines()
             .any(|l| l.contains("Invalid arguments. Run switchboard --help."));
+        // A Switchboard that knows the challenge and refused it (its vault locked, say) answered;
+        // only no answer at all reads as "did not answer".
+        let refused = output
+            .lines()
+            .any(|l| serde_json::from_str::<Value>(l.trim()).is_ok_and(|v| v["ok"] == false));
         return if unknown {
             Answer::Unsupported
+        } else if refused {
+            Answer::Refusal
         } else {
             Answer::Failed
         };
@@ -309,6 +318,7 @@ pub fn verify(
 enum Seen {
     Nothing,
     Answer,
+    Refusal,
     Invalid,
 }
 
@@ -330,6 +340,7 @@ fn verify_answer(
     let answer = challenge(target, program, run);
     let seen = match answer {
         Answer::Failed => Seen::Nothing,
+        Answer::Refusal => Seen::Refusal,
         Answer::Invalid => Seen::Invalid,
         _ => Seen::Answer,
     };
@@ -353,9 +364,10 @@ fn verify_answer(
             Proof::Pinned
         }
         (Answer::Invalid, _) => Proof::Refused,
-        (Answer::Unsupported | Answer::Failed, Some(_)) => Proof::Refused,
-        // An older Switchboard, or no answer: the call itself fails the same way when unreachable.
-        (Answer::Unsupported | Answer::Failed, None) => Proof::Unproven,
+        (Answer::Unsupported | Answer::Failed | Answer::Refusal, Some(_)) => Proof::Refused,
+        // An older Switchboard, a refusal or no answer: the call itself fails the same way when
+        // unreachable.
+        (Answer::Unsupported | Answer::Failed | Answer::Refusal, None) => Proof::Unproven,
     };
     if proof.trusted() {
         note_change(root, &machine, None, now);
@@ -373,6 +385,8 @@ fn gate(proof: Proof, seen: Seen, need: Need) -> Option<&'static str> {
         Proof::Unproven if need == Need::Read => None,
         // Never answered at all: the caller's own "did not answer" stays true.
         Proof::Unproven if seen == Seen::Nothing => Some(crate::account_send::UNREACHABLE),
+        // It refused to prove itself: its vault, most often.
+        Proof::Unproven if seen == Seen::Refusal => Some(PROOF_MISSING),
         Proof::Unproven => Some(PROOF_REQUIRED),
     }
 }
@@ -782,6 +796,12 @@ mod typed {
             Err(crate::account_send::UNREACHABLE.into()),
             "a machine that never answered is still said not to answer"
         );
+        // A Switchboard that knows the challenge and refused it (its vault locked) answered.
+        let locked = |_: &[String], _: Option<&[u8]>| -> Result<String, String> {
+            Err(r#"{"ok":false,"error":"The vault could not be opened."}"#.into())
+        };
+        let act = Guard::new(here.path(), "laptop", &PROGRAM, &locked);
+        assert_eq!(act.run(&line(), None), Err(PROOF_MISSING.into()));
         assert!(refusal(KEY_CHANGED) && refusal(PROOF_REQUIRED) && refusal(PROOF_INVALID));
         assert!(!refusal(crate::account_send::UNREACHABLE));
     }
