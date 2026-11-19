@@ -3895,35 +3895,50 @@ the window's `boot_resume` command (Settings → Sessions after a restart, SCN-1
   changed, `stopped_at` was set, or, while that set is not empty, its `at` is 30 minutes old
   (`REFRESH_SECONDS`); with no such session running nothing is written. The owner's drain sets `stopped_at` on a ledger of this boot.
   Boot time: `sysctl kern.boottime` (macOS), `btime` of `/proc/stat` (Linux), read once a process.
-- **The pass.** Once per owner process, the first watch pass with `boot-resume.json` saying on
-  (absent: on) and a ledger from an earlier boot runs `boot_resume::run`: it first settles each
+- **The pass.** Once per owner process, the first watch pass that read the process table decides:
+  with `boot-resume.json` saying on (absent: on) and a ledger from an earlier boot it runs
+  `boot_resume::run`; a pass that could not read the table waits for the next one. `run` it first settles each
   intent of this boot with no outcome (`continued` when a live process holds the session or it is
   `being_continued`, else `interrupted`), then continues what `boot_resume::candidates` admits,
   the rule of DEC-0030 (no end, not continued, Claude, launched before the boot; in the ledger, the
-  ledger at most 2 hours older than the boot and its `stopped_at` neither older than that nor older
-  than the transcript's last write minus 120 s; transcript last written in `[boot - 7200, boot]`
-  in any config folder (`machine_sessions::transcript_at`); not live, not `being_continued`, not
-  named by a launch since the boot, not in this boot's journal), newest transcript first, at most 5
-  (the rest `over_limit`). Each needs `capacity::reserve(Start::Interactive)`; a refusal writes
-  `at_capacity` for it and every one after. A continuation is `resumable::continue_as` with `How
+  ledger at most 2 hours older than the boot and its last look neither older than that nor older
+  than the transcript's last write minus 120 s, the last look being `stopped_at`, or, with none
+  (no drain: a crash, a power cut), the ledger's `at` plus `REFRESH_SECONDS`; transcript last written in `[boot - 7200, boot]`
+  in any config folder (`machine_sessions::transcript_at`); not live, not waiting on a limit stop
+  (`recovery::live_stop_sessions`: recovery continues those), not `being_continued`, not named by
+  a launch since the boot, not in this boot's journal), newest transcript first, at most 5 (the
+  rest `over_limit`). Each needs `capacity::reserve(Start::Interactive)`, every reservation held
+  until the pass ends (a started session takes seconds to show in the process table); a refusal
+  writes `at_capacity` for it and every one after. A continuation is `resumable::continue_as` with `How
   {in_place: true, hosted: true, by: {surface: recovery, by: boot-resume, parent: <launch>}}`, then
   `session_host::start_detached(root, launch, script, launch::agent_cli(), 40, 120)`; a host that
   never came up ends the new launch `not_started`. A started one gives the cut launch `ended: {kind:
   reboot, at}` (unless an end was recorded) and `continued_as: {kind: launch, id}`.
-- **The journal.** `<data>/boot-resume.jsonl` (0600, newest 500): `at`, `boot`, `session`,
+- **The journal.** `<data>/boot-resume.jsonl` (0600, the newest 500 lines within 256 KiB; a
+  file grown past that is read up to 4 MiB and cut to its newest lines, never emptied): `at`, `boot`, `session`,
   `launch_id`, `folder`, `phase` (`intent` before a start; `outcome` after) and `outcome`
   (`continued` with `new_launch_id`, `failed` with `reason`, `interrupted`, `at_capacity`,
   `over_limit`). Logged once a pass as `boot_resume` with the counts.
-- **Never twice.** `continue_as` serializes continuations in its process and refuses (`LIVE`) a
-  session a session host runs (its launch's `provider_session_id`) or a launch named in the last
-  `JUST_STARTED_SECONDS` (120) with no end, beside the live-process check it had. Fabric
+- **Never twice (SB-507).** `continue_as` serializes continuations with an in-process mutex
+  (`resumable::CONTINUING`: one owner, one continuation at a time; it does not span processes) and
+  refuses (`LIVE`) a session `resumable::being_continued` names, beside the live-process check it
+  had: a session host runs it (its launch's `provider_session_id`); a launch named it in the last
+  `JUST_STARTED_SECONDS` (120) with no end; a Terminal resume marked it in the last 120 s
+  (`<data>/resuming/<session>`, 0600, its start time, written by `resumable::mark_resuming` before
+  the duty officer's restart, a restart wave's resume and a person's Terminal Continue open their
+  window, taken back when the window did not open, marks older than a day removed on the next
+  write); the duty officer's restart of it is begun and not finished (`duty::restart_open`: a
+  `restart` intent with no outcome in the last hour, which its act or the next check finishes by
+  resuming it); or a running restart wave holds it (`restarts::in_wave`). The watch runs the duty
+  officer and the restart wave before this pass, so a resume they start that minute is seen. Fabric
   Dashboards' temporary `ai.passioncode.resume-after-boot` applies the same rule until 2026-11-25;
   either one finds the other's continuation through the live process, and Switchboard also through
   its host or launch record.
 - **Reading.** `Operation::BootResume {on}` (no store lock) saves `on` when given and answers
   `settings`, `boot_time`, `last_look` (`boot`, `at`, `sessions` count, `stopped_at`),
   `window_minutes` (120), `max_per_boot` (5), `recent` (the newest 20 outcome lines) and
-  `supported` (false on Windows, which keeps the ledger only). An unreadable `boot-resume.json` is
+  `supported` (false on Windows, where no boot time is read, so no ledger is kept and nothing is
+  continued). An unreadable `boot-resume.json` is
   `boot_resume::UNREADABLE`.
 - **Hosted starts.** `session_host::start_detached` is the one way a host starts: `launch --hosted`
   and `sessions continue --hosted` (`hosted::spawn`, the CLI's own executable) and this pass (the

@@ -205,7 +205,9 @@ pub fn owner_stopped(root: &Path, now: i64) {
 }
 
 fn journal(root: &Path) -> Vec<Value> {
-    switchboard_core::private_fs::read_private(&root.join(JOURNAL), MAX_BYTES)
+    // Written at most `MAX_BYTES`; one grown past it by another writer is still read (up to
+    // sixteen times that) so its newest lines are kept, never the whole journal lost.
+    switchboard_core::private_fs::read_private(&root.join(JOURNAL), MAX_BYTES * 16)
         .map(|b| {
             String::from_utf8_lossy(&b)
                 .lines()
@@ -214,13 +216,26 @@ fn journal(root: &Path) -> Vec<Value> {
         })
         .unwrap_or_default()
 }
+/// The newest of `lines`, at most `JOURNAL_LINES` and `MAX_BYTES`, as the file's text.
+fn kept(lines: &[Value]) -> String {
+    let mut text: Vec<String> = Vec::new();
+    let mut bytes = 0u64;
+    for l in lines.iter().rev().take(JOURNAL_LINES) {
+        let one = format!("{l}\n");
+        if bytes + one.len() as u64 > MAX_BYTES {
+            break;
+        }
+        bytes += one.len() as u64;
+        text.push(one);
+    }
+    text.into_iter().rev().collect()
+}
 fn append(root: &Path, line: Value) {
     // The owner's pass and an offline status never write at once: only the pass writes.
     let mut lines = journal(root);
     lines.push(line);
-    let keep = lines.len().saturating_sub(JOURNAL_LINES);
-    let text: String = lines[keep..].iter().map(|l| format!("{l}\n")).collect();
-    let _ = switchboard_core::private_fs::private_write(&root.join(JOURNAL), text.as_bytes());
+    let _ =
+        switchboard_core::private_fs::private_write(&root.join(JOURNAL), kept(&lines).as_bytes());
 }
 
 /// The session pool refused one more session.
@@ -239,6 +254,10 @@ pub trait Machine {
     fn admit(&self) -> Result<Option<Box<dyn std::any::Any>>, Full>;
     /// Continues `session` hosted; the new launch id, or the reason it could not.
     fn continue_hosted(&self, session: &str, parent: &str) -> Result<String, String>;
+    /// Sessions waiting on a limit stop: recovery continues them, never this pass.
+    fn on_limit_stop(&self) -> HashSet<String> {
+        HashSet::new()
+    }
 }
 
 /// One session the restart cut.
@@ -271,6 +290,7 @@ pub fn candidates(
         }
     }
     let live = machine.live_sessions();
+    let stopped = machine.on_limit_stop();
     let mut found: Vec<Candidate> = Vec::new();
     for seen in &ledger.sessions {
         let Some(r) = records.get(&seen.launch_id) else {
@@ -287,7 +307,11 @@ pub fn candidates(
         let Some(written) = machine.transcript_at(folder, &seen.session) else {
             continue;
         };
-        let looked = ledger.stopped_at.unwrap_or(i64::MAX);
+        // With no `stopped_at` the owner did not drain (a crash, a power cut): it looked last no
+        // later than `REFRESH_SECONDS` after the ledger's own time.
+        let looked = ledger
+            .stopped_at
+            .unwrap_or(ledger.at.saturating_add(REFRESH_SECONDS));
         if written < boot - WINDOW_SECONDS
             || written > boot
             || looked < boot - WINDOW_SECONDS
@@ -297,6 +321,7 @@ pub fn candidates(
         }
         if done.contains(&seen.session)
             || live.contains(&seen.session)
+            || stopped.contains(&seen.session)
             || after_boot.contains(seen.session.as_str())
             || found.iter().any(|c| c.session == seen.session)
             || machine.being_continued(&seen.session)
@@ -373,6 +398,9 @@ pub fn run(root: &Path, boot: i64, now: i64, machine: &dyn Machine) -> Value {
             "folder": c.folder})
     };
     let mut full = false;
+    // Each admitted start keeps its place in the pool until the pass ends: the sessions it
+    // started take seconds to show in the process table.
+    let mut places: Vec<Option<Box<dyn std::any::Any>>> = Vec::new();
     for c in &due {
         if full {
             skipped.push(c.session.clone());
@@ -409,7 +437,7 @@ pub fn run(root: &Path, boot: i64, now: i64, machine: &dyn Machine) -> Value {
             }
         }
         append(root, outcome);
-        drop(reservation);
+        places.push(reservation);
     }
     for c in &over {
         let mut l = line(c);
@@ -428,6 +456,7 @@ pub fn run(root: &Path, boot: i64, now: i64, machine: &dyn Machine) -> Value {
             ("skipped", crate::oplog::Field::Number(skipped.len() as i64)),
         ],
     );
+    drop(places);
     json!({"continued": continued, "skipped": skipped})
 }
 
@@ -447,6 +476,9 @@ impl Machine for Real<'_> {
     }
     fn transcript_at(&self, folder: &str, session: &str) -> Option<i64> {
         crate::machine_sessions::transcript_at(self.root, folder, session)
+    }
+    fn on_limit_stop(&self) -> HashSet<String> {
+        crate::recovery::live_stop_sessions(self.root, self.now)
     }
     fn admit(&self) -> Result<Option<Box<dyn std::any::Any>>, Full> {
         crate::capacity::reserve(self.root, crate::capacity::Start::Interactive)
@@ -499,7 +531,10 @@ fn boot() -> Option<i64> {
 /// are continued; then (every pass) the ledger is kept for the next boot.
 pub fn tick(root: &Path, rows: &[Value], pairs: &[(String, u32)], table_read: bool, now: i64) {
     let Some(boot) = boot() else { return };
-    if !DONE.swap(true, std::sync::atomic::Ordering::AcqRel)
+    // Only a pass that read the process table decides (what runs is unknown otherwise); the
+    // first such pass of this owner decides once, with the switch as it is then.
+    if table_read
+        && !DONE.swap(true, std::sync::atomic::Ordering::AcqRel)
         && cfg!(unix)
         && settings(root).is_ok_and(|s| s.on)
     {
@@ -550,6 +585,7 @@ mod tests {
         written: HashMap<String, i64>,
         full: bool,
         fail: HashSet<String>,
+        stopped: HashSet<String>,
         started: RefCell<Vec<String>>,
     }
     impl Machine for Fake {
@@ -568,6 +604,9 @@ mod tests {
             } else {
                 Ok(None)
             }
+        }
+        fn on_limit_stop(&self) -> HashSet<String> {
+            self.stopped.clone()
         }
         fn continue_hosted(&self, session: &str, _: &str) -> Result<String, String> {
             if self.fail.contains(session) {
@@ -874,6 +913,56 @@ mod tests {
             ) & 0o777,
             0o600
         );
+    }
+
+    #[test]
+    fn a_look_with_no_drain_counts_until_its_next_refresh_and_a_limit_stop_is_left_to_recovery() {
+        // Review round 1 of #836: with no `stopped_at` (a crash or a power cut) the owner looked
+        // last no later than one refresh after the ledger's time, never forever.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        launch(root, &id(1), "a", BOOT - 9000, json!({}));
+        launch(root, &id(2), "b", BOOT - 9000, json!({}));
+        launch(root, &id(3), "c", BOOT - 9000, json!({}));
+        let at = BOOT - 7000;
+        ledger(
+            root,
+            &[("a", &id(1)), ("b", &id(2)), ("c", &id(3))],
+            at,
+            None,
+        );
+        let mut fake = Fake::default();
+        // a: written after the last refresh could have happened: nobody saw it running then.
+        fake.written
+            .insert("a".into(), at + REFRESH_SECONDS + LOOK_SLACK_SECONDS + 60);
+        // b: written inside the look. c: the same, but it waits on a limit stop.
+        fake.written.insert("b".into(), at + REFRESH_SECONDS);
+        fake.written.insert("c".into(), at + REFRESH_SECONDS);
+        fake.stopped.insert("c".into());
+        run(root, BOOT, BOOT + 60, &fake);
+        assert_eq!(*fake.started.borrow(), ["b"]);
+    }
+
+    #[test]
+    fn the_journal_is_kept_under_its_size_and_one_grown_past_it_keeps_its_newest_lines() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        // A journal grown past `MAX_BYTES` by another writer.
+        let big: String = (0..3000)
+            .map(|n| format!("{}\n", json!({"n": n, "pad": "x".repeat(100)})))
+            .collect();
+        assert!(big.len() as u64 > MAX_BYTES);
+        switchboard_core::private_fs::private_write(&root.join(JOURNAL), big.as_bytes()).unwrap();
+        append(root, json!({"n": "last"}));
+        let size = std::fs::metadata(root.join(JOURNAL)).unwrap().len();
+        assert!(size <= MAX_BYTES, "{size}");
+        let lines = journal(root);
+        assert_eq!(lines.last().unwrap()["n"], "last");
+        assert!(
+            lines.len() > 1,
+            "the newest lines are kept, not only the new one"
+        );
+        assert_eq!(lines[lines.len() - 2]["n"], 2999);
     }
 
     #[test]

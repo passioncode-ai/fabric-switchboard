@@ -146,9 +146,66 @@ pub struct How {
 static CONTINUING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// SB-450: how long after its launch a continuation with no end counts as starting.
 pub const JUST_STARTED_SECONDS: i64 = 120;
-/// SB-450: whether `session` runs in a session host now (its launch's record names it), or a
-/// launch that names it started less than `JUST_STARTED_SECONDS` ago and has not ended.
+/// SB-450: the folder of the marks a Terminal resume leaves (`resuming/<session>`, 0600, its
+/// start time): a resume in a Terminal window writes no launch record, and its process takes
+/// seconds to hold the session.
+pub const RESUMING_DIR: &str = "resuming";
+
+/// SB-450 (review round 1 of #836): marks `session` as being resumed in a Terminal window now,
+/// before the window opens, so a continuation in the next `JUST_STARTED_SECONDS` sees it. Marks
+/// older than a day are removed on the way.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn mark_resuming(root: &Path, session: &str, now: i64) {
+    if !crate::launches::valid_id(session) {
+        return;
+    }
+    let dir = root.join(RESUMING_DIR);
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            if resuming_at(&e.path()).is_none_or(|at| now - at > 86_400) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    if std::fs::create_dir_all(&dir).is_ok() {
+        let _ = switchboard_core::private_fs::private_write(
+            &dir.join(session),
+            now.to_string().as_bytes(),
+        );
+    }
+}
+
+/// SB-450: takes back the mark of a resume whose window did not open.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn unmark_resuming(root: &Path, session: &str) {
+    if crate::launches::valid_id(session) {
+        let _ = std::fs::remove_file(root.join(RESUMING_DIR).join(session));
+    }
+}
+
+fn resuming_at(path: &Path) -> Option<i64> {
+    let bytes = switchboard_core::private_fs::read_private(path, 64).ok()?;
+    String::from_utf8_lossy(&bytes).trim().parse().ok()
+}
+
+/// SB-450: whether `session` is being continued now, so another continuation must not start:
+/// it runs in a session host (its launch's record names it); a launch that names it started less
+/// than `JUST_STARTED_SECONDS` ago and has not ended; a Terminal resume (the duty officer's
+/// restart, a restart wave's, a person's Continue) marked it less than `JUST_STARTED_SECONDS`
+/// ago; the duty officer's restart of it is begun and not finished (its intent open, which its
+/// next check finishes by resuming it); or a running restart wave holds it.
 pub fn being_continued(root: &Path, session: &str, now: i64) -> bool {
+    if crate::launches::valid_id(session)
+        && resuming_at(&root.join(RESUMING_DIR).join(session))
+            .is_some_and(|at| (0..JUST_STARTED_SECONDS).contains(&(now - at)))
+    {
+        return true;
+    }
+    if crate::duty::restart_open(root, session, now)
+        || crate::restarts::in_wave(root, now).contains(session)
+    {
+        return true;
+    }
     #[cfg(unix)]
     if crate::session_host::live_hosts(root)
         .iter()
@@ -233,7 +290,11 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
             json!({"continued": session, "folder": cwd, "script": path, "launch_id": launch_id}),
         );
     }
-    crate::launch::start_terminal(&path).map_err(|_| NOT_STARTED)?;
+    mark_resuming(root, session, now);
+    if crate::launch::start_terminal(&path).is_err() {
+        unmark_resuming(root, session);
+        return Err(NOT_STARTED.into());
+    }
     crate::oplog::event(
         "session_continue",
         &[("outcome", crate::oplog::Field::Code("started"))],
@@ -353,6 +414,45 @@ mod tests {
         );
         crate::launches::end_once(root.path(), &id, "not_started", 260, Some(1));
         assert!(!being_continued(root.path(), "S1", 300), "an ended one");
+    }
+
+    #[test]
+    fn a_terminal_resume_or_a_duty_restart_begun_holds_the_session() {
+        // Review round 1 of #836, P1: the duty officer's restart and a restart wave resume in a
+        // Terminal window, which writes no launch record; a continuation after a restart must
+        // not start a second copy beside it.
+        let root = tempfile::tempdir().unwrap();
+        let session = "11111111-2222-4333-8444-555555555555";
+        assert!(!being_continued(root.path(), session, 1000));
+        mark_resuming(root.path(), session, 1000);
+        assert!(being_continued(root.path(), session, 1000 + 30));
+        assert!(
+            !being_continued(root.path(), session, 1000 + JUST_STARTED_SECONDS),
+            "a window that never brought the session up is not waited for"
+        );
+        unmark_resuming(root.path(), session);
+        assert!(!being_continued(root.path(), session, 1000 + 30));
+        // A mark is never written outside its folder.
+        mark_resuming(root.path(), "../x", 1000);
+        assert!(!root.path().join("x").exists());
+        // The duty officer's restart with its intent open: its act, or the check that finishes
+        // it, resumes the session.
+        let journal = root.path().join(crate::duty::JOURNAL);
+        let intent = json!({"at": 2000, "phase": "intent", "action": "restart",
+            "reason": "stuck", "session": session, "pid": 7});
+        std::fs::write(&journal, format!("{intent}\n")).unwrap();
+        assert!(being_continued(root.path(), session, 2010));
+        assert!(being_continued(root.path(), session, 2600), "still open");
+        assert!(!being_continued(root.path(), "S2", 2010), "another session");
+        let outcome = json!({"at": 2000, "action": "restart", "reason": "stuck",
+            "outcome": "restarted", "session": session, "pid": 7});
+        std::fs::write(&journal, format!("{intent}\n{outcome}\n")).unwrap();
+        assert!(!being_continued(root.path(), session, 2010), "finished");
+        // A close begun is not a resume: the session may be continued.
+        let close = json!({"at": 2000, "phase": "intent", "action": "close",
+            "reason": "idle", "session": session, "pid": 7});
+        std::fs::write(&journal, format!("{close}\n")).unwrap();
+        assert!(!being_continued(root.path(), session, 2010));
     }
 
     #[cfg(unix)]

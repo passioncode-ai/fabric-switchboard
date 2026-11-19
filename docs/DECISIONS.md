@@ -908,7 +908,7 @@ research notes); the ones still in force that the board cites are seeded below w
   `at_capacity`, `over_limit`); a later owner settles an intent with no outcome as `continued` when
   a process or host holds the session, else `interrupted`, and never starts it again. On by default
   (`boot-resume.json`), off with `switchboard boot-resume off`, MCP `switchboard_boot_resume {on:
-  false}` or Settings → *Sessions after a restart*. macOS and Linux; Windows keeps the ledger only.
+  false}` or Settings → *Sessions after a restart*. macOS and Linux; Windows reads no boot time, so it keeps no ledger and continues nothing.
   `continue_as` itself refuses a session a host runs or a launch began to continue within 2 minutes
   and serializes continuations, so the owner's pass, a person's Continue and another agent's
   `sessions continue` never start one session twice.
