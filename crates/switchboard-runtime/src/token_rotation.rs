@@ -28,26 +28,32 @@ pub fn rotated_at(root: &Path) -> Option<i64> {
         .and_then(|v| v["at"].as_i64())
 }
 
-/// The live sessions still on the old token: a Claude Code or Codex process started before `at`
-/// that runs through the proxy, launched in managed mode (`modes` by launch id) or working in one
-/// of the groups' folders (their route). Pure, for tests.
+/// The live sessions still on the old token: a Claude Code process started before `at` launched
+/// in managed mode (`modes` by launch id) or working in a folder whose route Switchboard wrote
+/// (`claude_folders`, `bindings.json`), and a Codex process the same way while the Codex route is
+/// on (`codex_folders`, empty when it is off). Pure, for tests.
 pub fn stale(
     rows: &[Value],
     modes: &HashMap<String, String>,
-    folders: &[String],
+    claude_folders: &[String],
+    codex_folders: &[String],
     at: i64,
 ) -> Vec<Value> {
     rows.iter()
-        .filter(|r| matches!(r["agent"].as_str(), Some("claude-code" | "codex")))
         .filter(|r| r["started_at"].as_i64().is_some_and(|t| t < at))
         .filter(|r| {
+            let folders = match r["agent"].as_str() {
+                Some("claude-code") => claude_folders,
+                Some("codex") if !codex_folders.is_empty() => codex_folders,
+                _ => return false,
+            };
             let managed = r["launch_id"]
                 .as_str()
                 .and_then(|id| modes.get(id))
                 .is_some_and(|m| m == "managed");
-            let routed = r["folder"].as_str().is_some_and(|f| {
-                folders.iter().any(|g| Path::new(f).starts_with(g))
-            });
+            let routed = r["folder"]
+                .as_str()
+                .is_some_and(|f| folders.iter().any(|g| Path::new(f).starts_with(g)));
             managed || routed
         })
         .map(|r| json!({"pid": r["pid"], "agent": r["agent"], "folder": r["folder"], "launch_id": r["launch_id"]}))
@@ -68,12 +74,20 @@ pub fn sessions(root: &Path, snapshot: &switchboard_core::Snapshot) -> Option<Va
             Some((id.to_owned(), mode))
         })
         .collect();
-    let folders: Vec<String> = snapshot
-        .projects
-        .iter()
-        .flat_map(|p| p.folders.iter().cloned())
+    let claude: Vec<String> = crate::bindings::read(root)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|b| b.folder)
         .collect();
-    let left = stale(&rows, &modes, &folders, at);
+    let codex: Vec<String> = if crate::codex_route::wanted(root) {
+        crate::codex_route::folders(snapshot)
+            .into_iter()
+            .map(|(folder, _)| folder)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let left = stale(&rows, &modes, &claude, &codex, at);
     if left.is_empty() {
         if crate::session_watch::table_read(&scan) {
             let _ = std::fs::remove_file(root.join(FILE));
@@ -102,14 +116,18 @@ mod tests {
             ("L-4".to_owned(), "isolated".to_owned()),
         ]
         .into();
-        let folders = vec!["/g/app".to_owned()];
-        let pids: Vec<u64> = stale(&rows, &modes, &folders, 100)
-            .iter()
-            .map(|r| r["pid"].as_u64().unwrap())
-            .collect();
-        // A managed launch and a session in a group's folder; not an isolated launch, one outside
-        // every group, one started after the rotation or another agent.
-        assert_eq!(pids, [1, 2]);
+        let bound = vec!["/g/app".to_owned()];
+        let pids = |codex: &[String]| -> Vec<u64> {
+            stale(&rows, &modes, &bound, codex, 100)
+                .iter()
+                .map(|r| r["pid"].as_u64().unwrap())
+                .collect()
+        };
+        // A managed launch and a session in a folder whose route was written; not an isolated
+        // launch, one outside every route, one started after the rotation or another agent; a
+        // Codex session only while the Codex route is on and in its folders.
+        assert_eq!(pids(&[]), [1, 2]);
+        assert_eq!(pids(&["/elsewhere".to_owned()]), [1, 2, 3]);
     }
 
     #[test]

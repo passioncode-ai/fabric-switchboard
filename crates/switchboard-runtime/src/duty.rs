@@ -208,8 +208,7 @@ fn transcript_quiet(s: &Seen, now: i64, floor: i64) -> bool {
     s.last_write.is_some_and(|w| now - w >= floor)
 }
 
-/// SB-506: the one idle rule, shared by the duty officer and the session host. A quiet session is
-/// finished only when it has read `idle` for `floor` seconds, its transcripts (its background
+/// SB-500, SB-506: the duty officer's idle rule. A quiet session is finished only when it has read `idle` for `floor` seconds, its transcripts (its background
 /// agents' included, SB-500) were written no later than `floor` seconds ago, no command of its own
 /// runs and no launch of its own runs; unknown is not none. A `waiting` session asks the person
 /// something, a `busy` one says it works: neither is finished, whatever its output.
@@ -221,18 +220,37 @@ pub fn finished(s: &Seen, now: i64, floor: i64) -> bool {
         && no_own_launches(s)
 }
 
-/// SB-506: whether every live process holding one session is finished by `finished`; none when no
-/// live Claude Code process holds it (another agent, or a session file not written yet).
-pub fn all_finished(copies: &[Seen], now: i64, floor: i64) -> Option<bool> {
-    (!copies.is_empty()).then(|| copies.iter().all(|s| finished(s, now, floor)))
+/// SB-506 review round 1: how long the session host keeps one session past its idle time on the
+/// evidence below, from the first keep; past it the host closes the session (`kept_capped`).
+pub const HOST_KEEP_CAP_SECONDS: u64 = 24 * 3600;
+/// How long the host waits between two reads of a busy session's CPU, and the CPU seconds its
+/// tree must use meanwhile to count as working.
+const HOST_CPU_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
+const HOST_CPU_MOVED: f64 = 0.3;
+
+/// SB-506 (review round 1 of PR #853): positive evidence that a session still works, which keeps
+/// it open in its session host past its idle time. Only what was read counts: it asks the person
+/// something (`waiting`); a command of its own runs; a launch of its own runs; its transcript (its
+/// background agents' included) was written within `floor`; or it says it is in a turn (`busy`,
+/// `shell`) and its tree used CPU between two reads (`cpu_moved`). An unknown (no status file, no
+/// transcript found, the process table or the launch records not read) is no evidence, and the
+/// host's own rule (no viewer, nothing in or out of the terminal for `floor`) decides alone. Pure.
+pub fn host_keeps(s: &Seen, now: i64, floor: i64, cpu_moved: Option<bool>) -> bool {
+    s.status == "waiting"
+        || (s.commands_known && s.commands > 0)
+        || s.own_launches.is_some_and(|n| n > 0)
+        || s.last_write.is_some_and(|w| now - w < floor)
+        || (matches!(s.status.as_str(), "busy" | "shell") && cpu_moved == Some(true))
 }
 
-/// SB-506: `all_finished` for one session read now (its processes, commands and launches of its
-/// own), for the session host's idle close.
-pub fn session_finished(root: &Path, session: &str, now: i64, floor: i64) -> Option<bool> {
+/// SB-506: whether a live Claude Code process holding `session` shows positive evidence of work
+/// (`host_keeps`), read now: its session files, process trees and own launches, and for a busy
+/// copy with nothing else its CPU twice, `HOST_CPU_WINDOW` apart. False when no live process
+/// holds it or nothing could be read.
+pub fn session_works(root: &Path, session: &str, now: i64, floor: i64) -> bool {
     let mut copies = live(root, |id| id == session);
     if copies.is_empty() {
-        return None;
+        return false;
     }
     if let Some(table) = process_table() {
         for s in &mut copies {
@@ -241,7 +259,26 @@ pub fn session_finished(root: &Path, session: &str, now: i64, floor: i64) -> Opt
     }
     let (children, read) = crate::session_watch::children_now(root, now);
     count_own_launches(&mut copies, &children, read);
-    all_finished(&copies, now, floor)
+    if copies.iter().any(|s| host_keeps(s, now, floor, None)) {
+        return true;
+    }
+    let busy: Vec<&Seen> = copies
+        .iter()
+        .filter(|s| matches!(s.status.as_str(), "busy" | "shell") && s.cpu.is_some())
+        .collect();
+    if busy.is_empty() {
+        return false;
+    }
+    std::thread::sleep(HOST_CPU_WINDOW);
+    let Some(again) = process_table() else {
+        return false;
+    };
+    busy.iter().any(|s| {
+        let moved = s
+            .cpu
+            .map(|before| tree_of(&again, s.pid).cpu - before >= HOST_CPU_MOVED);
+        host_keeps(s, now, floor, moved)
+    })
 }
 
 /// What to do with one session now, and why; none to leave it. `newer_copy`: another process
@@ -607,7 +644,7 @@ pub fn resume_script_for(
     out
 }
 
-fn journal(root: &Path) -> Vec<Value> {
+pub(crate) fn journal(root: &Path) -> Vec<Value> {
     std::fs::read_to_string(root.join(JOURNAL))
         .unwrap_or_default()
         .lines()
@@ -1922,61 +1959,52 @@ mod tests {
     }
 
     #[test]
-    fn the_idle_rule_is_one_for_the_duty_officer_and_the_session_host() {
-        // SB-506: a session the host would close is one the duty officer would close too.
+    fn the_session_host_keeps_a_session_only_on_evidence_that_it_works() {
+        // SB-506 (review round 1 of PR #853): what was read and shows work keeps it; anything
+        // unknown leaves the host's own rule to decide.
         let floor = WAKE_UP_FLOOR;
         let now = 1_000_000;
-        let done = seen("idle", 120, 3, Some(120));
-        assert!(finished(&done, now, floor));
-        assert_eq!(
-            decide(&done, &Settings::default(), now, false),
-            Some((Act::Close, "idle"))
-        );
+        let quiet = seen("idle", 120, 3, Some(120));
+        assert!(!host_keeps(&quiet, now, floor, None), "finished: closed");
         let mut keeps = Vec::new();
-        // Its own launch still runs; a background agent wrote a minute ago; a command of its own
-        // runs; its commands or launches could not be read; it asks the person; it says it works.
-        let mut s = done.clone();
+        let mut s = quiet.clone();
         s.own_launches = Some(1);
         keeps.push(s);
-        let mut s = done.clone();
+        let mut s = quiet.clone();
         s.last_write = Some(now - 60);
         keeps.push(s);
-        let mut s = done.clone();
+        let mut s = quiet.clone();
         s.commands = 1;
         keeps.push(s);
-        let mut s = done.clone();
-        s.commands_known = false;
-        keeps.push(s);
-        let mut s = done.clone();
-        s.own_launches = None;
-        keeps.push(s);
         keeps.push(seen("waiting", 120, 3, Some(120)));
-        keeps.push(seen("busy", 120, 3, Some(120)));
         for s in &keeps {
-            assert!(!finished(s, now, floor), "{s:?}");
-            assert!(
-                !matches!(
-                    decide(s, &Settings::default(), now, false),
-                    Some((Act::Close, "idle"))
-                ),
-                "{s:?}"
-            );
-            // The host keeps a session while any copy of it is not finished.
-            assert_eq!(
-                all_finished(&[done.clone(), s.clone()], now, floor),
-                Some(false)
-            );
+            assert!(host_keeps(s, now, floor, None), "{s:?}");
         }
-        assert_eq!(
-            all_finished(std::slice::from_ref(&done), now, floor),
-            Some(true)
-        );
-        assert_eq!(
-            all_finished(&[], now, floor),
-            None,
-            "unknown is not finished"
-        );
-        // The host's own idle floor (`--idle-minutes`) is the floor the rule takes.
-        assert!(!finished(&done, now, 3 * 3600));
+        // A turn that uses CPU keeps it; one that uses none, or whose CPU was not read, does not.
+        let busy = seen("busy", 120, 3, Some(120));
+        assert!(host_keeps(&busy, now, floor, Some(true)));
+        assert!(!host_keeps(&busy, now, floor, Some(false)));
+        assert!(!host_keeps(&busy, now, floor, None));
+        // Unknowns are no evidence: no status file, no transcript found, the process table not
+        // read, the launch records not read.
+        let mut unknowns = Vec::new();
+        unknowns.push(seen("unknown", 120, 3, Some(120)));
+        let mut s = quiet.clone();
+        s.last_write = None;
+        unknowns.push(s);
+        let mut s = quiet.clone();
+        s.commands_known = false;
+        s.commands = 0;
+        unknowns.push(s);
+        let mut s = quiet.clone();
+        s.own_launches = None;
+        unknowns.push(s);
+        for s in &unknowns {
+            assert!(!host_keeps(s, now, floor, None), "{s:?}");
+        }
+        // The duty officer stays cautious on the same unknowns: it never closes them.
+        for s in &unknowns[1..] {
+            assert!(!finished(s, now, floor), "{s:?}");
+        }
     }
 }

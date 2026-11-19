@@ -537,6 +537,35 @@ pub struct Start<'a> {
 }
 
 /// How a hosted session ended.
+/// SB-506: what the idle close does with a quiet session that showed evidence of work or not.
+#[derive(Debug, PartialEq, Eq)]
+enum Keep {
+    /// It works: kept, and looked at again later.
+    Kept,
+    /// It works, but it has been kept for `cap` since the first keep of this quiet spell: closed.
+    Capped,
+    /// No evidence of work: closed.
+    Close,
+}
+
+/// SB-506: the host's decision, with this quiet spell's first keep in `first_kept`. Pure.
+fn keep_working(
+    works: bool,
+    first_kept: &mut Option<std::time::Instant>,
+    now: std::time::Instant,
+    cap: Duration,
+) -> Keep {
+    if !works {
+        return Keep::Close;
+    }
+    let first = *first_kept.get_or_insert(now);
+    if now.duration_since(first) >= cap {
+        Keep::Capped
+    } else {
+        Keep::Kept
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ended {
     /// Its exit status, 128 + the signal for one a signal ended.
@@ -612,16 +641,21 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             // SB-506: after a session was kept because it still works, the next look at its
             // processes waits a duty check's interval; the cheap look at the terminal goes on.
             let mut kept_until: Option<std::time::Instant> = None;
+            // When this quiet spell's first keep was, for the cap (`duty::HOST_KEEP_CAP_SECONDS`).
+            let mut first_kept: Option<std::time::Instant> = None;
             loop {
                 std::thread::sleep(check);
                 let inner = session.lock();
                 if inner.exit.is_some() {
                     return;
                 }
-                if inner.viewers.is_empty()
-                    && inner.last_activity.elapsed() >= idle
-                    && kept_until.is_none_or(|t| std::time::Instant::now() >= t)
-                {
+                let quiet = inner.viewers.is_empty() && inner.last_activity.elapsed() >= idle;
+                if !quiet {
+                    // A viewer or the terminal moved: a later quiet spell starts its own count.
+                    kept_until = None;
+                    first_kept = None;
+                }
+                if quiet && kept_until.is_none_or(|t| std::time::Instant::now() >= t) {
                     drop(inner);
                     // SB-396 D3: a session stopped on a limit waits for an account; its host
                     // continues it, so its window is not closed under it.
@@ -636,26 +670,36 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                                 now - idle.as_secs() as i64,
                             )
                     });
-                    // SB-506: nor one the duty officer would keep: the same idle rule
-                    // (`duty::finished`) over its processes, its transcripts and background
-                    // agents, its own commands and the launches it started. A session no live
-                    // Claude Code process holds (another agent) keeps the terminal's rule alone.
-                    let works = !stopped
-                        && id.as_deref().is_some_and(|s| {
-                            crate::duty::session_finished(&root, s, now, idle.as_secs() as i64)
-                                == Some(false)
+                    // SB-506: nor one that shows it still works (`duty::session_works`: it asks
+                    // the person, runs a command or a launch of its own, its transcripts were
+                    // written, or its turn uses CPU). Only evidence keeps it: what could not be
+                    // read leaves the terminal's rule alone, and a session no live Claude Code
+                    // process holds (another agent) too. Kept at most a day from the first keep.
+                    if !stopped {
+                        let works = id.as_deref().is_some_and(|s| {
+                            crate::duty::session_works(&root, s, now, idle.as_secs() as i64)
                         });
-                    if works {
-                        kept_until = Some(
-                            std::time::Instant::now()
-                                + Duration::from_secs(crate::duty::CHECK_SECONDS as u64),
-                        );
-                        crate::oplog::event(
-                            "session_host_idle",
-                            &[("result", crate::oplog::Field::Code("kept_working"))],
-                        );
+                        let cap = Duration::from_secs(crate::duty::HOST_KEEP_CAP_SECONDS);
+                        match keep_working(works, &mut first_kept, std::time::Instant::now(), cap) {
+                            Keep::Kept => {
+                                kept_until = Some(
+                                    std::time::Instant::now()
+                                        + Duration::from_secs(crate::duty::CHECK_SECONDS as u64),
+                                );
+                                crate::oplog::event(
+                                    "session_host_idle",
+                                    &[("result", crate::oplog::Field::Code("kept_working"))],
+                                );
+                                continue;
+                            }
+                            Keep::Capped => crate::oplog::event(
+                                "session_host_idle",
+                                &[("result", crate::oplog::Field::Code("kept_capped"))],
+                            ),
+                            Keep::Close => {}
+                        }
                     }
-                    if stopped || works {
+                    if stopped {
                         continue;
                     }
                     session.end("idle");
@@ -1668,6 +1712,26 @@ mod tests {
         }
         write_frame(&mut first.stream, INPUT, b"x\n").unwrap();
         assert_eq!(host.join().unwrap().reason, "exited");
+    }
+
+    #[test]
+    fn a_working_session_is_kept_at_most_a_day_from_its_first_keep() {
+        // SB-506 (review round 1 of PR #853): evidence keeps it, its absence closes it, and a
+        // keep that lasts past the cap closes it too.
+        let cap = Duration::from_secs(crate::duty::HOST_KEEP_CAP_SECONDS);
+        let start = std::time::Instant::now();
+        let mut first = None;
+        assert_eq!(keep_working(false, &mut first, start, cap), Keep::Close);
+        assert_eq!(first, None);
+        assert_eq!(keep_working(true, &mut first, start, cap), Keep::Kept);
+        assert_eq!(first, Some(start));
+        let later = start + Duration::from_secs(3600);
+        assert_eq!(keep_working(true, &mut first, later, cap), Keep::Kept);
+        assert_eq!(first, Some(start), "the first keep is kept");
+        assert_eq!(
+            keep_working(true, &mut first, start + cap, cap),
+            Keep::Capped
+        );
     }
 
     #[test]

@@ -373,6 +373,18 @@ pub(crate) fn live_add(root: &Path, id: &str, deadline: i64) {
     });
     live_write(root, &live);
 }
+/// SB-509: moves a watched run's deadline; false when the run is no longer watched (its reaping
+/// thread recorded its end meanwhile), so an ended run is never listed again.
+fn live_extend(root: &Path, id: &str, deadline: i64) -> bool {
+    let _lock = live_lock();
+    let mut live = live_read(root);
+    let Some(entry) = live.iter_mut().find(|l| l.launch_id == id) else {
+        return false;
+    };
+    entry.deadline = deadline;
+    live_write(root, &live);
+    true
+}
 fn live_remove(root: &Path, id: &str) {
     let _lock = live_lock();
     let mut live = live_read(root);
@@ -812,7 +824,9 @@ pub fn extension(record: &Value, written: Option<i64>, now: i64) -> Option<i64> 
 /// SB-509: moves a run's deadline to `until`: the watched list, its launch record
 /// (`dispatch.extended_until` and `dispatch.extensions`) and the duty officer's journal.
 fn extend(root: &Path, record: &Value, id: &str, until: i64, now: i64) {
-    live_add(root, id, until);
+    if !live_extend(root, id, until) {
+        return;
+    }
     let extensions = crate::launches::extend_dispatch(root, id, until);
     crate::duty::journal_line(
         root,
@@ -1139,7 +1153,17 @@ mod tests {
                 }
             ]
         );
+        // SB-509: an extension moves a watched run's deadline and never lists an ended one again.
+        assert!(live_extend(root.path(), "b", 40));
         live_remove(root.path(), "a");
+        assert!(!live_extend(root.path(), "a", 50));
+        assert_eq!(
+            live_read(root.path()),
+            vec![Live {
+                launch_id: "b".into(),
+                deadline: 40
+            }]
+        );
         live_remove(root.path(), "b");
         assert!(!root.path().join(LIVE_FILE).exists());
         // An idle pass reads nothing and writes nothing.
