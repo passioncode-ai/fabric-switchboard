@@ -110,6 +110,73 @@ pub fn save(root: &Path, users: &[NamedUser]) -> Result<(), String> {
     switchboard_core::private_fs::private_write(&path, &bytes).map_err(|_| UNWRITTEN.into())
 }
 
+/// SB-442: what one named account used: requests served, and the list-price cost of its Claude
+/// answers in micro-dollars (unknown prices count nothing).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Usage {
+    pub requests: u64,
+    pub cost_micros: u64,
+}
+impl Usage {
+    pub fn add(&mut self, other: Usage) {
+        self.requests = self.requests.saturating_add(other.requests);
+        self.cost_micros = self.cost_micros.saturating_add(other.cost_micros);
+    }
+}
+
+/// SB-442: each named account's use per UTC day, `<data>/proxy-user-usage.json` (0600): `{day:
+/// {uid: Usage}}`, counts only, the newest 90 days kept.
+pub const USAGE_FILE: &str = "proxy-user-usage.json";
+const USAGE_DAYS: usize = 90;
+pub type UsageBook = std::collections::BTreeMap<String, std::collections::BTreeMap<u32, Usage>>;
+
+/// The book of every day kept; an absent or unreadable file reads as empty.
+pub fn usage(root: &Path) -> UsageBook {
+    switchboard_core::private_fs::read_private(&root.join(USAGE_FILE), 4 * 1024 * 1024)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Adds `new` to `day` and keeps the newest days.
+pub fn add_usage(
+    root: &Path,
+    day: &str,
+    new: &std::collections::BTreeMap<u32, Usage>,
+) -> Result<(), String> {
+    if new.is_empty() {
+        return Ok(());
+    }
+    let mut book = usage(root);
+    let today = book.entry(day.to_owned()).or_default();
+    for (uid, u) in new {
+        today.entry(*uid).or_default().add(*u);
+    }
+    while book.len() > USAGE_DAYS {
+        let oldest = book.keys().next().cloned().unwrap_or_default();
+        book.remove(&oldest);
+    }
+    let bytes = serde_json::to_vec(&book).map_err(|_| UNWRITTEN.to_string())?;
+    switchboard_core::private_fs::private_write(&root.join(USAGE_FILE), &bytes)
+        .map_err(|_| UNWRITTEN.into())
+}
+
+/// One account's use on `day`, and from `from` to `day` (UTC days `YYYY-MM-DD` compare as text).
+pub fn usage_of(book: &UsageBook, uid: u32, day: &str, from: &str) -> (Usage, Usage) {
+    let mut today = Usage::default();
+    let mut window = Usage::default();
+    for (d, users) in book.range(from.to_owned()..=day.to_owned()) {
+        if let Some(u) = users.get(&uid) {
+            window.add(*u);
+            if d == day {
+                today.add(*u);
+            }
+        }
+    }
+    (today, window)
+}
+
 /// The capability of one named account for its group: the session token, the group, the uid and
 /// the account's salt. Knowing it reveals neither the session token nor any other capability,
 /// and it is worthless for another group, another account or after a new salt.
@@ -281,5 +348,34 @@ mod tests {
         save(root.path(), &rows).unwrap();
         let listed: Vec<u32> = load(root.path()).unwrap().iter().map(|u| u.uid).collect();
         assert_eq!(listed, [1005]);
+    }
+
+    /// SB-442: per-uid use adds up per UTC day, holds counts only and keeps 90 days.
+    #[test]
+    fn use_per_uid_adds_up_per_day_and_keeps_ninety_days() {
+        let root = tempfile::tempdir().unwrap();
+        let one = |requests, cost_micros| [(1001u32, Usage { requests, cost_micros })].into();
+        add_usage(root.path(), "2026-11-17", &one(2, 300)).unwrap();
+        add_usage(root.path(), "2026-11-18", &one(1, 50)).unwrap();
+        add_usage(root.path(), "2026-11-18", &one(3, 0)).unwrap();
+        let book = usage(root.path());
+        let (today, window) = usage_of(&book, 1001, "2026-11-18", "2026-10-20");
+        assert_eq!(today, Usage { requests: 4, cost_micros: 50 });
+        assert_eq!(window, Usage { requests: 6, cost_micros: 350 });
+        assert_eq!(usage_of(&book, 1002, "2026-11-18", "2026-10-20").1, Usage::default());
+        for d in 0..95u32 {
+            let day = format!("2027-{:02}-{:02}", d / 28 + 1, d % 28 + 1);
+            add_usage(root.path(), &day, &one(1, 1)).unwrap();
+        }
+        assert_eq!(usage(root.path()).len(), 90);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(root.path().join(USAGE_FILE))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
 }

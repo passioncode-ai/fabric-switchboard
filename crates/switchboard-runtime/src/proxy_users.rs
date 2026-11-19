@@ -158,11 +158,25 @@ fn folder_is_safe(fd: std::os::fd::RawFd, me: u32) -> Result<(), String> {
     }
     let mode = u32::from(st.st_mode);
     let owner_ok = st.st_uid == 0 || st.st_uid == me;
-    let others_write = mode & 0o022 != 0 && mode & u32::from(libc::S_ISVTX) == 0;
+    let sticky = mode & u32::from(libc::S_ISVTX) != 0;
+    // Group write counts only when the group is this account's own private group (a umask of
+    // 002 makes every new folder group-writable on many Linux systems).
+    let group_write = mode & 0o020 != 0 && !own_private_group(st.st_gid, me);
+    let others_write = (mode & 0o002 != 0 || group_write) && !sticky;
     if (mode & u32::from(libc::S_IFMT)) != u32::from(libc::S_IFDIR) || !owner_ok || others_write {
         return Err(SETTINGS_FOLDER_UNSAFE.into());
     }
     Ok(())
+}
+
+/// Whether `gid` is the private group of the account `me`: named as the account, with no member
+/// but it.
+#[cfg(unix)]
+fn own_private_group(gid: u32, me: u32) -> bool {
+    let Some(name) = switchboard_proxy::peer::account_name(me) else {
+        return false;
+    };
+    group_entry(gid).is_some_and(|(group, members)| group == name && members.iter().all(|m| *m == name))
 }
 
 /// SB-421 review (P1-2): opens `parent` one folder at a time from `/`, never through a link, and
@@ -446,6 +460,18 @@ fn deliver(
     Ok((answer, written.sha256))
 }
 
+/// SB-442: the account's use today and over the last 30 UTC days, from the day file.
+fn usage_view(root: &Path, uid: u32) -> Value {
+    let now = crate::monitor::now();
+    let day = switchboard_proxy::stats::day_of(now);
+    let from = switchboard_proxy::stats::day_of(now - 29 * 86_400);
+    let (today, window) = users::usage_of(&users::usage(root), uid, &day, &from);
+    json!({
+        "today": {"requests": today.requests, "cost_micros": today.cost_micros},
+        "last_30_days": {"requests": window.requests, "cost_micros": window.cost_micros},
+    })
+}
+
 /// The answer's view of one listed account: never the salt.
 fn view(user: &NamedUser, store: &Store) -> Value {
     let group_name = store.snapshot().ok().and_then(|s| {
@@ -537,7 +563,14 @@ pub(crate) fn execute(
     let mut list = users::load(root)?;
     match action.unwrap_or("list") {
         "list" => Ok(json!({
-            "users": list.iter().map(|u| view(u, store)).collect::<Vec<_>>(),
+            "users": list
+                .iter()
+                .map(|u| {
+                    let mut v = view(u, store);
+                    v["usage"] = usage_view(root, u.uid);
+                    v
+                })
+                .collect::<Vec<_>>(),
         })),
         "allow" => {
             let who = who.filter(|w| !w.trim().is_empty()).ok_or(NO_USER)?;
@@ -890,10 +923,14 @@ mod tests {
         let group = base.join("group");
         std::fs::create_dir(&group).unwrap();
         std::fs::set_permissions(&group, std::fs::Permissions::from_mode(0o770)).unwrap();
-        assert_eq!(
-            write_settings(&group.join("settings.json"), &bytes, None, None),
-            Err(SETTINGS_FOLDER_UNSAFE.into())
-        );
+        // Group-writable: refused unless the group is this account's own private group.
+        let gid = std::os::unix::fs::MetadataExt::gid(&std::fs::metadata(&group).unwrap());
+        let in_group = write_settings(&group.join("settings.json"), &bytes, None, None);
+        if own_private_group(gid, own_uid().unwrap()) {
+            assert!(in_group.is_ok());
+        } else {
+            assert_eq!(in_group, Err(SETTINGS_FOLDER_UNSAFE.into()));
+        }
         std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o1777)).unwrap();
         let written = write_settings(&open.join("settings.json"), &bytes, None, None).unwrap();
         assert_eq!(written.mode, 0o600);

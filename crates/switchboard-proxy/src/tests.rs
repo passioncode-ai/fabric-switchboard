@@ -2852,7 +2852,7 @@ async fn a_named_account_is_served_only_with_its_own_capability_on_its_group() {
         "{:?}",
         tallies.keys().collect::<Vec<_>>()
     );
-    assert_eq!(p.take_user_requests().get(&user.uid), Some(&2));
+    assert_eq!(p.take_user_requests().get(&user.uid).map(|u| u.requests), Some(2));
     // Nothing but its own capability gets in from it.
     let agent = p.agent_token().to_owned();
     let refused = [

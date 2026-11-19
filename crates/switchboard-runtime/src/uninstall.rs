@@ -22,6 +22,8 @@ const OWNED: &[&str] = &[
     "proxy.json",
     // Other accounts of this computer the proxy serves (SB-421).
     "proxy-users.json",
+    // Each named account's requests and list-price cost per day (SB-442).
+    "proxy-user-usage.json",
     "renewal-state.json",
     "usage-holds.json",
     "limit-evidence.json",

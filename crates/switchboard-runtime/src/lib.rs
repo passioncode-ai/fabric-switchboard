@@ -2505,17 +2505,35 @@ impl Runtime {
                 )],
             );
         }
-        // SB-421: requests served for each named account, counts only.
-        for (uid, count) in self.proxy.take_user_requests() {
+        // SB-421, SB-442: requests and list-price cost of each named account, counts only, logged
+        // and added to its UTC day in `proxy-user-usage.json`.
+        let used = self.proxy.take_user_requests();
+        for (uid, usage) in &used {
             oplog::event(
                 "proxy_user_requests",
                 &[
-                    ("uid", oplog::Field::Number(uid.into())),
+                    ("uid", oplog::Field::Number((*uid).into())),
                     (
                         "count",
-                        oplog::Field::Number(i64::try_from(count).unwrap_or(i64::MAX)),
+                        oplog::Field::Number(i64::try_from(usage.requests).unwrap_or(i64::MAX)),
+                    ),
+                    (
+                        "cost_micros",
+                        oplog::Field::Number(i64::try_from(usage.cost_micros).unwrap_or(i64::MAX)),
                     ),
                 ],
+            );
+        }
+        if switchboard_proxy::users::add_usage(
+            &self.root,
+            &switchboard_proxy::stats::day_of(monitor::now()),
+            &used,
+        )
+        .is_err()
+        {
+            oplog::event(
+                "proxy_user_usage",
+                &[("result", oplog::Field::Code("unsaved"))],
             );
         }
         let new = self.proxy.take_statistics();

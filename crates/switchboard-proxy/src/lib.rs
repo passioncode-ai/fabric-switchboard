@@ -104,7 +104,7 @@ struct Gateway {
     user_requests: UserRequests,
 }
 /// SB-421: requests served for each named account (uid) since the owner last took them.
-pub type UserRequests = Arc<std::sync::Mutex<std::collections::BTreeMap<u32, u64>>>;
+pub type UserRequests = Arc<std::sync::Mutex<std::collections::BTreeMap<u32, users::Usage>>>;
 /// SB-147: every group folder, and each folder's own capability → that folder, so a request's
 /// statistics name the folder it came from.
 #[derive(Default)]
@@ -438,9 +438,9 @@ impl ProxyHandle {
         self.foreign_refused
             .swap(0, std::sync::atomic::Ordering::Relaxed)
     }
-    /// SB-421: the requests served for each named account (uid) since the last call, handed over
-    /// and cleared; counts only.
-    pub fn take_user_requests(&self) -> std::collections::BTreeMap<u32, u64> {
+    /// SB-421: the requests served for each named account (uid) since the last call and, SB-442,
+    /// the list-price cost of their Claude answers in micro-dollars; handed over and cleared.
+    pub fn take_user_requests(&self) -> std::collections::BTreeMap<u32, users::Usage> {
         self.user_requests
             .lock()
             .map(|mut m| std::mem::take(&mut *m))
@@ -572,6 +572,8 @@ struct AuditedStream {
     spend: Arc<tokens::Spend>,
     spend_pool: String,
     spend_root: Option<std::path::PathBuf>,
+    /// SB-442: a named account's answer, whose cost also counts under its uid.
+    user: Option<(u32, UserRequests)>,
     _permit: tokio::sync::OwnedSemaphorePermit,
 }
 impl AuditedStream {
@@ -592,6 +594,12 @@ impl AuditedStream {
         if let Some((micros, _)) = cost {
             self.spend
                 .add_and_write(&self.spend_pool, now(), micros, self.spend_root.as_deref());
+            if let Some((uid, tally)) = &self.user {
+                if let Ok(mut all) = tally.lock() {
+                    let usage = all.entry(*uid).or_default();
+                    usage.cost_micros = usage.cost_micros.saturating_add(micros);
+                }
+            }
         }
         if let Ok(mut all) = self.stats.lock() {
             let t = all.entry(std::mem::take(&mut self.key)).or_default();
@@ -739,7 +747,7 @@ fn named_user(
         return Err((StatusCode::FORBIDDEN, NAMED_USER_GROUP));
     }
     if let Ok(mut counts) = g.user_requests.lock() {
-        *counts.entry(uid).or_default() += 1;
+        counts.entry(uid).or_default().requests += 1;
     }
     Ok(user)
 }
@@ -1178,6 +1186,7 @@ async fn relay_as(
                 .is_ok_and(|(_, tokens)| tokens)
                 .then(|| g.store.root().to_owned()),
             spend_pool: account.pool.clone(),
+            user: named.as_ref().map(|u| (u.uid, g.user_requests.clone())),
             _permit: permit,
         };
     response
