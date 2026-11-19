@@ -28,7 +28,7 @@ Beyond that they differ:
 |---|---|---|
 | `Snapshot::project_for` (`projects.rs:668-681`) | prefix; personal groups first; groups switched off last; first group with an enabled account of its own, any provider | no |
 | `bindings::desired` (`bindings.rs:204-295`, writes `settings.local.json`) | personal first; first group with an enabled Claude account, shared ones counted | group folders no, worktrees yes |
-| `account_for_folder` (`projects.rs:521-534`) | `project_for`, then the default group per provider | no |
+| `account_for_folder` (`switchboard-runtime/src/projects.rs:521-534`) | `project_for`, then the default group per provider | no |
 | Launch `serving_pool` (`launch.rs:1769-1788`) | the chosen account's pool, else its first shared pool holding the folder | cwd yes |
 | Shell map (`shell/map.rs:135-158`) | `project_for` for the row, longest prefix for the lookup | yes |
 | Proxy statistics and the SB-452 check (`proxy/lib.rs:899-931`, `stats.rs:93-129`) | the folder capability, else a folder hint read from the request body | no |
@@ -96,8 +96,9 @@ rule is the duty officer's rule; a gone launch with a transcript is offered for 
 through admission; sessions on a rotated token restarted by a wave; a dispatched run extended
 while its log grows. A small launchd job `switchboard watchdog --once` every 5 minutes, independent
 of the owner, checks that the owner answers, that no intent is older than 10 minutes, that no gone
-launch is older than 30 minutes and no duplicate older than 15; it reports through Needs attention,
-an `agent-health/1` check and the operator's notification channel, and never acts itself. It is
+launch is older than 30 minutes and no duplicate older than 15; it reports through Needs attention
+and an `agent-health/1` check (an agent watching those relays it further; Switchboard itself sends
+no message), and never acts itself. It is
 Switchboard's first own launchd label (`ai.passioncode.fabric-switchboard.watchdog`): the same change
 updates the Lifecycle table ("Launchd labels owned"), `switchboard uninstall` and the Linux and
 Windows equivalents (a systemd user timer, a scheduled task).
@@ -116,7 +117,7 @@ restarts, Continue and restart waves.
   catalog agents on a key (`launch.rs:2102-2128`) start in ask mode, while the fallback treats them
   as unattended (`fallback.rs:409`, `:906`): an unattended hand-over can wait on a prompt nobody
   answers.
-- A remote dispatch records `--permissions` but never sends it (`lib.rs:5460`), and passes Codex
+- A remote dispatch records `--permissions` but never sends it (`switchboard-runtime/src/lib.rs:5460`), and passes Codex
   `-p`, which Codex reads as `--profile` (`remote_dispatch.rs:157`).
 - `SessionAccounts::resume_flags` in `fabric-sessions-core` is never called (`accounts.rs:40`).
 - The window and MCP offer no per-launch restriction (SB-516, part of section E).
@@ -196,7 +197,7 @@ whole group: it routes only its own session (its route file, SB-452).
 **Now.** From one machine over ssh to the operator's own user on another: list (`sessions --rows
 --target`, and the window reads every machine), launch (`launch --target`), attach and type
 (`attach --target` runs `ssh -t host switchboard attach <id>`; the window's *Open here*), end and
-close a duplicate copy. Not remote: Continue (`lib.rs:460`; the window hides it,
+close a duplicate copy. Not remote: Continue (`switchboard-runtime/src/lib.rs:460`; the window hides it,
 `src/main.ts:3829`), restart waves, a session's output without attaching, one line typed without a
 terminal (the session host's INPUT frame exists, `session_host.rs:39`, nothing sends it). No pause
 exists anywhere. The remote session paths skip the machine proof SB-357 requires (`there()` goes
@@ -255,15 +256,19 @@ always full, about 8 usage calls a minute from one address. A switch needs a fig
 300 s (`rotation.rs:609-631`), the real cadence is about 240 s plus stalls (`control_slow` up to
 33 s), so most switches come after a refusal: 25 before the limit against 66 after it on
 2026-11-18, 175 "no candidate" decisions. Response headers are read on every Claude answer
-(`proxy/lib.rs:1065`, `:1144`) but never push the next check back (`core/lib.rs:2696-2704`); each
+(`proxy/lib.rs:1065`, `:1144`) but on purpose never push the next check back
+(`core/lib.rs:2696-2698`: a header must not postpone the endpoint poll, because one window alone
+can hide the other); each
 changed header rewrites `accounts.json` with fsync (1187 `metadata_write_slow`). A 429 holds one
 account, never the provider (`usage_gate.rs:30`). An external sweep checks every account at :03
 and :33; the window and CLI have no spacing (`runtime/lib.rs:1850`). Codex headers are not read.
 
 **Target, the smart mode (SB-518, SB-519).**
-- **Passive first.** A response's headers with both windows count as a check; while traffic flows
+- **Passive first.** A response's headers with both windows count as a check (both windows lift the
+  reason the poll was never postponed); while traffic flows
   the next active check is 180 s after the last header, and an account with no traffic falls to
-  the idle cadence (600 s). Header observations are kept in memory and written at most once a
+  the idle cadence (600 s); a busy account still gets an endpoint check at least every 30 minutes,
+  since headers can lag the endpoint. Header observations are kept in memory and written at most once a
   minute.
 - **The one move of a refused request (DEC-0002) is unchanged**: it uses the group's next usable
   account as today and asks for no check.
