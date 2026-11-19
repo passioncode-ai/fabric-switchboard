@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- MCP clients are told that removing an account and deleting a group cannot be undone: `switchboard_account_remove` and `switchboard_project_delete` are annotated as destructive, like the Kimi Code and OpenRouter removals (SB-566, audit finding M5-13).
 - The app's threads get the 16 MiB stack the command line has run on since 0.6.61 (SB-558): the threads of its async runtime on every system, and its main thread on Windows, where it was 1 MiB. The Windows test steps give each test thread the same. The nightly checks of 0.7.123 failed on Windows on Arm when one test overflowed its 2 MiB thread.
 
 ## 0.7.123
