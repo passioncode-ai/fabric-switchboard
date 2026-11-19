@@ -4134,6 +4134,7 @@ mod tests {
                     via: crate::AgentVia::Openrouter,
                     model: None,
                     key: None,
+                    effort: None,
                 }),
             )
             .await
@@ -4169,6 +4170,7 @@ mod tests {
                     via: crate::AgentVia::Proxy,
                     model: None,
                     key: None,
+                    effort: None,
                 }),
             )
             .await
@@ -4416,6 +4418,7 @@ mod tests {
                     via: crate::AgentVia::Openrouter,
                     model: None,
                     key: None,
+                    effort: None,
                 }),
             )
             .await
@@ -4464,6 +4467,7 @@ mod tests {
                     via: crate::AgentVia::Openrouter,
                     model: None,
                     key: None,
+                    effort: None,
                 }),
             )
             .await
@@ -4912,6 +4916,7 @@ mod tests {
                             via: crate::AgentVia::Openrouter,
                             model: None,
                             key: None,
+                            effort: None,
                         }),
                     ),
                 ),
@@ -4972,6 +4977,7 @@ mod tests {
             via: crate::AgentVia::Openrouter,
             model: None,
             key: None,
+            effort: None,
         });
         let probe = async {
             let waited = tokio::time::Instant::now();
@@ -5072,6 +5078,7 @@ mod tests {
                     via: crate::AgentVia::Openrouter,
                     model: None,
                     key: None,
+                    effort: None,
                 }),
             )
             .await
@@ -5482,6 +5489,7 @@ mod tests {
                     via: crate::AgentVia::Proxy,
                     model: None,
                     key: None,
+                    effort: None,
                 }),
             )
             .await
