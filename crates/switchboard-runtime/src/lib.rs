@@ -45,6 +45,7 @@ pub mod launch;
 pub mod launch_keys;
 pub mod launches;
 mod limits;
+pub mod login_path;
 pub mod machine_proof;
 pub mod machine_sessions;
 pub mod machines;
@@ -704,6 +705,11 @@ pub enum Operation {
         limit: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         before: Option<i64>,
+        /// SB-423: only these launches (1 to 64), each read by its id (`launches::by_ids`), with
+        /// `missing` naming the ids that have no record. Sent only when asked, so an owner from
+        /// before it reads every other `launches`; the CLI asks such an owner one id at a time.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        launch_ids: Option<Vec<String>>,
     },
     /// Creates (`pool: None`) or updates a project: its name, folders and whole account set.
     SaveProject {
@@ -3783,6 +3789,11 @@ impl Owner {
                 "login_adopted",
                 &[("count", oplog::Field::Number(adopted as i64))],
             );
+        }
+        // SB-455: the person's login PATH, asked of their login shell once (bounded, off the start
+        // path), so the sessions this owner starts find Homebrew's tools.
+        if native_sources {
+            login_path::warm();
         }
         // SB-87: sign-in homes an earlier owner forgot; off the start path (it may ask `ps` and
         // Keychain, each bounded), and only the real owner of its data folder does it.
@@ -9127,10 +9138,24 @@ async fn execute(
             launch_id,
             limit,
             before,
+            launch_ids,
         } => {
             let snapshot = store.snapshot()?;
             // The states may ask `kill -0`/`ps`: never on an async worker (SB-103).
             match launch_id {
+                // SB-423 (FD-316): the named launches alone, each read by its id.
+                None if launch_ids.is_some() => {
+                    let ids = launches::wanted_ids(&launch_ids.unwrap_or_default())?;
+                    let (found, missing) = crate::blocking::run(|| launches::by_ids(root, &ids));
+                    let found: Vec<Value> = found
+                        .into_iter()
+                        .map(|r| label_session(&snapshot, r))
+                        .collect();
+                    Ok(
+                        json!({"launches": found, "total": found.len(), "next_before": null,
+                        "missing": missing}),
+                    )
+                }
                 Some(id) => {
                     let mut shown = crate::blocking::run(|| launches::show(root, &id))?;
                     shown["launch"] = label_session(&snapshot, shown["launch"].take());
@@ -15246,6 +15271,7 @@ mod launch_record_tests {
                 launch_id: None,
                 limit: None,
                 before: None,
+                launch_ids: None,
             })
             .await
             .unwrap();
@@ -15269,6 +15295,7 @@ mod launch_record_tests {
                 launch_id: Some(id.clone()),
                 limit: None,
                 before: None,
+                launch_ids: None,
             })
             .await
             .unwrap();
