@@ -536,7 +536,6 @@ pub struct Start<'a> {
     pub idle: Option<Duration>,
 }
 
-/// How a hosted session ended.
 /// SB-506: what the idle close does with a quiet session that showed evidence of work or not.
 #[derive(Debug, PartialEq, Eq)]
 enum Keep {
@@ -566,6 +565,7 @@ fn keep_working(
     }
 }
 
+/// How a hosted session ended.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ended {
     /// Its exit status, 128 + the signal for one a signal ended.
@@ -701,6 +701,16 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                     }
                     if stopped {
                         continue;
+                    }
+                    // The look above takes seconds: a viewer who attached or typed meanwhile keeps
+                    // the session (review round 2 of PR #853).
+                    {
+                        let inner = session.lock();
+                        if !inner.viewers.is_empty() || inner.last_activity.elapsed() < idle {
+                            kept_until = None;
+                            first_kept = None;
+                            continue;
+                        }
                     }
                     session.end("idle");
                     // SB-396 D5: the session can be continued as itself later.
