@@ -524,6 +524,9 @@ pub(crate) fn seat_id(organization: &str, account: &str) -> String {
     digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
+/// One organization's rows: (day, seat, client) → the row's fields and its counts.
+type UsageRows = BTreeMap<(String, String, String), (Value, Tally)>;
+
 /// SB-568: each organization's daily sums as data another agent may read through Observatory or
 /// the CLI (`org-usage/1`): per UTC day, seat (`seat_id`), provider, class and client, the
 /// requests, their outcomes and tokens. A request counts under its account's first context
@@ -534,8 +537,6 @@ pub(crate) fn seat_id(organization: &str, account: &str) -> String {
 /// accounts are left out. Never a group, project, folder, label, e-mail or account id.
 /// The row's counts are named one by one (`usage_counts`), so a field added to `Tally` for
 /// another purpose never enters `org-usage/1` unannounced.
-/// One organization's rows: (day, seat, client) → the row's fields and its counts.
-type UsageRows = BTreeMap<(String, String, String), (Value, Tally)>;
 fn organization_usage(snapshot: &Snapshot, tallies: &Tallies, from: &str, to: &str) -> Value {
     let mut by_org: BTreeMap<String, UsageRows> = BTreeMap::new();
     if !snapshot.organizations.is_empty() {
