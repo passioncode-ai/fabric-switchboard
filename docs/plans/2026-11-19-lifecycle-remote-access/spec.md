@@ -37,7 +37,7 @@ Each requirement names the findings it closes and the check that proves it. A re
 ## S4 Lifecycle robustness (root R7 and the rest of M1)
 
 - **S4.1** Claude board runs are extended on their transcript writes, not only their log. Closes M1-02.
-- **S4.2** A limit stop is its own field, cleared on the next turn; `ended` keeps the real end. Closes M1-08.
+- **S4.2** A limit stop is its own field, cleared on the next turn; `ended` keeps the real end; it is booked to the account of the launch it belongs to (the launch record, else `CLAUDE_CONFIG_DIR`). Closes M1-08, M1-20.
 - **S4.3** Pacing, deadlines and freshness use a monotonic or sleep-aware clock; a future-dated stamp is stale beyond a bound. Closes M1-09, M1-10, M1-43.
 - **S4.4** Dispatch: remote runs count as live for their workflow; a remote stop checks the run's exit and start before signalling; gates run before the owner transaction; a run whose record or watch entry cannot be written is killed and reported. Closes M1-11..14, M2-15.
 - **S4.5** Session hosts: a slow start never leaves two copies; a host whose descriptor cannot be written does not start the session; a dropped viewer's socket is shut both ways; headless restarts go through a detached host. Closes M1-16..19.
@@ -62,5 +62,5 @@ Each requirement names the findings it closes and the check that proves it. A re
 ## S7 Board and docs (root R8)
 
 - **S7.1** Every backlog status matches what shipped (M5's table); the plan's State table, DECISIONS' next-free line and plan rows without a backlog row are corrected. Closes M5 statuses.
-- **S7.2** The open PRs land or close: #821 with M5-01..06, #829 renumbered with M5-08, #832 with M5-09..12 and M3-13; M5-13 annotations.
-- **S7.3** Docs named in M2-23, M3-19, M4-25, M1-36, M1-42 match the code.
+- **S7.2** The open PRs land or close: #821 with M5-01 and M5-03..06 (its M5-02 is met by S1.2), #829 renumbered (M5-07) with M5-08, #832 with M5-09..12 and M3-13; M5-13 annotations.
+- **S7.3** Docs named in M2-23, M3-19, M4-25, M1-36, M1-42 match the code; M3-14, M3-15 and M3-16 are fixed or kept as rows with evidence.

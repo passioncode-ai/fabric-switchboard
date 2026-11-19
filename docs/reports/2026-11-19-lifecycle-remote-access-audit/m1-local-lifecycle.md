@@ -7,7 +7,7 @@ method: read-only (code and docs from a temporary copy); one read-only `ps` for 
 
 # M1: session lifecycle on one machine
 
-45 defects no open backlog row covers: 6 P1, 18 P2, 21 P3; nine more are already filed (end of file).
+45 defects no open backlog row covers: 6 P1, 18 P2, 21 P3; twelve more are already filed (end of file).
 
 ## How a session moves through its life today
 

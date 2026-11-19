@@ -17,7 +17,7 @@ The operator's order (2026-11-19, this repository's session), verbatim: «И д�
 
 | Module | File | P0 | P1 | P2 | P3 | Also |
 |---|---|---|---|---|---|---|
-| M1 session lifecycle on one machine | [m1-local-lifecycle.md](m1-local-lifecycle.md) | 0 | 6 | 18 | 21 | 9 already filed |
+| M1 session lifecycle on one machine | [m1-local-lifecycle.md](m1-local-lifecycle.md) | 0 | 6 | 18 | 21 | 12 already filed |
 | M2 sessions and accounts across machines | [m2-cross-machine.md](m2-cross-machine.md) | 0 | 2 | 13 | 10 | |
 | M3 delegation, permissions, access | [m3-delegation-access.md](m3-delegation-access.md) | 0 | 1 | 5 | 13 | 1 info |
 | M4 release and update | [m4-release-update.md](m4-release-update.md) | 0 | 5 | 17 | 7 | |
@@ -53,10 +53,10 @@ The operator's order (2026-11-19, this repository's session), verbatim: «И д�
 | R3 An unknown or unreadable state is read as "nothing there" or "unreachable" | M1-15, M1-24, M2-02, M2-13, M3-05 | Typed unknowns: skip the act, say why, raise an attention item |
 | R4 Capabilities and gates wider than the act | M3-01, M3-02, M3-06, M3-10, M3-14, M1-06 | A capability per launch and pool; value-returning operations only through restricted, journalled doors; decisions bound to a verifiable artefact |
 | R5 Nobody sees a machine fall behind or a release go wrong | M4-01..08, M4-12, M4-14..19, M4-26 | Guard on jobs, not runs; retries; an `update` health check and attention item for every machine; one update policy for app and `serve`; a remote update verb |
-| R6 Remote acts are partial and partly unproven | M2-03, M2-04, M2-11, M2-15, M2-18, M3-12 | W10.6 remote acts through one proved path; hosted by default; dispatch records before the start |
+| R6 Remote acts are partial and partly unproven | M2-03, M2-04, M2-11, M2-15, M2-18, M3-12 | Remote acts through one proved path (W11.6, which takes over the earlier plan's W10.6); hosted by default; dispatch records before the start |
 | R7 Pacing and deadlines on the wall clock | M1-09, M1-10, M1-43 | Monotonic or sleep-aware clocks |
 | R8 Board hygiene | M5 status table, plan State table, DEC "next free" lines | One pass now; statuses edited in the same change as each merge from now on |
 
 ## How this report is used
 
-The [spec](../../plans/2026-11-19-lifecycle-remote-access/spec.md) turns each root into requirements with acceptance checks; the [plan](../../plans/2026-11-19-lifecycle-remote-access/plan.md) orders them in waves W11.0 to W11.8 with backlog rows, and every finding id above maps to exactly one wave.
+The [spec](../../plans/2026-11-19-lifecycle-remote-access/spec.md) turns each root into requirements with acceptance checks; the [plan](../../plans/2026-11-19-lifecycle-remote-access/plan.md) orders them in waves W11.0 to W11.8 with backlog rows, and every finding id of the five modules maps to exactly one wave.
