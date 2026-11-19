@@ -46,6 +46,8 @@ Core implementer: crates/switchboard-core only. UI implementer: src/, index.html
 
 A separate loopback control server dispatches typed metadata/account operations, usage and native login/launch. Commands cannot query credentials. It authenticates before decoding a bounded body, denies browser Origins and wrong Host, and has no arbitrary URL/proxy primitive. CLI must not fall back to writing an already owned Store when a live control call is refused.
 
+Peer account (2026-11-19 audit M3-13, with SB-421): the control listener answers a connection only when its peer runs as the owner's own account, as the proxy does since SB-273: `control::ControlHandle::start` wraps its listener in `switchboard_proxy::peer::OwnUser` with nobody named (`Users::none`), so another account's connection is closed before a byte of it is read, on a host where other users run agents (DEC-0029) as anywhere; the 0600 descriptor is no longer the only barrier. Windows compares the peer's token user (SB-274). Test `control::tests::the_control_listener_closes_another_accounts_connection`.
+
 Version skew (2026-10-08, found by fabric-dashboards FD-25): an update installs a newer bundle (CLI included) while the earlier owner keeps running from a temporary copy until it restarts, so the CLI can send an operation the owner cannot decode. Since 0.6.12 the identity answer (`GET /v1/hello`) carries the owner's version in the `x-switchboard-version` header (a header, because an earlier client refuses unknown fields in the `{proof}` body). A 400 then reads `CONTROL_OWNER_OLDER` (restart Switchboard to finish its update) when the owner is older or sends no version, `CONTROL_OWNER_NEWER` when the CLI is older, the plain refusal when both match; 429 reads `CONTROL_BUSY`. Every refusal of the listener is logged as `control_refused` with its status and a code (`unsafe_request`, `unauthorized`, `busy`, `too_large`, `body_timeout`, `unknown_operation`), never the request (`a_malformed_request_is_named_by_which_side_is_older`, `the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew`). A request the owner took 5 s or longer to answer is logged as `control_slow` with the operation's tag and the milliseconds, never its arguments (SB-174, `an_operation_kind_is_its_tag_and_never_its_arguments`; a launch from outside the window, which arrives wrapped as `launched`, is tagged by what it launches, `launch` or `continue`, SB-220), so a client's stall can be told apart from a wait on the way to the owner. Since 0.7.0 it also carries `lock_ms`, the milliseconds the request waited in all for the store's metadata lock, when it took that lock at all (H-2): the store tells its observer each take (`Store::observe_lock_waits`, zero when the lock was free), and the control handler adds the takes of the request's own task, its blocking sections included, not those of tasks it spawns (`a_slow_request_names_how_long_it_waited_for_the_stores_lock`, `an_operation_counts_the_time_it_waited_for_the_stores_lock`, `the_lock_observer_is_told_each_take_and_how_long_it_waited`). A `control_slow` with a large `lock_ms` is a wait behind the store's metadata lock; one with a small `lock_ms` is time spent elsewhere (the owner transaction, the store's credential lock, which a credential writer holds across its Keychain calls and `lock_ms` does not count, the Keychain, the machine). A credential read of a second or more is logged by the next background pass as `vault_slow` with the slowest read's milliseconds; since 0.6.81 such a read no longer holds the account metadata, so `snapshot()` and every read built on it (recovery, hand-overs, agents) answer while it runs (SB-185, `a_slow_credential_read_does_not_hold_the_metadata`).
 
 Windows protection is an OS implementation behind the same Vault/Store contract; build success does not certify provider login or screen-reader behavior. macOS signing uses an existing Developer ID private key locally without export. Notary acceptance remains a separate receipt.
@@ -2995,7 +2997,16 @@ subscriptions. SB-273 closes their connections, and the agents' key never reache
   whenever its length, modification time or inode changed (`users::Users::current`), so allowing
   and disallowing take effect at the next connection, with no owner restart
   (`a_named_accounts_connection_is_let_in_and_marked_with_its_uid`,
-  `only_a_named_account_or_this_one_is_admitted`). A uid listed with a name is admitted only while
+  `only_a_named_account_or_this_one_is_admitted`). The file is never read on the request path
+  (2026-11-19 audit M5-11): a request's handler reads the list as last read
+  (`users::Users::find_cached`); the accept loop reads the file on a blocking thread before it
+  admits a named connection, the owner reads it again after each change it saves
+  (`ProxyHandle::reload_users`, so a disallow or a rotation reaches every open connection at once),
+  and while the list names anyone the proxy reads it again every `users::REFRESH` (2 s: a stat,
+  and a read only when it changed), so a change made by hand reaches open connections within that
+  (`disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_closed`). The accept loop
+  still admits one connection at a time and asks the password database for a named uid's name
+  each time (SB-456, open). A uid listed with a name is admitted only while
   the password database still gives the uid that name: a uid handed to a new account is refused
   (security round 1 P2-4, `a_listed_uid_is_admitted_only_under_its_recorded_name`).
   The owner is the one socket whose local address and port are the peer's and whose foreign ones
@@ -3020,7 +3031,9 @@ subscriptions. SB-273 closes their connections, and the agents' key never reache
   time) and only on `/claude/<its pool>/v1/...`: the session token, the agents' key, a group's or a
   folder's capability and another account's or group's user capability are refused with 401
   `NAMED_USER_CAPABILITY`; its own capability on another group, on Codex or on `/codex/_auto` with
-  403 `NAMED_USER_GROUP`; an account taken off the list while its connection stayed open with 401
+  403 `NAMED_USER_GROUP`; a listed group that is the pay-per-token group or a machine group (a
+  list edited by hand), or a store that cannot be read, with 403 `NAMED_USER_KIND` before any key
+  is read (M5-09, `a_hand_edited_list_never_lends_the_pay_per_token_group`); an account taken off the list while its connection stayed open with 401
   `NAMED_USER_REFUSED` (`a_named_account_is_served_only_with_its_own_capability_on_its_group`,
   `disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_closed`). An admitted request
   is official: a Claude Code session, so a subscription account serves it, SB-98's one move to the
@@ -3060,7 +3073,13 @@ subscriptions. SB-273 closes their connections, and the agents' key never reache
 - **Surfaces.** CLI `proxy allow-user <name|uid> --group <group> [--folder <abs>]...
   [--write-settings <abs>]`, `proxy disallow-user`, `proxy users`, `proxy rotate-user
   [--write-settings <abs>]`; MCP `switchboard_proxy_users` (`action` list, allow, disallow,
-  rotate); the window's Settings → *Other users of this computer* lists the accounts and disallows
+  rotate; the list form is a read form a read-only server answers, `mcp::READ_FORMS`, and the
+  tool is annotated `destructiveHint: true`, `idempotentHint: false` because disallow revokes and
+  rotate issues a new capability each time, M5-10). `allow` refuses the pay-per-token group
+  (`TOKENS_GROUP`: its API keys spend per request, DEC-0023) and a machine group, by its id or
+  its machine's name (`MACHINE_GROUP`, DEC-0013), and lists nothing
+  (`the_pay_per_token_group_and_a_machine_group_are_never_allowed`); a group switched off is
+  accepted and serves its named users nothing until it is on again, as for any request; the window's Settings → *Other users of this computer* lists the accounts and disallows
   one (Tauri `proxy_users`, list and disallow only). `Operation::ProxyUsers` runs outside the store
   transaction: it writes only its own file and the settings file. Every surface refuses on Windows.
 - **Proved and not yet.** The gate plays the other account with synthetic uids (`start_as` with

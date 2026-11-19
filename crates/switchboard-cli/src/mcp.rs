@@ -240,6 +240,10 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         tool["annotations"] = if write && STOPS_PROCESSES.contains(&name.as_str()) {
             // Review round 1: a tool that ends a process cannot be taken back.
             json!({"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false})
+        } else if write && REVOKES.contains(&name.as_str()) {
+            // M5-10: takes someone's access away (disallow) or issues a new capability each time
+            // (rotate): neither is taken back, and asking twice is not the same as asking once.
+            json!({"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false})
         } else if write && DELETES.contains(&name.as_str()) {
             // SB-517: a deletion cannot be taken back; asking twice removes nothing more.
             json!({"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false})
@@ -260,13 +264,17 @@ const STOPS_PROCESSES: [&str; 3] = [
     "switchboard_session_end",
 ];
 
+/// 2026-11-19 audit M5-10: the tools whose write form revokes access or issues a new secret
+/// (`switchboard_proxy_users` disallow and rotate).
+const REVOKES: [&str; 1] = ["switchboard_proxy_users"];
+
 /// SB-517: the tools that delete what cannot be restored (the window's Remove buttons).
 const DELETES: [&str; 2] = ["switchboard_kimi_remove", "switchboard_openrouter_remove"];
 
 /// SB-517: the write tools that also have a read form. Called without the fields that change
 /// something they only read, so a read-only server lists them and answers that form
 /// ([`writes`] decides per call); the full server lists them as before.
-pub(crate) const READ_FORMS: [&str; 15] = [
+pub(crate) const READ_FORMS: [&str; 16] = [
     "switchboard_capacity",
     "switchboard_own_sign_in",
     "switchboard_boot_resume",
@@ -283,6 +291,8 @@ pub(crate) const READ_FORMS: [&str; 15] = [
     "switchboard_login",
     // SB-518: without `mode`, the setting.
     "switchboard_usage_mode",
+    // SB-421 (M5-10): `list`, or no `action`, reads the named users.
+    "switchboard_proxy_users",
 ];
 
 /// SB-517: whether this call of `name` changes something. A tool without a read form answers
@@ -328,6 +338,7 @@ pub(crate) fn writes(name: &str, write: bool, args: &Map<String, Value>) -> bool
             _ => true,
         },
         "switchboard_login" => !matches!(action, Some("status" | "pending")),
+        "switchboard_proxy_users" => !matches!(action, None | Some("list")),
         _ => true,
     }
 }
@@ -3216,6 +3227,12 @@ mod checks {
         ));
         assert!(!w("switchboard_login", json!({"action": "pending"})));
         assert!(w("switchboard_login", json!({"action": "begin"})));
+        // M5-10: the named users' list reads; allow, disallow and rotate change it.
+        assert!(!w("switchboard_proxy_users", json!({})));
+        assert!(!w("switchboard_proxy_users", json!({"action": "list"})));
+        for action in ["allow", "disallow", "rotate"] {
+            assert!(w("switchboard_proxy_users", json!({"action": action})));
+        }
         // A read tool and a tool with no read form keep their one flag.
         assert!(!w("switchboard_launch_keys", json!({"agent": "hermes"})));
         assert!(w("switchboard_switch", json!({})));
@@ -3252,6 +3269,13 @@ mod checks {
             .find(|t| t["name"] == "switchboard_capacity")
             .unwrap();
         assert_eq!(capacity["annotations"]["readOnlyHint"], false);
+        // M5-10: disallow revokes and rotate issues a new capability each time.
+        let users = full
+            .iter()
+            .find(|t| t["name"] == "switchboard_proxy_users")
+            .unwrap();
+        assert_eq!(users["annotations"]["destructiveHint"], true);
+        assert_eq!(users["annotations"]["idempotentHint"], false);
     }
 
     #[test]

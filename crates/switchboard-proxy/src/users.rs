@@ -190,11 +190,34 @@ impl Users {
         *cache = Some((now, users.clone()));
         users
     }
-    /// The named account with this uid, if listed now.
+    /// The named account with this uid, if listed now. Blocking: it may stat and read the file.
     pub fn find(&self, uid: u32) -> Option<NamedUser> {
         self.current().iter().find(|u| u.uid == uid).cloned()
     }
+    /// 2026-11-19 audit M5-11: the list as last read, never touching the file, for a request's
+    /// handler on the async runtime. The accept loop (`peer::OwnUser`, on a blocking thread)
+    /// reads the file before it admits a named connection, the owner reads it again after each
+    /// change it makes (`ProxyHandle::reload_users`), and a refresher reads it every
+    /// [`REFRESH`] while anyone is listed, so a list changed by hand also applies to a kept-alive
+    /// connection. Never read: nobody.
+    pub fn find_cached(&self, uid: u32) -> Option<NamedUser> {
+        let cache = self.cache.lock().ok()?;
+        let (_, users) = cache.as_ref()?;
+        users.iter().find(|u| u.uid == uid).cloned()
+    }
+    /// Whether the list as last read names anyone (the refresher's cue; no file read).
+    pub fn any_cached(&self) -> bool {
+        self.cache
+            .lock()
+            .ok()
+            .and_then(|c| c.as_ref().map(|(_, users)| !users.is_empty()))
+            .unwrap_or(false)
+    }
 }
+
+/// M5-11: how often the proxy reads the list again while it names anyone (one stat, a read only
+/// when the file changed), so a change made outside Switchboard reaches open connections.
+pub const REFRESH: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[cfg(test)]
 mod tests {

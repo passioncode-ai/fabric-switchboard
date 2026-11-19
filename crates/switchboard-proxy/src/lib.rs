@@ -164,6 +164,10 @@ pub struct ProxyHandle {
     foreign_refused: Arc<std::sync::atomic::AtomicU64>,
     /// SB-421: requests served for each named account since the last call.
     user_requests: UserRequests,
+    /// SB-421: the named accounts' list the request path reads from memory (M5-11).
+    users: Arc<users::Users>,
+    /// M5-11: reads the named accounts' list again every `users::REFRESH` while it names anyone.
+    users_task: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
 /// Requests relayed at once; each holds a slot until its response stream ends. 16 was too few for
 /// a machine with two dozen agent sessions streaming at once (2026-10-18): the rest got 503.
@@ -228,6 +232,10 @@ pub const NAMED_USER_CAPABILITY: &str = "This account may use Switchboard's prox
 /// SB-421: a named account asked for another group's accounts, or for something but Claude Code.
 pub const NAMED_USER_GROUP: &str =
     "This account may use only the Claude Code route of the group it was allowed for.";
+/// 2026-11-19 audit M5-09: a list edited by hand that names the pay-per-token group or a machine
+/// group serves nothing (`proxy allow-user` refuses both).
+pub const NAMED_USER_KIND: &str =
+    "The pay-per-token group and another machine's group are never served to another user of this computer.";
 fn valid_token(token: &str) -> bool {
     token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -365,11 +373,30 @@ impl ProxyHandle {
             .into_make_service_with_connect_info::<peer::Conn>();
         let (stop, rx) = oneshot::channel();
         let foreign_refused = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        // M5-11: the request path reads the list from memory; this reads the file again, on a
+        // blocking thread, while it names anyone.
+        let users_task = {
+            let users = users.clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(users::REFRESH);
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    tick.tick().await;
+                    if users.any_cached() {
+                        let users = users.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            users.current();
+                        })
+                        .await;
+                    }
+                }
+            })
+        };
         let listener = peer::OwnUser {
             inner: listener,
             me,
             refused: foreign_refused.clone(),
-            users,
+            users: users.clone(),
         };
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, router)
@@ -397,6 +424,8 @@ impl ProxyHandle {
             spend,
             foreign_refused,
             user_requests,
+            users,
+            users_task: std::sync::Mutex::new(Some(users_task)),
         })
     }
     /// When the last managed request started, Unix seconds (0 before the first). Between two
@@ -457,6 +486,12 @@ impl ProxyHandle {
     pub fn take_foreign_refused(&self) -> u64 {
         self.foreign_refused
             .swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+    /// SB-421, M5-11: reads the named accounts' list again now, so a change the owner just saved
+    /// (allow, disallow, rotate) reaches every connection at once. Blocking: a stat and, when
+    /// the file changed, a read.
+    pub fn reload_users(&self) {
+        self.users.current();
     }
     /// SB-421: the requests served for each named account (uid) since the last call, handed over
     /// and cleared; counts only.
@@ -532,6 +567,9 @@ impl ProxyHandle {
         if let Some(stop) = self.stop.lock().ok().and_then(|mut s| s.take()) {
             let _ = stop.send(());
         }
+        if let Some(task) = self.users_task.lock().ok().and_then(|mut t| t.take()) {
+            task.abort();
+        }
         let Some(mut task) = self.task.lock().ok().and_then(|mut t| t.take()) else {
             return true;
         };
@@ -557,6 +595,9 @@ impl ProxyHandle {
 }
 impl Drop for ProxyHandle {
     fn drop(&mut self) {
+        if let Some(task) = self.users_task.get_mut().ok().and_then(|t| t.take()) {
+            task.abort();
+        }
         if let Some(stop) = self.stop.get_mut().ok().and_then(|s| s.take()) {
             let _ = stop.send(());
         }
@@ -771,7 +812,8 @@ fn named_user(
     pool: &str,
     headers: &HeaderMap,
 ) -> Result<users::NamedUser, (StatusCode, &'static str)> {
-    let Some(user) = g.users.find(uid) else {
+    // M5-11: from memory; the file is read off the request path (`users::Users::find_cached`).
+    let Some(user) = g.users.find_cached(uid) else {
         return Err((StatusCode::UNAUTHORIZED, NAMED_USER_REFUSED));
     };
     let bearer = headers
@@ -791,6 +833,16 @@ fn named_user(
     }
     if provider != "claude" || pool != user.pool {
         return Err((StatusCode::FORBIDDEN, NAMED_USER_GROUP));
+    }
+    // M5-09: never the pay-per-token group's keys or a machine group's accounts, even when the
+    // list was edited by hand; an unreadable store serves nothing.
+    if switchboard_core::machines::is_machine_pool(&user.pool)
+        || !g
+            .store
+            .pool_flags(&user.pool)
+            .is_ok_and(|(_, tokens)| !tokens)
+    {
+        return Err((StatusCode::FORBIDDEN, NAMED_USER_KIND));
     }
     if let Ok(mut counts) = g.user_requests.lock() {
         *counts.entry(uid).or_default() += 1;

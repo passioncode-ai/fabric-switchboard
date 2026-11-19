@@ -2950,6 +2950,8 @@ async fn disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_close
         ..user.clone()
     };
     users::save(s.root(), std::slice::from_ref(&rotated)).unwrap();
+    // The owner reads the list again after each change it saves (M5-11).
+    p.reload_users();
     let old = client
         .post(&base)
         .bearer_auth(&first)
@@ -2969,18 +2971,34 @@ async fn disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_close
         .unwrap();
     assert_eq!(new.status(), 200);
     new.text().await.unwrap();
-    // Disallowed: refused on the open connection, and a new connection is closed.
+    // Disallowed by hand (the file emptied outside Switchboard, no reload): the refresher reads
+    // it again within `users::REFRESH` (M5-11), so the kept-alive connection answers 401 soon
+    // after; a connection opened anew is closed.
     users::save(s.root(), &[]).unwrap();
-    // The kept-alive connection answers 401; a connection opened anew is closed.
-    if let Ok(r) = client
-        .post(&base)
-        .bearer_auth(&second)
-        .body("{}")
-        .send()
-        .await
-    {
-        assert_eq!(r.status(), 401);
-        assert!(r.text().await.unwrap().contains(NAMED_USER_REFUSED));
+    let until = std::time::Instant::now() + users::REFRESH * 3;
+    loop {
+        match client
+            .post(&base)
+            .bearer_auth(&second)
+            .body("{}")
+            .send()
+            .await
+        {
+            Ok(r) if r.status() == 200 => {
+                r.text().await.unwrap();
+                assert!(
+                    std::time::Instant::now() < until,
+                    "a disallowed account was still served"
+                );
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Ok(r) => {
+                assert_eq!(r.status(), 401);
+                assert!(r.text().await.unwrap().contains(NAMED_USER_REFUSED));
+                break;
+            }
+            Err(_) => break,
+        }
     }
     assert!(reqwest::Client::new()
         .post(&base)
@@ -2989,6 +3007,46 @@ async fn disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_close
         .send()
         .await
         .is_err());
+    p.shutdown().await;
+    up.abort();
+}
+
+/// 2026-11-19 audit M5-09: a list edited by hand that names the pay-per-token group lends
+/// nothing: the named account's request is refused before any key is read, with no hit upstream.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[tokio::test]
+async fn a_hand_edited_list_never_lends_the_pay_per_token_group() {
+    let (_root, s) = store();
+    let tokens = s.ensure_tokens_group().unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = hits.clone();
+    let (url, up) = fixture(Router::new().route(
+        "/v1/messages",
+        post(move || {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                "{}"
+            }
+        }),
+    ))
+    .await;
+    let p = start_as_service(s.clone(), url).await;
+    let user = name_this_account(s.root(), &tokens, &[]);
+    let own = p.user_capability(&tokens, user.uid, &user.salt);
+    let answer = reqwest::Client::new()
+        .post(format!(
+            "http://{}/claude/{tokens}/v1/messages",
+            p.address()
+        ))
+        .bearer_auth(&own)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(answer.status(), 403);
+    assert!(answer.text().await.unwrap().contains(NAMED_USER_KIND));
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
     p.shutdown().await;
     up.abort();
 }

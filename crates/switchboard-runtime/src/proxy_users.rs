@@ -21,6 +21,11 @@ pub const ROOT_USER: &str = "Switchboard never serves the root account's process
 pub const NO_GROUP: &str = "Name the group whose accounts this user may use.";
 pub const UNKNOWN_GROUP: &str = "No group has that id or name.";
 pub const NOT_LISTED: &str = "That account is not on the list of users the proxy serves.";
+/// 2026-11-19 audit M5-09: the pay-per-token group's API keys spend money per request (DEC-0023);
+/// DEC-0029 lends another user a group's subscriptions only.
+pub const TOKENS_GROUP: &str = "The pay-per-token group's keys serve only Switchboard's own sessions. Name a group whose accounts are subscriptions.";
+/// M5-09: a machine group (DEC-0013) holds accounts that work on another machine, never here.
+pub const MACHINE_GROUP: &str = "That group holds another machine's accounts, which serve nothing on this computer. Name a group of this computer.";
 pub const RELATIVE_FOLDER: &str = "Give each folder as an absolute path.";
 pub const RELATIVE_SETTINGS: &str = "Give the settings file as an absolute path.";
 pub const TOO_MANY: &str = "The proxy serves at most 256 other users.";
@@ -476,13 +481,26 @@ fn group_pool(store: &Store, group: &str) -> Result<String, String> {
         return Ok("default".into());
     }
     let snapshot = store.snapshot()?;
-    snapshot
+    // M5-09: a machine group, by its id or the machine's name, is never lent here.
+    if switchboard_core::machines::is_machine_pool(group)
+        || snapshot
+            .machines
+            .iter()
+            .any(|m| m.pool == group || m.name == group)
+    {
+        return Err(MACHINE_GROUP.into());
+    }
+    let project = snapshot
         .projects
         .iter()
         .find(|p| p.pool == group)
         .or_else(|| snapshot.projects.iter().find(|p| p.name == group))
-        .map(|p| p.pool.clone())
-        .ok_or_else(|| UNKNOWN_GROUP.into())
+        .ok_or(UNKNOWN_GROUP)?;
+    // M5-09: the pay-per-token group's API keys spend per request (DEC-0023), never lent.
+    if project.tokens {
+        return Err(TOKENS_GROUP.into());
+    }
+    Ok(project.pool.clone())
 }
 
 fn normal_folder(folder: &str) -> Result<String, String> {
@@ -521,6 +539,31 @@ fn surface(by: Option<&str>) -> String {
 /// `Operation::ProxyUsers`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute(
+    store: &Store,
+    root: &Path,
+    runtime: Option<&crate::Runtime>,
+    action: Option<&str>,
+    who: Option<&str>,
+    group: Option<&str>,
+    folders: &[String],
+    write_to: Option<&str>,
+    by: Option<&str>,
+) -> Result<Value, String> {
+    let answer = change(
+        store, root, runtime, action, who, group, folders, write_to, by,
+    );
+    // M5-11: the proxy reads the list from memory on the request path; after a change it reads
+    // the file again now, so a disallow or a rotation reaches every open connection at once.
+    if !matches!(action, None | Some("list")) {
+        if let Some(runtime) = runtime {
+            runtime.proxy.reload_users();
+        }
+    }
+    answer
+}
+
+#[allow(clippy::too_many_arguments)]
+fn change(
     store: &Store,
     root: &Path,
     runtime: Option<&crate::Runtime>,
@@ -1145,6 +1188,47 @@ mod tests {
             execute(&store, &root, None, None, None, None, &[], None, None).unwrap(),
             json!({"users": []})
         );
+    }
+
+    /// 2026-11-19 audit M5-09: the pay-per-token group (its keys spend per request, DEC-0023)
+    /// and a machine group (its accounts work on another machine, DEC-0013) are never lent to
+    /// another user of this computer, by id or by name; nothing is listed.
+    #[test]
+    fn the_pay_per_token_group_and_a_machine_group_are_never_allowed() {
+        let Some(other) = another_account() else {
+            return;
+        };
+        let (_dir, store) = store();
+        let root = store.root().to_owned();
+        let tokens = store.ensure_tokens_group().unwrap();
+        let tokens_name = store
+            .snapshot()
+            .unwrap()
+            .projects
+            .iter()
+            .find(|p| p.pool == tokens)
+            .unwrap()
+            .name
+            .clone();
+        let allow = |group: &str| {
+            execute(
+                &store,
+                &root,
+                None,
+                Some("allow"),
+                Some(other.name.as_str()),
+                Some(group),
+                &[],
+                None,
+                None,
+            )
+        };
+        assert_eq!(allow(&tokens), Err(TOKENS_GROUP.into()));
+        assert_eq!(allow(&tokens_name), Err(TOKENS_GROUP.into()));
+        assert_eq!(allow("machine_studio"), Err(MACHINE_GROUP.into()));
+        assert!(users::load(&root).unwrap().is_empty());
+        // An ordinary group still is.
+        assert!(allow("default").is_ok());
     }
 
     fn record_proxy(root: &Path, token: &str) {

@@ -934,8 +934,13 @@ account and no link may be among them; a file there is replaced only when it hol
 Switchboard wrote there last); run
 `claude --settings <file> -p ...` as that user. No answer carries the capability. `disallow` takes
 the account off the list and `rotate` gives it a new capability (and writes the recorded file
-again): both at once. macOS and Linux only; Windows answers that it is not supported. Changing it
-only when the operator asks. Kept in `<data>/proxy-users.json` (0600, no secret).
+again): both at once. `allow` refuses the pay-per-token group (its API keys spend per request,
+DEC-0023) and a machine group (its accounts work on another machine, DEC-0013), by id or name. The
+list form (`list`, or no `action`) is a read: a read-only server answers it; `disallow` and
+`rotate` cannot be taken back and asking twice differs from asking once, so the tool is annotated
+`destructiveHint: true`, `idempotentHint: false`. macOS and Linux only; Windows answers that it is
+not supported. Changing it only when the operator asks. Kept in `<data>/proxy-users.json` (0600,
+no secret).
 
 ### `switchboard_usage_mode`: `mode?`
 
