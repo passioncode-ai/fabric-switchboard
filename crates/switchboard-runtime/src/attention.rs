@@ -1043,6 +1043,7 @@ mod tests {
             refusals: None,
             too_large: &[],
             rotated: None,
+            watchdog: &[],
             now: 10_000,
         });
         assert_eq!(
