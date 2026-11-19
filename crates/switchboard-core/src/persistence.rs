@@ -22,13 +22,18 @@ struct Disk {
 /// parse, whose unknown fields (`deny_unknown_fields`) would otherwise read it as corrupt: the
 /// person reads that a newer Switchboard wrote it. Readers of 0.7.123 and older lack this and
 /// report such a file as corrupt.
+/// The newest `accounts.json` version this build reads and writes; every check names it once.
+const MAX_SCHEMA: u32 = 17;
+
 #[derive(Deserialize)]
 struct VersionOnly {
     schema_version: u32,
 }
 fn refuse_later_version(bytes: &[u8]) -> Result<(), String> {
     match serde_json::from_slice::<VersionOnly>(bytes) {
-        Ok(v) if v.schema_version > 17 => Err("Unsupported account metadata version".into()),
+        Ok(v) if v.schema_version > MAX_SCHEMA => {
+            Err("Unsupported account metadata version".into())
+        }
         _ => Ok(()),
     }
 }
@@ -66,9 +71,11 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // Version 17 only while the person turned an account or a Kimi Code account off, a
     // delegated seat records its call back, or the journal holds such a turn (W1.2, DEC-0027): a
     // 0.7.123 or older reader refuses the unknown field and action rather than read an account
-    // the person turned off as one it may turn on; it parses the whole file before the version,
-    // so it reports the file as corrupt (from this version on, `refuse_later_version` names a
-    // later version instead, 2026-11-19 audit M5-03). The way back to such a version is restoring a
+    // the person turned off as one it may turn on. It parses the whole file before the version,
+    // so a file whose account, Kimi Code account or delegated seat carries the new field reads to
+    // it as corrupt, and one with only the journal's turns as an unsupported version (from this
+    // version on, `refuse_later_version` names a later version first, 2026-11-19 audit M5-03).
+    // The way back to such a version is restoring a
     // backup there (its accounts come back off, as before).
     if snapshot.accounts.iter().any(|a| a.off.is_some())
         || snapshot.kimi_accounts.iter().any(|k| k.off.is_some())
@@ -212,7 +219,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             refuse_later_version(&bytes)?;
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=17) {
+            if !matches!(disk.schema_version, 1..=MAX_SCHEMA) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -295,7 +302,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         refuse_later_version(&bytes)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=17) {
+        if !matches!(disk.schema_version, 1..=MAX_SCHEMA) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;

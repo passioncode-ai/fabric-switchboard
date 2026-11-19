@@ -652,6 +652,7 @@ mod tests {
         assert_eq!(turned_off_home(root.path(), &home), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_session_a_launch_began_to_continue_a_moment_ago_is_not_continued_again() {
         // SB-450: the owner's continuation after a restart and another agent's never both start.
