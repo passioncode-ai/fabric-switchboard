@@ -15744,6 +15744,7 @@ mod analytics_door_tests {
         .await
         .unwrap();
         assert_eq!(state["available"], false);
+        // SB-560 (M3-07): from outside the window, a switch needs the operator's words first.
         assert_eq!(
             execute_offline(
                 root.path().to_owned(),
@@ -15753,6 +15754,23 @@ mod analytics_door_tests {
             )
             .await
             .unwrap_err(),
+            analytics::NEEDS_WORD
+        );
+        let worded = Operation::OnOperatorsWord {
+            decision: spend::Decision {
+                by: "operator".into(),
+                instruction: "turn usage counts off".into(),
+                at: rfc3339(monitor::now()).unwrap(),
+                source: "session test".into(),
+            },
+            inner: Box::new(Operation::Analytics {
+                enabled: Some(false),
+            }),
+        };
+        assert_eq!(
+            execute_offline(root.path().to_owned(), worded)
+                .await
+                .unwrap_err(),
             ANALYTICS_APP_ONLY
         );
     }
