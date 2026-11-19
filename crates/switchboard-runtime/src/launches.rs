@@ -492,6 +492,31 @@ pub(crate) fn end_once(
         })
     })
 }
+/// SB-509: records that a dispatched run's deadline moved to `until`; answers how many times it
+/// moved (`dispatch.extensions`), 0 when the record could not be written.
+pub(crate) fn extend_dispatch(root: &Path, id: &str, until: i64) -> u64 {
+    if !valid_id(id) {
+        return 0;
+    }
+    crate::blocking::run(|| {
+        let _writing = writing();
+        let mut count = 0;
+        let written = update(root, id, |r| {
+            if !r["dispatch"].is_object() {
+                return false;
+            }
+            count = r["dispatch"]["extensions"].as_u64().unwrap_or(0) + 1;
+            r["dispatch"]["extensions"] = count.into();
+            r["dispatch"]["extended_until"] = until.into();
+            true
+        });
+        if written {
+            count
+        } else {
+            0
+        }
+    })
+}
 /// SB-247: takes back an `ended` of `kind` this process set a moment ago (a stop that could not
 /// end its run), so the record says the run goes on.
 pub(crate) fn unend(root: &Path, id: &str, kind: &str) {
