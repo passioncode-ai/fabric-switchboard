@@ -69,6 +69,7 @@ pub mod remote_dispatch;
 pub mod remote_usage;
 pub mod restarts;
 pub mod resumable;
+pub mod resume;
 pub mod roots;
 pub mod seats;
 pub mod self_update;
@@ -1605,6 +1606,8 @@ impl Runtime {
         native: NativeSources,
     ) -> Result<Arc<Self>, String> {
         let store = Arc::new(Store::open(root.clone(), vault)?);
+        // SB-561: the session watch's continuations check their accounts through this store.
+        resume::attach(&root, &store);
         // H-2: `control_slow` names the time a request waited for the store's lock.
         store.observe_lock_waits(control::lock_waited);
         // SB-347: and the credentials it read, with how long the reads took.
@@ -4985,6 +4988,8 @@ pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Valu
         root.clone(),
         switchboard_core::open_vault(&root, false)?,
     )?);
+    // SB-561: a continuation started offline checks its account through this store.
+    resume::attach(&root, &store);
     // SB-518: a person's check from the offline CLI follows the person's usage mode too.
     store.set_usage_mode(usage_mode::read(&root));
     execute(store, &root, None, from_outside(operation)).await

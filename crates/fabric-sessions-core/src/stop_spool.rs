@@ -89,6 +89,24 @@ pub fn done(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
+/// SB-561 (M1-23): the session finished a turn (its `Stop` hook): a stop of it kept from before
+/// `before` is over, so it is removed and never registered after the session went on. A stop
+/// kept at or after `before` (the same turn's) stays. Answers whether one was removed.
+pub fn forget_before(root: &Path, session: &str, before: i64) -> bool {
+    if !crate::ids::valid_id(session) {
+        return false;
+    }
+    let path = root.join(DIR).join(format!("{session}.json"));
+    let stale = crate::private_fs::read_private(&path, MAX_BYTES)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Spooled>(&b).ok())
+        .is_some_and(|s| s.session == session && s.at < before);
+    if stale {
+        let _ = std::fs::remove_file(&path);
+    }
+    stale
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,6 +151,21 @@ mod tests {
             super::waiting(root.path(), 200).is_empty(),
             "each stop is handed over once"
         );
+    }
+
+    #[test]
+    fn a_turn_after_a_kept_stop_forgets_it_and_the_same_turns_stop_stays() {
+        let root = tempfile::tempdir().unwrap();
+        spool(root.path(), &stop("S1", 100)).unwrap();
+        assert!(
+            !forget_before(root.path(), "S1", 100),
+            "the same turn's stop stays"
+        );
+        assert_eq!(waiting(root.path(), 200).len(), 1);
+        assert!(forget_before(root.path(), "S1", 150));
+        assert!(waiting(root.path(), 200).is_empty());
+        assert!(!forget_before(root.path(), "S2", 150), "nothing kept");
+        assert!(!forget_before(root.path(), "../x", 150));
     }
 
     #[test]

@@ -884,6 +884,12 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
         {
             continue;
         }
+        // SB-561 (M1-22): a session of this workflow that another path is continuing now (a
+        // Continue, the boot resume, a restart) or whose stop a host claimed is left to it.
+        if let Some(why) = crate::resume::workflow_held(&runtime.root, id, now) {
+            log(why);
+            continue;
+        }
         let executor = workflow
             .pointer("/lease/executor")
             .cloned()
@@ -1009,6 +1015,11 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
         };
         let done = hand_over(&pinned_act, &gate, id, &dir, &steps).await;
         log(done.outcome);
+        // SB-561 (M1-22): the work went on elsewhere: a waiting stop of its sessions is settled,
+        // so no host resumes them beside the hand-over.
+        if done.outcome == "offered" {
+            crate::resume::handed_over(&runtime.root, id, now);
+        }
         record_last(&runtime.root, &snapshot, id, &done, now);
         // SB-82 (D-3): the walk's record with the contract's probe results.
         let walk = crate::walks::of(now, id, &done.passed, done.selected.clone());

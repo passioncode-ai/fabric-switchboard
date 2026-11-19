@@ -313,25 +313,27 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
         return Err(NO_TRANSCRIPT.into());
     }
     let program = crate::launch::find_program("claude").ok_or(NO_CLAUDE)?;
-    // SB-515: the permission choice as Fabric Sessions asks it (D-7), the one answer it reads.
-    let bypass = crate::session_accounts::resume_flags(root);
-    let mut script = crate::duty::resume_script_for(
-        &config,
-        &cwd,
-        session,
-        &program,
-        &bypass,
-        Some(CONTINUE_PROMPT),
-    );
     let launch_id = how.hosted.then(crate::launches::new_id);
-    if let Some(id) = &launch_id {
-        // The session's hooks report to its own launch (its record, its turns, its end).
-        script = crate::restarts::with_launch_id(&script, id);
-    }
+    // SB-561 (S1.1): the one builder, from the launch record this session continues: its
+    // account checked, its home's sign-in current, its own permissions and environment.
+    let resume = crate::resume::build(
+        root,
+        &crate::resume::Target {
+            session,
+            config: &config,
+            cwd: &cwd,
+            live: None,
+            restarting: false,
+        },
+        &program,
+        Some(CONTINUE_PROMPT),
+        launch_id.as_deref(),
+        now,
+    )?;
     let dir = root.join("duty");
     let path = dir.join(format!("continue-{session}.command"));
     std::fs::create_dir_all(&dir).map_err(|_| NOT_STARTED)?;
-    crate::launch::write_script_at(&path, &script).map_err(|_| NOT_STARTED)?;
+    crate::launch::write_script_at(&path, &resume.script).map_err(|_| NOT_STARTED)?;
     if how.in_place {
         if let Some(id) = &launch_id {
             let record = json!({
@@ -342,11 +344,15 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
                 // SB-508 (review round 2): the config folder itself, so `locate` never guesses it
                 // for a config outside the data folder.
                 "config_dir": config,
+                // SB-561: what a later resume of this launch carries again (S1.3, S1.4).
+                "permissions": resume.permissions,
+                "env": resume.env,
             });
             crate::launches::record_resume(root, id, record, &how.by)?;
         }
         // SB-509: an offer to continue it (Needs attention) is taken.
         crate::session_watch::continued(root, session, now);
+        crate::resume::started(root, &resume, session, now);
         crate::oplog::event(
             "session_continue",
             &[("outcome", crate::oplog::Field::Code("in_place"))],
@@ -361,6 +367,7 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
         return Err(NOT_STARTED.into());
     }
     crate::session_watch::continued(root, session, now);
+    crate::resume::started(root, &resume, session, now);
     crate::oplog::event(
         "session_continue",
         &[("outcome", crate::oplog::Field::Code("started"))],

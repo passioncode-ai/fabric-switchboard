@@ -3948,12 +3948,21 @@ only while `duty.json` (0600: `on`, `stuck_minutes`, `waiting_minutes`, `idle_mi
   whose pid its file names. `kind` other than `interactive` is never watched;
 - reads the process table once (`ps -axww -o pid=,ppid=,etime=,time=,command=`, `LC_ALL=C`): for
   each session the CPU seconds of its process and every descendant, and its own commands, the
-  direct children whose command line names `.claude/shell-snapshots/` (the shells its Bash tool
-  starts, foreground or background; MCP servers and `caffeinate` are not commands). The CPU is
+  direct children whose command line names `<config>/shell-snapshots/` of the session's own config
+  folder (the shells its Bash tool starts, foreground or background; MCP servers and `caffeinate`
+  are not commands). SB-561 (M1-01): before this, only `/.claude/shell-snapshots/` counted, so
+  a session in a Switchboard home (`homes/<account>`, `runtimes/claude-<pool>`), where Claude Code
+  writes its snapshots, read as running no command (test
+  `duty::tests::a_command_of_a_session_in_a_switchboard_home_is_its_own`). The same read gives the
+  process's permission mode from its command line (`resume::mode_of_command`). The CPU is
   compared with the sample the previous five-minute check kept (`cpu_quiet`: under 2 s since then;
   unknown on a first look or after a gap of more than two checks); a status read keeps no sample;
 - reads each session's host from its ancestors' executable paths (`dashboards`, `orca`,
-  `terminal`, `iterm`, `other`); a `dashboards` session is left alone;
+  `terminal`, `iterm`, `other`); a `dashboards` session is left alone. SB-561 (S1.6): a session
+  is also a Dashboards console when a launch record naming it, not ended, says `launched_by.surface:
+  dashboards`, so a console whose spawning CLI exited is still known; and a session a live session
+  host runs (`session_host::live_hosts`, its launch's `provider_session_id`) carries that launch
+  (`Seen.hosted`);
 - decides with `duty::decide` and acts on at most 3 sessions. Since 0.7.96 (operator 2026-11-15:
   never before a session finished): `idle` closes a session idle for `idle_minutes`, and for at
   least `duty::WAKE_UP_FLOOR` (65 minutes: the longest wake-up a session can set itself with
@@ -3978,23 +3987,33 @@ only while `duty.json` (0600: `on`, `stuck_minutes`, `waiting_minutes`, `idle_mi
   working copy. A `waiting` session is never acted on, and nothing is restarted for its age
   (`waiting_minutes` and `max_age_hours` stay in `duty.json` for older settings, unused). Close is
   SIGTERM, then SIGKILL after 10 s (outcome
-  `still_running` if it outlives that); restart writes `<data>/duty/<session>.command` (0700) and
-  opens it in a new Terminal window, only after the old process has ended and no other process
-  holds the session (`closed_held_elsewhere`), the folder exists (`closed_no_folder`) and the
-  `claude` program is found (`closed_no_claude`); a failed write or Terminal start is
-  `closed_not_restarted`;
+  `still_running` if it outlives that); restart builds its resume with `resume::build` (below,
+  SB-561) before anything is stopped: a resume the account check refuses leaves the session running
+  (`left_account`). A hosted session is restarted in place through its host: the script goes to
+  `<data>/restarts/duty-<session>.command` and `session_host::restart` ends and reruns it in the
+  same terminal, viewers kept (`restarted_in_host`; a host that refuses, is busy or is gone leaves
+  it running: `left_host_refused`, `left_host_busy`, `left_host_gone`). Any other restart writes
+  `<data>/duty/<session>.command` (0700) and opens it in a new Terminal window, only after the old
+  process has ended and no other process holds the session (`closed_held_elsewhere`), the folder
+  exists (`closed_no_folder`) and the `claude` program is found (`closed_no_claude`); a failed
+  write or Terminal start is `closed_not_restarted`; a cut restart finished by a later check whose
+  account now refuses it is `closed_account`;
 - writes one `duty.jsonl` line per action: `at`, `action` (`restart`, `close`), `reason` (`idle`,
   `old`, `waiting`, `stuck`, `duplicate`), `outcome`, `session`, `folder`, `pid`, `host`; the newest
   500 kept. Restarts of one session within 6 hours are counted from it: from the fourth, a restart
-  becomes a close. SB-530: only a restart that stopped the session counts (outcome `restarted`, or
-  a `closed_*` one: stopped and not resumed); `still_running` and `interrupted` stopped nothing
-  (test `duty::tests::only_a_restart_that_stopped_the_session_counts_toward_the_limit`).
+  becomes a close. SB-530: only a restart that stopped the session counts (outcome `restarted` or
+  `restarted_in_host`, or a `closed_*` one: stopped and not resumed); `still_running`,
+  `interrupted` and the `left_*` outcomes stopped nothing (tests
+  `duty::tests::only_a_restart_that_stopped_the_session_counts_toward_the_limit`,
+  `a_restart_that_left_the_session_running_is_not_counted`). An intent line also carries the
+  process's `permissions` and `hosted` launch, so a check that finishes a cut restart resumes it
+  with the same mode.
 
-The resume script unsets the variables a nested launch must not inherit (`CONFLICTS`), copies the
-`export` lines of the home's `launch.command` except `SWITCHBOARD_LAUNCH_ID` and
-`CLAUDE_CONFIG_DIR`, sets `CLAUDE_CONFIG_DIR` to the session's config folder unless it is the
+The resume script (`resume::script`, SB-561) unsets the variables a nested launch must not inherit (`CONFLICTS`, which since SB-561 include `OBSERVATORY_WORKFLOW_ID` and `OBSERVATORY_HANDOFF_ID`), exports the launch it reports to when it is a launch of its own, copies the
+`export` lines of the home's `launch.command` except `SWITCHBOARD_LAUNCH_ID`,
+`CLAUDE_CONFIG_DIR`, `PATH` and the launch's own values (`resume::PER_LAUNCH_ENV`), which come from the launch record it continues, sets `CLAUDE_CONFIG_DIR` to the session's config folder unless it is the
 person's own, then `export PATH='<program folder>'"${PATH:+:$PATH}"':<the rest of the session PATH>'` (SB-455: the program's folder, the `PATH` the window started with, then the login PATH, the owner's, `~/.local/bin` and Homebrew's for what it lacks; a `PATH` line of the home's script is not copied), `cd <folder> || exit 1` and `claude
-[bypass flag] --resume <session>` (not `exec`: an end by a signal exits 0, so the window closes), with
+[permission arguments] [--settings=<route>] --resume <session>` (not `exec`: an end by a signal exits 0, so the window closes); a resume in a Switchboard home with no launch of its own first writes the home's `.session-pid`; with
 the prompt `duty::CONTINUE_PROMPT` («Switchboard restarted this session because it had stopped making progress. Continue the task from where you left off.») for `stuck`. No credential is in it: the home's sign-in stays in its own Keychain item or file.
 
 `Operation::Duty` (no store lock) answers `status`: `settings`, `check_seconds`,
@@ -4257,6 +4276,77 @@ the window's `boot_resume` command (Settings → Sessions after a restart, SCN-1
   installed CLI). It runs `<cli> --data-dir <root> session-host --launch-id … --program <script>
   --rows … --cols …` in a session of its own with nothing on its stdio, waits up to 10 s for the
   socket, and reaps the host on a thread.
+
+## One continuation module (SB-561, DEC-0034)
+
+Code: `crates/switchboard-runtime/src/resume.rs`; spec S1 of
+[2026-11-19-lifecycle-remote-access](plans/2026-11-19-lifecycle-remote-access/spec.md); findings
+M1-01, M1-03 to M1-07, M1-21 to M1-23, M1-45 and M5-02 of the
+[audit](reports/2026-11-19-lifecycle-remote-access-audit/m1-local-lifecycle.md); builds on SB-463.
+
+- **One builder (S1.1).** `resume::build(root, target, program, prompt, launch_id, now)` builds
+  every resume of a Claude Code session as itself: `resumable::continue_as` (Continue in the
+  window, MCP `switchboard_session_continue`, CLI `sessions continue`, and the boot resume of
+  DEC-0030), the duty officer's restart (`duty::act_on`, and `duty::resume` for a cut one) and a
+  restart wave (`restarts::restart_one`). It reads the launch record the session continues
+  (`resume::record_of`: the newest record naming the session whose config folder is the session's,
+  else the newest naming it; never a dispatched run), checks the account, takes the permission
+  mode and the launch's own values, and writes the script with `resume::script`. After a start,
+  `resume::started` settles the waiting limit stop it continued past
+  (`recovery::continued`). Tests `resume::tests::*`.
+- **The account (S1.2).** `resume::check` reads the home: `homes/<account>` (isolated),
+  `runtimes/claude-<pool>` (managed) or another folder (the person's own, not checked). Through the
+  store (`resume::attach` registers the owner's, and an offline command's, store for its data
+  folder; a Switchboard home with no store registered is refused `ACCOUNTS_UNREAD`): an account no
+  longer saved (`ACCOUNT_GONE`), used on another machine (`ACCOUNT_ELSEWHERE`), turned off
+  (`ACCOUNT_OFF`, DEC-0027: `resume::turned_off` is the one place SB-418's mark is read once it
+  lands), a delegated seat whose lease ended (`SEAT_ENDED`), disabled (`ACCOUNT_DISABLED`), given to
+  an agent and not its group's selection (`ACCOUNT_ASSIGNED`), or in a group switched off
+  (`GROUP_OFF`) refuses the resume. A managed home needs its group on and an account selected
+  (`NO_ROUTE`); the proxy handles a limit (DEC-0002). An isolated home that another live session
+  holds is refused (`HOME_BUSY`, except for the duty officer's and a wave's restart, whose own
+  process holds it); otherwise its `settings.json` gets the account's current sign-in from the store
+  (`Store::credential`, kept fresh by the background renewal; an expired one refuses with the
+  store's sentence), in place of the one its launch wrote; the rest of the file is kept. An isolated
+  session with a waiting limit stop (`recovery::live_stop_sessions`) continues through its group's
+  managed route (`--settings=<runtimes/claude-<pool>/switchboard-route.json>`, its home's own
+  sign-in taken out of `settings.json` so the route's token serves it), when that route file exists
+  and the group has a selected account; otherwise it is refused (`AT_LIMIT`). No credential is ever
+  written into a script.
+- **Permissions (S1.3).** Every launch record (`launch::launch_core`) carries `permissions`: `bypass`
+  (the agent's full-access arguments, SB-515), `default` (no flags), `ask` (`--permission-mode
+  manual`, a hand-over taken with `--ask`, SB-405), or a mode named with `--permission-mode`
+  (`resume::mode_of_args`). A resume runs with the live process's own mode when it is restarted
+  (read from its command line), else the record's, else, for a record written before this, the
+  person's setting as it launched then (`session_accounts::resume_flags`); a session no record names
+  resumes with no permission flags, so its own settings decide. A resume that is a launch of its own
+  records the mode it ran with. Never the global default for a recorded launch.
+- **Environment (S1.4).** Every launch record carries `env`: its own `OBSERVATORY_WORKFLOW_ID`,
+  `OBSERVATORY_HANDOFF_ID` and `SWITCHBOARD_CONTEXT` (`resume::launch_env`; never a token). A resume
+  exports those from the record it continues, never the values of a later launch that rewrote the
+  home's `launch.command`; a record written before this keeps the home's context, and its workflow
+  only when the home's is the one the record continued. `OBSERVATORY_WORKFLOW_ID` and
+  `OBSERVATORY_HANDOFF_ID` are in `launch::CONFLICTS`, so no launch inherits another's.
+- **The home marker (S1.5).** A resume in a Switchboard home with no launch of its own writes the
+  home's `.session-pid` before the session starts; `launch::ensure_idle` also reads the home's live
+  Claude Code session files (`sessions/<pid>.json` with its pid alive, not written before that
+  process started), so a hosted resume, which writes no marker, keeps its home from a launch, a
+  remove or a lease end too.
+- **Hosts (S1.6).** A hosted session is restarted in place through its host (above, the duty
+  officer); a restart wave already did. A Dashboards console is recognised by its launch record too.
+- **Commands (S1.7).** `duty::tree_of(table, pid, config)` counts a command whose shell snapshot is
+  in the session's own config folder (above).
+- **Gates of the paths that start no resume.** A recovery claim (`recovery::claim`) is refused
+  while the session is being continued (`recovery::BEING_CONTINUED`) or a launch continued it after
+  its stop (`recovery::CONTINUED`, `launches::continuation`) (M1-21). The automatic fallback leaves a
+  workflow alone while one of its sessions (launches with `continues` = the workflow, written in the
+  last day) is being continued or its stop is claimed by a host (`resume::workflow_held`, logged as
+  `fallback` outcome `being_continued` or `stop_claimed`); a hand-over it made (`offered`) settles
+  the waiting stops of those sessions (`resume::handed_over`), so no host resumes one beside it
+  (M1-22). A limit stop kept while no owner ran (`stop-spool/`) is removed by the session's next
+  `Stop` hook when it was kept at least 2 s before that turn ended
+  (`stop_spool::forget_before`), and the owner's pass drops one whose session took a turn or was
+  launched again after it (`resume::spool_stale`, log `recovery_hook` result `spool_stale`) (M1-23).
 
 ## Pay-per-token group (SB-401, DEC-0023)
 

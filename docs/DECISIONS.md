@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0034` (`DEC-0032` is SB-518, smart usage checks; `DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0035` (`DEC-0034` is SB-561, one continuation module; `DEC-0032` is SB-518, smart usage checks; `DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -410,7 +410,7 @@ research notes); the ones still in force that the board cites are seeded below w
 ### DEC-0021: A duty officer restarts stalled Claude Code sessions and closes finished ones
 
 - **Date:** 2026-11-15
-- **Status:** Accepted (built on branch `duty`: SB-384)
+- **Status:** Accepted (built on branch `duty`: SB-384); its restart's permissions and hosts amended by [DEC-0034](#dec-0034-every-continuation-of-a-session-is-built-from-the-launch-it-continues-its-account-checked-first)
 - **Context:** the session watch (SB-379) reports a stalled or duplicated session but acts on
   none, and sessions that stall or finish their work keep their terminal and memory for hours.
   The operator asked for a duty officer in the lifecycle that closes a hung session and resumes it
@@ -881,7 +881,7 @@ research notes); the ones still in force that the board cites are seeded below w
 ### DEC-0030: The sessions a restart of this computer cut are continued once, hosted
 
 - **Date:** 2026-11-18
-- **Status:** Accepted (built on branch `boot-resume`: SB-450)
+- **Status:** Accepted (built on branch `boot-resume`: SB-450); its continuation checks its account and keeps its launch's permissions ([DEC-0034](#dec-0034-every-continuation-of-a-session-is-built-from-the-launch-it-continues-its-account-checked-first))
 - **Context:** after the Mac rebooted nothing continued the sessions (Fabric Dashboards, board
   request 737b04e6): each session host died with the machine, the duty officer acts only on live
   processes, and recovery only on sessions stopped on a limit. Fabric Dashboards runs a temporary
@@ -1090,3 +1090,40 @@ research notes); the ones still in force that the board cites are seeded below w
   минуту через свитчборд а не через запросы напрямую к сессиям и на удаленный свитчборд в рамках
   организации то же самое».
 
+### DEC-0034: Every continuation of a session is built from the launch it continues, its account checked first
+
+- **Date:** 2026-11-19
+- **Status:** Accepted (built on branch `sb-561-resume`: SB-561, wave W11.2 of the
+  [plan](plans/2026-11-19-lifecycle-remote-access/plan.md))
+- **Context:** the audit of 2026-11-19 (M1-01, M1-03 to M1-07, M1-21 to M1-23, M1-45, M5-02)
+  found every resume built from the home's current state: an isolated session resumed with the old
+  token its launch wrote, on an account disabled, used elsewhere or at its limit; with the person's
+  global permission setting instead of its launch's (a launch started with prompts on came back
+  without them); with the workflow of whichever launch last rewrote the home; with no home marker,
+  so a launch or a remove could take the home under it; and a hosted session or a Dashboards
+  console was stopped and reopened in Terminal without its host. The recovery claim and the
+  automatic fallback could start a second copy beside a continuation.
+- **Decision:** one module (`resume.rs`) builds every resume: Continue (window, MCP, CLI), the
+  boot resume, the duty officer's restart and a restart wave. It reads the launch record the session
+  continues; checks the account through the store before anything is stopped or started (no longer
+  saved, disabled, used elsewhere, given to an agent and not its group's selection, a delegated
+  seat whose lease ended, a group switched off, and DEC-0027's turned-off mark once it lands
+  refuse with that reason); gives an isolated home the account's current sign-in; continues an
+  isolated session stopped on its limit through its group's managed route, or refuses it; runs with
+  the permission mode the launch recorded (the live process's own when it is restarted; the
+  person's setting only for a record written before this; none for a session no record names) and
+  the launch's own workflow, hand-over and context; writes the home's `.session-pid` when it is no
+  launch of its own. A hosted session is restarted in place through its host and is never stopped
+  and reopened in Terminal; a Dashboards console is known by its launch record too. A recovery claim
+  is refused while the session is being continued or after a launch continued it; the automatic
+  fallback leaves a workflow alone while one of its sessions is being continued or its stop is
+  claimed, and its hand-over settles that workflow's waiting stops. Supersedes, in DEC-0021, that a
+  restart resumes with the bypass setting of SB-298 and that a session hosted elsewhere is reopened
+  in Terminal (for Switchboard's own session hosts).
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#one-continuation-module-sb-561-dec-0034),
+  [CONTRACTS duty officer](CONTRACTS.md#session-duty-officer-sb-384-dec-0021), AGENTS.md
+  Lifecycle (session duty officer), SCN-096, SCN-105, [backlog](evidence/backlog.md) SB-561 and
+  SB-463.
+- **Source:** the operator's order of 2026-11-19 to deliver the plan in waves (spec S1, accepted);
+  audit
+  [report](reports/2026-11-19-lifecycle-remote-access-audit/README.md).

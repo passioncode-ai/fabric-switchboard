@@ -1915,6 +1915,12 @@ check(() => {
   assert.equal(logic.dutyReasonText('martian'), 'martian', 'an unknown reason shows its code');
   for (const outcome of [undefined, 'restarted', 'closed', 'planned']) assert.equal(logic.dutyOutcomeText(outcome), null, String(outcome));
   for (const outcome of ['still_running', 'closed_held_elsewhere', 'closed_no_folder', 'closed_no_claude', 'closed_not_restarted']) assert.ok(logic.dutyOutcomeText(outcome)?.length, outcome);
+  // SB-561: a restart in a session host is as planned; one left running says why.
+  assert.equal(logic.dutyOutcomeText('restarted_in_host'), null);
+  for (const outcome of ['left_account', 'left_host_refused', 'left_host_busy', 'left_host_gone', 'left_not_prepared', 'closed_account']) {
+    const text = logic.dutyOutcomeText(outcome);
+    assert.ok(text?.length && text !== outcome, outcome);
+  }
   i18nForShell.setLocale('ru');
   assert.equal(logic.dutyReasonText('idle'), 'закончила работу и простаивала');
   i18nForShell.setLocale('en');
