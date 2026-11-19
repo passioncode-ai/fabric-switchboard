@@ -1471,7 +1471,14 @@ async fn confirm_candidates(
         return;
     };
     let mut wanted: Vec<(Provider, String)> = Vec::new();
-    for policy in snapshot.policies.iter().filter(|p| p.enabled) {
+    // A provider that is held or confirmed a candidate within the minute is not asked this pass:
+    // no candidate is worked out for it, so no credential is read for nothing.
+    let budget = &runtime.usage_gate.budget;
+    for policy in snapshot
+        .policies
+        .iter()
+        .filter(|p| p.enabled && budget.may_confirm(p.provider, time))
+    {
         if policy.target == "claude_cli" && runtime.refresh.swap_switching() {
             continue;
         }
@@ -1503,7 +1510,9 @@ async fn confirm_candidates(
             now(),
             &excluded,
         ) {
-            if !wanted.iter().any(|(_, w)| *w == id) {
+            // An account the provider asked to wait for is not checked; its token would buy
+            // nothing.
+            if !wanted.iter().any(|(_, w)| *w == id) && !runtime.usage_gate.held(&id, time) {
                 wanted.push((policy.provider, id));
             }
         }

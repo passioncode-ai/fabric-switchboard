@@ -364,6 +364,16 @@ impl UsageBudget {
         Ok(())
     }
 
+    /// Whether a switch's candidate of `provider` could be checked at `now`: the provider is not
+    /// held and none was checked within [`CONFIRM_SPACING_SECONDS`]. The token is still taken by
+    /// [`UsageBudget::take`]; this only spares working out a candidate that could not be checked.
+    pub(crate) fn may_confirm(&self, provider: Provider, now: i64) -> bool {
+        self.held_until(provider, now).is_none()
+            && !lock(&self.confirmed_at)
+                .get(&provider)
+                .is_some_and(|at| now >= *at && now - at < CONFIRM_SPACING_SECONDS)
+    }
+
     fn flight(&self, provider: Provider) -> Arc<tokio::sync::Semaphore> {
         lock(&self.flights)
             .entry(provider)
@@ -498,6 +508,15 @@ mod tests {
         // An answer to a check that started after it ends the hold.
         pair.succeeded_since(Provider::Claude, 30_002);
         assert_eq!(pair.held_until(Provider::Claude, 30_002), None);
+        // A candidate is worked out only while one could be checked.
+        let spaced = UsageBudget::limited();
+        assert!(spaced.may_confirm(Provider::Claude, 40_000));
+        assert!(spaced.take(Provider::Claude, Caller::Confirm, 40_000).is_ok());
+        assert!(!spaced.may_confirm(Provider::Claude, 40_030));
+        assert!(spaced.may_confirm(Provider::Claude, 40_000 + CONFIRM_SPACING_SECONDS));
+        spaced.refused(Provider::Claude, 40_100, None);
+        assert!(!spaced.may_confirm(Provider::Claude, 40_200));
+        assert!(spaced.may_confirm(Provider::Codex, 40_200));
         // A hold over by the next start is dropped.
         assert_eq!(
             UsageBudget::kept_in(path, 4_900).held_until(Provider::Claude, 4_900),

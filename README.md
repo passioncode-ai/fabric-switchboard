@@ -197,9 +197,10 @@ stored (`&backup=1` adds a backup to restore from).
    Ticked, it runs in the account's own home with a direct connection to the provider, and
    later **Select** actions do not affect it.
 5. **Folders** are always chosen with the system folder picker, never typed.
-6. **Check usage**: quota is checked in the background (every 3 minutes for accounts in use or
-   in a group with automatic switching, every 10 minutes otherwise); **Check usage** asks at
-   once. An API key does not report a reliable subscription quota; an unknown quota is never
+6. **Check usage**: quota is checked in the background (every 3 minutes for accounts in use,
+   read from their requests' own rate-limit headers while those flow; every 10 minutes
+   otherwise; at most 2 checks a minute per provider, `switchboard usage-mode` chooses the
+   older fixed cadence); **Check usage** asks at once. An API key does not report a reliable subscription quota; an unknown quota is never
    shown as zero.
 7. **Automatic switching** (**Turn on for Claude Code** on Accounts): when the account in use
    nears its limit, Switchboard moves to the saved account in the same group with the most quota left.

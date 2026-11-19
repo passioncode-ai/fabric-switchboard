@@ -176,7 +176,8 @@ pub enum UsageMode {
     #[default]
     Smart,
     /// The fixed cadence of 0.7.121: every account of a switching group every three minutes,
-    /// headers never postpone a check, no budget beyond the provider's own waits.
+    /// headers never postpone a check, no budget beyond the provider's own waits and two checks
+    /// of one provider on the network at once.
     Timer,
     /// No background check: the endpoint is asked only for a switch's candidate and when a
     /// person asks; headers keep the figures of accounts in use.
