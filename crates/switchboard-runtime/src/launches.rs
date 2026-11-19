@@ -42,6 +42,9 @@ pub const PARENT_INVALID: &str =
 pub const LAUNCH_NOT_FOUND: &str =
     "No launch has that id. List them with switchboard sessions --history.";
 pub const NOT_A_LAUNCH: &str = "Only a launch can name who launched it.";
+/// SB-423: the most launch ids one `sessions --history --launch` (MCP `launch_ids`) reads.
+pub const MAX_LAUNCH_IDS: usize = 64;
+pub const LAUNCH_IDS_INVALID: &str = "Give from 1 to 64 launch ids.";
 
 /// Where a launch was asked for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -415,6 +418,35 @@ fn update(root: &Path, id: &str, change: impl FnOnce(&mut Value) -> bool) -> boo
 pub(crate) fn get(root: &Path, id: &str) -> Option<Value> {
     read(root, id).map(|r| with_state(root, r))
 }
+/// SB-423: the ids `sessions --history --launch` names, in the order given, a repeated id once;
+/// none or more than `MAX_LAUNCH_IDS` is refused.
+pub fn wanted_ids(ids: &[String]) -> Result<Vec<String>, String> {
+    let mut wanted: Vec<String> = Vec::new();
+    for id in ids {
+        if !wanted.contains(id) {
+            wanted.push(id.clone());
+        }
+    }
+    if wanted.is_empty() || wanted.len() > MAX_LAUNCH_IDS {
+        return Err(LAUNCH_IDS_INVALID.into());
+    }
+    Ok(wanted)
+}
+/// SB-423 (Fabric Dashboards FD-316, 2026-11-17): the named launches, each read by its id with
+/// its state now as the history gives it (`with_state_in`, each home read once), and the ids with
+/// no record (an id that is not one included). Nothing else is read: no other record, no chain,
+/// unlike `show`, which reads every record to build one launch's chain.
+pub fn by_ids(root: &Path, ids: &[String]) -> (Vec<Value>, Vec<String>) {
+    let mut homes = Homes::default();
+    let (mut found, mut missing) = (Vec::new(), Vec::new());
+    for id in ids {
+        match read(root, id) {
+            Some(record) => found.push(with_state_in(root, record, &mut homes)),
+            None => missing.push(id.clone()),
+        }
+    }
+    (found, missing)
+}
 /// SB-417: whether launch `id` was started for Fabric's board (`launched_by.surface: fabric`) and
 /// has not ended: the session pool counts it against the board's share.
 pub fn board_run_live(root: &Path, id: &str) -> bool {
@@ -680,12 +712,16 @@ pub(crate) fn by_session(
 /// the stop at `stopped_at`: its record names where its work went (`continued_as`, a hand-over or
 /// a later launch), or it was itself started after the stop (the session was continued by it).
 /// Either way the stop is no longer there to be continued. A missing record answers false.
-pub(crate) fn continued_after(root: &Path, id: &str, stopped_at: i64) -> bool {
-    read(root, id).is_some_and(|r| {
-        !r["continued_as"].is_null()
+/// With it, the record's own `continued_as` (null when it names none or the record is missing),
+/// from the same read: FD-316 (2026-11-17) puts `continued_as` on each open stop of `recovery`,
+/// so Fabric Dashboards no longer reads `sessions --history` to find it.
+pub(crate) fn continuation(root: &Path, id: &str, stopped_at: i64) -> (bool, Value) {
+    read(root, id).map_or((false, Value::Null), |r| {
+        let continued = !r["continued_as"].is_null()
             || r["launched_at"]
                 .as_i64()
-                .is_some_and(|at| at > stopped_at.saturating_add(STOP_SLACK_SECONDS))
+                .is_some_and(|at| at > stopped_at.saturating_add(STOP_SLACK_SECONDS));
+        (continued, r["continued_as"].clone())
     })
 }
 /// The seconds after a stop a launch of the same session may still be the one that stopped
@@ -1979,6 +2015,56 @@ mod tests {
     }
 
     #[test]
+    fn named_launches_are_read_by_id_alone_and_the_ids_with_no_record_are_named() {
+        // SB-423 (FD-316): `sessions --history --launch` reads each named record and nothing
+        // else: no scan of every record (as `show` does for its chain).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(DIR)).unwrap();
+        for (id, at) in [("l-a", 100), ("l-b", 200), ("l-c", 300)] {
+            fs::write(
+                root.join(DIR).join(format!("{id}.json")),
+                serde_json::to_vec(&json!({"launch_id": id, "launched_at": at})).unwrap(),
+            )
+            .unwrap();
+        }
+        let ids = wanted_ids(&[
+            "l-c".into(),
+            "l-a".into(),
+            "l-c".into(),
+            "l-none".into(),
+            "../l-a".into(),
+        ])
+        .unwrap();
+        assert_eq!(ids, ["l-c", "l-a", "l-none", "../l-a"]);
+        let scans = SCANS.with(|n| n.get());
+        let (found, missing) = by_ids(root, &ids);
+        assert_eq!(
+            SCANS.with(|n| n.get()),
+            scans,
+            "no record but the named ones"
+        );
+        let found: Vec<_> = found
+            .iter()
+            .map(|r| {
+                (
+                    r["launch_id"].as_str().unwrap(),
+                    r["state"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(found, [("l-c", "ended"), ("l-a", "ended")]);
+        assert_eq!(missing, ["l-none", "../l-a"]);
+        assert_eq!(wanted_ids(&[]).unwrap_err(), LAUNCH_IDS_INVALID);
+        let many: Vec<String> = (0..=MAX_LAUNCH_IDS).map(|i| format!("l-{i}")).collect();
+        assert_eq!(wanted_ids(&many).unwrap_err(), LAUNCH_IDS_INVALID);
+        assert_eq!(
+            wanted_ids(&many[..MAX_LAUNCH_IDS]).unwrap().len(),
+            MAX_LAUNCH_IDS
+        );
+    }
+
+    #[test]
     fn a_launch_continued_or_started_after_its_stop_takes_the_stop_with_it() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -2000,10 +2086,13 @@ mod tests {
             json!({"launch_id": "l-later", "launched_at": 900}),
         );
         put("l-same", json!({"launch_id": "l-same", "launched_at": 500}));
-        assert!(continued_after(root, "l-handed", 600));
-        assert!(continued_after(root, "l-later", 600));
-        assert!(!continued_after(root, "l-same", 600));
-        assert!(!continued_after(root, "l-missing", 600));
+        assert_eq!(
+            continuation(root, "l-handed", 600),
+            (true, json!({"kind": "handover", "id": "ho-1"}))
+        );
+        assert_eq!(continuation(root, "l-later", 600), (true, Value::Null));
+        assert_eq!(continuation(root, "l-same", 600), (false, Value::Null));
+        assert_eq!(continuation(root, "l-missing", 600), (false, Value::Null));
     }
 
     #[test]
