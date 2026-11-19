@@ -49,6 +49,7 @@ pub use projects::{
 };
 pub use rotation::{
     default_managed_policy, free_at, FailoverTally, Fits, RotationDecision, RotationPolicy,
+    CANDIDATE_RANK_MAX_AGE_SECONDS, CURRENT_MAX_AGE_FLOOR_SECONDS,
 };
 pub use vault::{
     open_vault, set_vault_kind, vault_kind, FileVault, MemoryVault, NativeVault, Vault, VaultKind,
@@ -155,6 +156,50 @@ pub const PROJECT_NOT_NATIVE: &str = "This account belongs to a project. The ord
 /// one of its windows resets.
 pub const CHECK_ACTIVE_SECONDS: i64 = 180;
 pub const CHECK_IDLE_SECONDS: i64 = 600;
+/// SB-518 (DEC-0029): a response's rate-limit headers that carry both the five-hour and the
+/// seven-day window count as a quota check, so while requests flow the next check from the
+/// usage endpoint waits; but never longer than this after the last check from the endpoint
+/// itself, because headers can lag the real figure and do not carry the per-model windows.
+pub const PASSIVE_CEILING_SECONDS: i64 = 1800;
+/// SB-518: the windows a header observation must carry to count as a check.
+pub const HEADER_WINDOWS: [&str; 2] = ["five_hour", "seven_day"];
+/// SB-518: the near-limit cadence never asks the usage endpoint while a header this recent
+/// already gave the figure.
+pub const HEADER_FRESH_SECONDS: i64 = 60;
+/// SB-518: header observations kept in memory reach `accounts.json` at most this often.
+pub const HEADER_FLUSH_SECONDS: i64 = 60;
+/// SB-518 (DEC-0029): how this computer keeps quota figures current, the person's choice.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UsageMode {
+    /// Response headers first, the usage endpoint when a figure decides something, under a
+    /// budget per provider (the default).
+    #[default]
+    Smart,
+    /// The fixed cadence of 0.7.120: every account of a switching group every three minutes,
+    /// headers never postpone a check, no budget beyond the provider's own waits.
+    Timer,
+    /// No background check: the endpoint is asked only for a switch's candidate and when a
+    /// person asks; headers keep the figures of accounts in use.
+    OnDemand,
+}
+impl UsageMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UsageMode::Smart => "smart",
+            UsageMode::Timer => "timer",
+            UsageMode::OnDemand => "on_demand",
+        }
+    }
+    /// `smart`, `timer`, `on_demand` (also `on-demand`).
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim() {
+            "smart" => Some(UsageMode::Smart),
+            "timer" => Some(UsageMode::Timer),
+            "on_demand" | "on-demand" => Some(UsageMode::OnDemand),
+            _ => None,
+        }
+    }
+}
 /// How soon after a reported reset an idle account is checked again.
 pub const CHECK_AFTER_RESET_SECONDS: i64 = 30;
 /// How old an observation may be and still count as current where no rotation policy sets
@@ -390,6 +435,17 @@ pub struct Store {
     ended: Mutex<std::collections::HashSet<String>>,
     /// What the proxy's failovers did since the runtime last took it (SB-237). Memory only.
     failover_tally: Mutex<rotation::FailoverTally>,
+    /// SB-518: when each account's quota was last read from the provider's usage endpoint in
+    /// this process (the anchor of `PASSIVE_CEILING_SECONDS`). Memory only: after a start no
+    /// header postpones a check until the endpoint answered once.
+    endpoint_seen: Mutex<std::collections::HashMap<String, i64>>,
+    /// SB-518: when each account last sent response headers with both windows. Memory only.
+    header_seen: Mutex<std::collections::HashMap<String, i64>>,
+    /// SB-518: since when a header observation waits in memory for `accounts.json` (0: none).
+    header_pending_since: std::sync::atomic::AtomicI64,
+    /// SB-518: the person's `UsageMode`, as the runtime last read it (0 smart, 1 timer, 2 on
+    /// demand). Memory only; the runtime keeps the choice in `<data>/usage-mode`.
+    usage_mode: std::sync::atomic::AtomicU8,
 }
 
 pub(crate) fn now() -> i64 {
@@ -441,7 +497,9 @@ fn usage_valid(u: &Usage) -> bool {
         )
 }
 
-fn merge_windows(old: &Usage, new: &Usage) -> Option<Usage> {
+/// `passive` (SB-518): a complete header set within `PASSIVE_CEILING_SECONDS` of the endpoint's
+/// last answer, whose other windows then count as observed with it.
+fn merge_windows(old: &Usage, new: &Usage, passive: bool) -> Option<Usage> {
     let mut windows = new.windows.clone();
     let mut observed_at = new.observed_at;
     for w in &old.windows {
@@ -452,7 +510,9 @@ fn merge_windows(old: &Usage, new: &Usage) -> Option<Usage> {
             // The aggregate can establish capacity only as recently as every
             // window it contains. A partial header response does not observe
             // the missing weekly/model quota, even when its reset is ahead.
-            observed_at = observed_at.min(old.observed_at);
+            if !passive {
+                observed_at = observed_at.min(old.observed_at);
+            }
         }
     }
     let worst = windows
@@ -977,6 +1037,10 @@ impl Store {
             paced: Default::default(),
             ended: Default::default(),
             failover_tally: Default::default(),
+            endpoint_seen: Default::default(),
+            header_seen: Default::default(),
+            header_pending_since: Default::default(),
+            usage_mode: Default::default(),
         })
     }
     /// The private data folder this store owns.
@@ -1049,6 +1113,8 @@ impl Store {
         self.writes
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.pending_since
+            .store(0, std::sync::atomic::Ordering::SeqCst);
+        self.header_pending_since
             .store(0, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
@@ -1187,6 +1253,13 @@ impl Store {
                     next.push(id);
                 }
             }
+        }
+        // SB-518: never an account whose response headers gave its figure within the minute.
+        if self.usage_mode() != UsageMode::Timer {
+            next.retain(|id| {
+                self.header_seen_at(id)
+                    .is_none_or(|at| now.saturating_sub(at) >= HEADER_FRESH_SECONDS)
+            });
         }
         if next.is_empty() {
             return Ok(0);
@@ -1417,6 +1490,49 @@ impl Store {
         }
         let current = state.clone();
         self.publish(&mut state, current)
+    }
+    /// SB-518: writes header observations held in memory once the oldest has waited `max_age`
+    /// seconds (`HEADER_FLUSH_SECONDS`), so a stream of answers costs at most one metadata write
+    /// a minute instead of one per changed header. The drain's `flush` writes the rest.
+    pub fn flush_headers_if_older(&self, now: i64, max_age: i64) -> Result<(), String> {
+        let since = self
+            .header_pending_since
+            .load(std::sync::atomic::Ordering::SeqCst);
+        if since == 0 || (now - since < max_age && now >= since) {
+            return Ok(());
+        }
+        self.flush()
+    }
+    /// SB-518: when `id` last sent response headers with both windows, in this process.
+    pub fn header_seen_at(&self, id: &str) -> Option<i64> {
+        self.header_seen
+            .lock()
+            .ok()
+            .and_then(|seen| seen.get(id).copied())
+    }
+    /// SB-518: the mode quota checks follow (the runtime sets it from the person's choice).
+    pub fn set_usage_mode(&self, mode: UsageMode) {
+        self.usage_mode.store(
+            match mode {
+                UsageMode::Smart => 0,
+                UsageMode::Timer => 1,
+                UsageMode::OnDemand => 2,
+            },
+            std::sync::atomic::Ordering::SeqCst,
+        );
+    }
+    pub fn usage_mode(&self) -> UsageMode {
+        match self.usage_mode.load(std::sync::atomic::Ordering::SeqCst) {
+            1 => UsageMode::Timer,
+            2 => UsageMode::OnDemand,
+            _ => UsageMode::Smart,
+        }
+    }
+    /// SB-518: whether a header observation waits in memory for `accounts.json`.
+    pub fn headers_pending(&self) -> bool {
+        self.header_pending_since
+            .load(std::sync::atomic::Ordering::SeqCst)
+            != 0
     }
     /// Writes pending timestamps once they have waited `max_age` seconds; a crash then loses
     /// at most that much quota bookkeeping, never an account, credential or setting.
@@ -2693,52 +2809,103 @@ impl Store {
         if let (Some(expected), Some(read)) = (expected, read) {
             self.same_generation(id, expected, read)?;
         }
-        // Inference response headers must not keep postponing the independent
-        // quota endpoint poll, especially when they contain only one window.
-        let next_check_at = if usage.source == "response_headers" {
-            a.usage_health
-                .as_ref()
-                .map(|h| h.next_check_at)
-                .unwrap_or(usage.observed_at)
-                .max(usage.observed_at)
-        } else {
-            let in_use = self
-                .in_use
-                .lock()
-                .map(|set| set.as_ref().is_some_and(|set| set.contains(id)))
-                .unwrap_or(true);
-            let rotates = candidate
-                .policies
+        let headers = usage.source == "response_headers";
+        // SB-518 (DEC-0029): headers with both windows count as a check; a partial set never
+        // does, and never postpones the usage endpoint.
+        let complete = headers
+            && HEADER_WINDOWS
                 .iter()
-                .any(|p| p.enabled && p.provider == a.provider && p.pool == a.pool);
-            let routed = candidate
-                .routes
-                .get(&format!("{}:{}", a.provider.as_str(), a.pool))
-                .is_some_and(|route| route == id);
-            let next = next_quota_check(in_use || rotates || routed, &usage, usage.observed_at);
-            // SB-106: the account a session works on, where a switch can follow, is checked
-            // sooner near its limit — unless the provider refused its checks lately.
-            let paced = self
-                .paced
-                .lock()
-                .map(|set| set.contains(id))
-                .unwrap_or(true);
-            match near_limit_check(&usage, usage.observed_at) {
-                Some(sooner) if ((in_use && rotates) || routed) && !paced => next.min(sooner),
+                .all(|name| usage.windows.iter().any(|w| w.name == *name));
+        let observed = usage.observed_at;
+        let anchor = self
+            .endpoint_seen
+            .lock()
+            .ok()
+            .and_then(|seen| seen.get(id).copied());
+        // While the endpoint answered within the ceiling, a header is as fresh as a check. The
+        // `timer` mode keeps the fixed cadence of 0.7.120: no header postpones anything.
+        let smart = self.usage_mode() != UsageMode::Timer;
+        let passive =
+            smart && complete && anchor.is_some_and(|at| observed < at + PASSIVE_CEILING_SECONDS);
+        let in_use = self
+            .in_use
+            .lock()
+            .map(|set| set.as_ref().is_some_and(|set| set.contains(id)))
+            .unwrap_or(true);
+        let rotates = candidate
+            .policies
+            .iter()
+            .any(|p| p.enabled && p.provider == a.provider && p.pool == a.pool);
+        let routed = candidate
+            .routes
+            .get(&format!("{}:{}", a.provider.as_str(), a.pool))
+            .is_some_and(|route| route == id);
+        // SB-106: the account a session works on, where a switch can follow, is checked sooner
+        // near its limit, unless the provider refused its checks lately.
+        let paced = self
+            .paced
+            .lock()
+            .map(|set| set.contains(id))
+            .unwrap_or(true);
+        let near_applies = ((in_use && rotates) || routed) && !paced;
+        let header_before = self.header_seen_at(id);
+        let existing = a.usage_health.as_ref().map(|h| h.next_check_at);
+        let next_check_at = if passive {
+            // The active cadence counts from this answer; near the limit the minute cadence
+            // counts from it too, so the endpoint is asked only once no header came for a
+            // minute (`HEADER_FRESH_SECONDS`). Never past the ceiling after the endpoint's last
+            // answer; never sooner than a schedule already set (an idle account's ten minutes,
+            // a failure's backoff).
+            let mut sooner = observed.saturating_add(CHECK_ACTIVE_SECONDS);
+            if near_applies && near_limit_check(&usage, observed).is_some() {
+                sooner = sooner.min(observed.saturating_add(HEADER_FRESH_SECONDS));
+            }
+            let ceiling = anchor
+                .unwrap_or(observed)
+                .saturating_add(PASSIVE_CEILING_SECONDS);
+            existing
+                .unwrap_or(observed)
+                .max(sooner.min(ceiling))
+                .max(observed)
+        } else if headers {
+            // Inference response headers that are partial, or come before the endpoint answered
+            // once in this process or past the ceiling, never postpone the endpoint's check.
+            existing.unwrap_or(observed).max(observed)
+        } else {
+            // SB-518: only an account that carries traffic (the ordinary CLI's, a group's routed
+            // one) keeps the active cadence; one that only could be switched to is read on the
+            // idle cadence, and a switch to it checks it fresh first (DEC-0029).
+            let next = next_quota_check(in_use || routed || (!smart && rotates), &usage, observed);
+            match near_limit_check(&usage, observed) {
+                Some(sooner) if near_applies => {
+                    // SB-518: never while a header from the last minute already gave the figure.
+                    let sooner = match header_before {
+                        Some(at) if smart && at <= observed => {
+                            sooner.max(at.saturating_add(HEADER_FRESH_SECONDS))
+                        }
+                        _ => sooner,
+                    };
+                    next.min(sooner)
+                }
                 _ => next,
             }
         };
         let was_ok = a.usage_health.as_ref().is_some_and(|h| h.status == "ok");
         a.usage_health = Some(UsageHealth {
             status: "ok".into(),
-            checked_at: usage.observed_at,
+            checked_at: observed,
             next_check_at,
         });
-        let headers = usage.source == "response_headers";
         if headers {
             // Stored quota is cleared whenever the credential generation changes, so any
-            // stored windows belong to this generation. Headers carry only 5h/7d.
-            if let Some(merged) = a.usage.as_ref().and_then(|old| merge_windows(old, &usage)) {
+            // stored windows belong to this generation. Headers carry only 5h/7d; the windows
+            // they lack keep the age of the endpoint's last answer, except within the ceiling
+            // (SB-518), where that answer is as current as the cadence promises.
+            if let Some(merged) = a
+                .usage
+                .as_ref()
+                .and_then(|old| merge_windows(old, &usage, passive))
+            {
                 usage = merged;
             }
         }
@@ -2746,14 +2913,33 @@ impl Store {
         // no journal entry, no write (lifecycle LC-08).
         let unchanged = was_ok && a.usage.as_ref().is_some_and(|old| same_quota(old, &usage));
         a.usage = Some(usage);
+        if complete {
+            if let Ok(mut seen) = self.header_seen.lock() {
+                seen.insert(id.to_owned(), observed);
+            }
+        } else if !headers {
+            if let Ok(mut seen) = self.endpoint_seen.lock() {
+                seen.insert(id.to_owned(), observed);
+            }
+        }
         if unchanged {
             return self.hold(&mut state, candidate);
         }
         // Per-request header observations would evict account history from the ring.
         if !headers {
             append_event(&mut candidate, "usage", Some(id), "observed");
+            return self.publish(&mut state, candidate);
         }
-        self.publish(&mut state, candidate)
+        // SB-518: a changed header waits in memory too, written at most once a minute
+        // (`flush_headers_if_older`) and at the drain; before, each one was an fsync.
+        self.hold(&mut state, candidate)?;
+        let _ = self.header_pending_since.compare_exchange(
+            0,
+            now().max(1),
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        Ok(())
     }
     pub fn record(&self, action: &str, id: Option<&str>, detail: &str) -> Result<(), String> {
         if !event_valid(action, detail) || id.is_some_and(|v| !uuid_valid(v)) {

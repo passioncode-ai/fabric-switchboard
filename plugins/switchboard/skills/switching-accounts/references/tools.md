@@ -861,6 +861,19 @@ session duty officer looks only at sessions in Switchboard's own homes. Claude D
 Switchboard either way. Without `on` it reads `{own_sign_in: "on" | "off", on}`; `on` changes it, only
 when the operator asks. Kept in `<data>/own-sign-in`.
 
+### `switchboard_usage_mode`: `mode?`
+
+How quota figures are kept current on this computer (SB-518, DEC-0029). `smart` (the default): a
+response's rate-limit headers with both the five-hour and the seven-day window count as a check, so
+while requests flow the usage endpoint is asked at most every 30 minutes per account; an account
+that carries no traffic is checked every 10 minutes; a switch checks its candidate fresh first;
+each provider has a budget of 2 checks a minute (a burst of 4, at most 2 at once), and a 429 on any
+usage check holds the whole provider for at least 15 minutes, doubling on repeats up to an hour.
+`timer`: the fixed cadence of 0.7.120. `on_demand`: no check on a schedule, only a switch's
+candidate and a person's check. Without `mode` it reads `{usage_mode, modes}`; `mode` changes it,
+only when the operator asks. Kept in `<data>/usage-mode`. A person's check (`switchboard_usage`
+with `refresh`) runs ahead of the budget by at most 4 checks, then answers that checks are paced.
+
 ### `switchboard_duty`: `on?`, `stuck_minutes?`, `waiting_minutes?`, `idle_minutes?`, `max_age_hours?`, `run?`, `dry_run?`
 
 The session duty officer (SB-384, DEC-0021). Every five minutes it looks at each live interactive

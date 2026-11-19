@@ -192,6 +192,70 @@ impl Store {
         now: i64,
         limited: &std::collections::HashSet<String>,
     ) -> Result<RotationDecision, String> {
+        self.decide(policy, current_id, now, limited, policy.max_age_seconds)
+    }
+    /// SB-518 (DEC-0029): the candidate a switch would take if its figures, up to
+    /// `CANDIDATE_RANK_MAX_AGE_SECONDS` old, were current, when they are older than the policy
+    /// allows: the caller checks it fresh before the pass decides, and `rotation_decision_with`
+    /// then switches to it only on that fresh figure. None when the decision already has a
+    /// candidate known fresh, holds for another reason, or the account in use is held by a
+    /// limit (that switch takes the last known figure, SB-98, and waits for nothing).
+    pub fn rotation_candidate_to_confirm(
+        &self,
+        policy: &RotationPolicy,
+        current_id: Option<&str>,
+        now: i64,
+        limited: &std::collections::HashSet<String>,
+    ) -> Result<Option<String>, String> {
+        if current_id.is_none_or(|id| limited.contains(id)) || !policy.enabled {
+            return Ok(None);
+        }
+        // From the metadata first: an account in use below its threshold, or with no current
+        // figure, switches nowhere, and no credential is read to learn so (LC-04).
+        let over = {
+            let state = self.lock()?;
+            state
+                .accounts
+                .iter()
+                .find(|a| Some(a.id.as_str()) == current_id)
+                .and_then(|a| {
+                    fresh_usage(
+                        a,
+                        policy.max_age_seconds.max(CURRENT_MAX_AGE_FLOOR_SECONDS),
+                        now,
+                    )
+                })
+                .is_some_and(|used| used >= policy.threshold_percent)
+        };
+        if !over {
+            return Ok(None);
+        }
+        let ranked = self.decide(
+            policy,
+            current_id,
+            now,
+            limited,
+            policy.max_age_seconds.max(CANDIDATE_RANK_MAX_AGE_SECONDS),
+        )?;
+        let Some(id) = ranked.candidate_id else {
+            return Ok(None);
+        };
+        let state = self.lock()?;
+        Ok(state
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .filter(|a| fresh_usage(a, policy.max_age_seconds, now).is_none())
+            .map(|a| a.id.clone()))
+    }
+    fn decide(
+        &self,
+        policy: &RotationPolicy,
+        current_id: Option<&str>,
+        now: i64,
+        limited: &std::collections::HashSet<String>,
+        candidate_max_age: i64,
+    ) -> Result<RotationDecision, String> {
         policy.validate()?;
         if now <= 0 {
             return Err("Invalid rotation time".into());
@@ -221,7 +285,10 @@ impl Store {
             if !self.rotation_credential_eligible(current, policy, now) {
                 return Ok(hold("current_unavailable"));
             }
-            let Some(usage) = fresh_usage(current, policy, now) else {
+            // SB-518: the account in use is held to the policy's age, but never to less than
+            // the real interval between its checks (`CURRENT_MAX_AGE_FLOOR_SECONDS`).
+            let current_age = policy.max_age_seconds.max(CURRENT_MAX_AGE_FLOOR_SECONDS);
+            let Some(usage) = fresh_usage(current, current_age, now) else {
                 return Ok(hold("usage_unavailable"));
             };
             if usage < policy.threshold_percent {
@@ -242,7 +309,7 @@ impl Store {
                     // spending ceiling gates, and a key's caller never onto a subscription.
                     && a.kind == current.kind
             })
-            .filter_map(|a| fresh_usage(a, policy, now).map(|used| (a, used)))
+            .filter_map(|a| fresh_usage(a, candidate_max_age, now).map(|used| (a, used)))
             .filter(|(a, used)| {
                 // An account in use that fails every request is worse than any account with
                 // room left; otherwise the usual headroom applies.
@@ -423,7 +490,7 @@ impl Store {
                     && fits.admits(a)
                     && self.rotation_credential_eligible(a, policy, now)
             })
-            .filter_map(|a| match fresh_usage(a, policy, now) {
+            .filter_map(|a| match fresh_usage(a, policy.max_age_seconds, now) {
                 Some(used) if used < 100.0 => Some((a, 0u8, used)),
                 Some(_) => None,
                 None => {
@@ -543,7 +610,7 @@ impl Store {
                     && !held.contains(&a.id)
                     && a.usage_health.as_ref().is_some_and(|h| h.status == "ok")
             })
-            .filter_map(|a| match fresh_usage(a, policy, now) {
+            .filter_map(|a| match fresh_usage(a, policy.max_age_seconds, now) {
                 Some(used) if used < 100.0 => Some((a, 0u8, used)),
                 Some(_) => None,
                 None => {
@@ -607,7 +674,14 @@ fn last_known_usage(account: &Account, now: i64) -> f64 {
     }
     usage.account_used_percent().unwrap_or(99.0)
 }
-fn fresh_usage(account: &Account, policy: &RotationPolicy, now: i64) -> Option<f64> {
+/// SB-518: how old a candidate's figures may be for it to be ranked; the one chosen is checked
+/// fresh before a switch (`Store::rotation_candidate_to_confirm`).
+pub const CANDIDATE_RANK_MAX_AGE_SECONDS: i64 = 900;
+/// SB-518: the account in use is checked every `CHECK_ACTIVE_SECONDS` (± 15 %), on the 30-second
+/// pass, under the provider's budget: a policy age below this would hold every switch until a
+/// refusal forced one.
+pub const CURRENT_MAX_AGE_FLOOR_SECONDS: i64 = 300;
+fn fresh_usage(account: &Account, max_age: i64, now: i64) -> Option<f64> {
     let usage = account.usage.as_ref()?;
     let health = account.usage_health.as_ref()?;
     // A partial response header set cannot establish available subscription capacity:
@@ -621,8 +695,8 @@ fn fresh_usage(account: &Account, policy: &RotationPolicy, now: i64) -> Option<f
         return None;
     }
     if health.status != "ok" || health.checked_at < usage.observed_at || health.checked_at > now
-        || usage.observed_at > now || now - usage.observed_at > policy.max_age_seconds
-        || now - health.checked_at > policy.max_age_seconds
+        || usage.observed_at > now || now - usage.observed_at > max_age
+        || now - health.checked_at > max_age
         // A reset crossing needs a fresh provider observation, never a guessed zero. A feature
         // window's reset says nothing about the account (SB-40); with windows stored, the
         // aggregate's reset is one of theirs.

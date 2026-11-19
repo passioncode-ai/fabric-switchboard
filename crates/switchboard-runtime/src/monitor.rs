@@ -6,6 +6,7 @@ use std::{sync::Arc, time::Duration};
 use switchboard_core::{Account, AuthKind, Provider, Store, Usage};
 use tokio::task::JoinHandle;
 
+use crate::usage_budget::Caller;
 use crate::usage_gate::UsageGate;
 
 /// The active quota cadence (SB-48); also the source-sync and first-failure interval.
@@ -245,9 +246,10 @@ impl Pass {
         );
         // With the same slack as the schedules it sets: passes 30 s apart, stamped in whole
         // seconds, may be 59 s apart.
-        if time.abs_diff(self.last_pull_in)
-            >= (switchboard_core::CHECK_NEAR_LIMIT_SECONDS
-                - switchboard_core::NEAR_LIMIT_SLACK_SECONDS) as u64
+        if runtime.store.usage_mode() != switchboard_core::UsageMode::OnDemand
+            && time.abs_diff(self.last_pull_in)
+                >= (switchboard_core::CHECK_NEAR_LIMIT_SECONDS
+                    - switchboard_core::NEAR_LIMIT_SLACK_SECONDS) as u64
         {
             let _ = runtime.store.pull_in_next_accounts(time);
             self.last_pull_in = time;
@@ -258,10 +260,21 @@ impl Pass {
         runtime
             .usage_gate
             .forget_missing(snapshot.accounts.iter().map(|a| a.id.as_str()));
+        // SB-518 (DEC-0029): the person's mode. `on_demand` checks nothing on a schedule (a
+        // switch's candidate and a person's check still ask); `timer` keeps 0.7.120's cadence.
+        let mode = runtime.store.usage_mode();
         let mut due: Vec<_> = snapshot
             .accounts
             .into_iter()
-            .filter(|a| due_now(a, time, &runtime.usage_gate))
+            .filter(|_| mode != switchboard_core::UsageMode::OnDemand)
+            .filter(|a| {
+                due_now_at(
+                    a,
+                    time,
+                    &runtime.usage_gate,
+                    mode != switchboard_core::UsageMode::Timer,
+                )
+            })
             .collect();
         // Oldest due first: a failing first row cannot starve another account.
         due.sort_by_key(|a| {
@@ -273,7 +286,7 @@ impl Pass {
         if native_sources {
             renew_due(runtime, time, &mut self.renew).await;
         }
-        for account in due.into_iter().take(CHECKS_PER_PASS) {
+        for account in choose_checks(due, &runtime.usage_gate, mode, time) {
             let _ = check(
                 &runtime.store,
                 runtime.native(),
@@ -293,6 +306,13 @@ impl Pass {
         // W4 items 2 and 14: Claude Code's sign-in and the accounts that need a new sign-in are
         // read once per pass, before the transaction (Keychain reads held it up to 48 s).
         let inputs = crate::blocking::run(|| rotate_inputs(runtime, native_sources));
+        // SB-518 (DEC-0029): a switch ranks candidates on figures up to fifteen minutes old and
+        // takes one only on a fresh figure: the one it would take is checked now, outside the
+        // transaction, counted in its provider's budget. Never a request of a session: the proxy's
+        // one move of a refused request (DEC-0002) is untouched.
+        if runtime.store.usage_mode() != switchboard_core::UsageMode::Timer {
+            confirm_candidates(runtime, native_sources, &inputs, time).await;
+        }
         {
             let _mutation = runtime.hold("rotate").await;
             // SB-310: a group with accounts and no saved managed policy gets an enabled one.
@@ -418,6 +438,10 @@ impl Pass {
         // Quota timestamps wait in memory; they reach the disk with the next real change or
         // after a quarter of an hour.
         let _ = runtime.store.flush_if_older(time, FLUSH_SECONDS);
+        // SB-518: response headers' figures, at most once a minute.
+        let _ = runtime
+            .store
+            .flush_headers_if_older(time, switchboard_core::HEADER_FLUSH_SECONDS);
         // SB-145: the proxy's counts, written at most every quarter of an hour.
         runtime.absorb_statistics();
         runtime.statistics.save(&runtime.root, time, false);
@@ -576,20 +600,65 @@ fn primed_or_read(
     }
 }
 
-/// A schedule stamped ahead of a clock that was set back would otherwise stall probes.
+/// The due accounts (oldest first) this pass checks: at most four, and in the `smart` and
+/// `on_demand` modes each only with a token of its provider's budget (SB-518, DEC-0029: two a
+/// minute, a burst of four), so a provider without one waits for a later pass. The `timer` mode
+/// keeps 0.7.120's four a pass with no budget.
+fn choose_checks(
+    due: Vec<Account>,
+    gate: &UsageGate,
+    mode: switchboard_core::UsageMode,
+    time: i64,
+) -> Vec<Account> {
+    let mut chosen = Vec::new();
+    for account in due {
+        if chosen.len() == CHECKS_PER_PASS {
+            break;
+        }
+        if mode != switchboard_core::UsageMode::Timer
+            && gate
+                .budget
+                .take(account.provider, Caller::Background, time)
+                .is_err()
+        {
+            continue;
+        }
+        chosen.push(account);
+    }
+    chosen
+}
+
+/// A schedule stamped ahead of a clock that was set back would otherwise stall probes. SB-518:
+/// every schedule of two minutes or more falls due spread by ± 15 % (`usage_budget::jittered`),
+/// so accounts checked together drift apart instead of falling due in step.
 fn due(a: &Account, time: i64) -> bool {
+    due_at(a, time, true)
+}
+/// `spread` false: the `timer` mode's fixed cadence, every schedule due exactly when it says.
+fn due_at(a: &Account, time: i64, spread: bool) -> bool {
     a.enabled
         && a.kind == AuthKind::OAuth
-        && a.usage_health
-            .as_ref()
-            .is_none_or(|h| h.next_check_at <= time || h.checked_at > time + 60)
+        && a.usage_health.as_ref().is_none_or(|h| {
+            let next = if spread {
+                crate::usage_budget::jittered(&a.id, h.checked_at, h.next_check_at)
+            } else {
+                h.next_check_at
+            };
+            next <= time || h.checked_at > time + 60
+        })
 }
 
 /// Due for this pass. A row the provider asked to wait for keeps no slot, even when its
 /// schedule says due (a clock set back); a new credential generation — its usage health
 /// cleared — is checked at once. No credential is read here (LC-04).
 fn due_now(a: &Account, time: i64, gate: &UsageGate) -> bool {
-    due(a, time) && !(a.usage_health.is_some() && gate.held(&a.id, time))
+    due_now_at(a, time, gate, true)
+}
+fn due_now_at(a: &Account, time: i64, gate: &UsageGate, spread: bool) -> bool {
+    due_at(a, time, spread)
+        && !(a.usage_health.is_some() && gate.held(&a.id, time))
+        // SB-518: a 429 on any usage check holds every account of its provider.
+        && gate.budget.held_until(a.provider, time).is_none()
 }
 
 fn backoff(previous: Option<(i64, i64)>) -> i64 {
@@ -698,7 +767,10 @@ pub(crate) async fn probe(
     let result = probe_provider(store.clone(), id, generation.clone(), gate).await;
     let checked = now();
     match result {
-        Ok(usage) => Ok(usage),
+        Ok(usage) => {
+            gate.budget.succeeded(account.provider);
+            Ok(usage)
+        }
         Err(failure) => {
             let delay = failure_delay(
                 account
@@ -717,6 +789,8 @@ pub(crate) async fn probe(
                     checked,
                     checked + crate::usage_gate::not_before_delay(wait),
                 );
+                // SB-518: and every other account of the provider, from the same address.
+                gate.budget.refused(account.provider, checked, wait);
             }
             // Diagnosis only: a fixed code, never the provider's body or a token.
             match failure.status {
@@ -772,7 +846,18 @@ pub(crate) async fn check(
     lock: Option<&tokio::sync::Mutex<()>>,
     gate: &UsageGate,
 ) -> Result<Usage, String> {
-    check_as(store, native, refresh, id, lock, gate, false).await
+    check_as(store, native, refresh, id, lock, gate, Caller::Background).await
+}
+/// SB-518: the fresh check of the candidate a switch would take; the pass took its token.
+pub(crate) async fn check_candidate(
+    store: &Arc<Store>,
+    native: crate::NativeSources,
+    refresh: &crate::refresh::RefreshState,
+    id: &str,
+    lock: Option<&tokio::sync::Mutex<()>>,
+    gate: &UsageGate,
+) -> Result<Usage, String> {
+    check_as(store, native, refresh, id, lock, gate, Caller::Confirm).await
 }
 /// B-5 fix cycle 1: a quota check a person asked for (the owner's Usage operation, the offline
 /// CLI's). Past a usage verdict it asks the provider once more: any answer other than a 401
@@ -786,7 +871,7 @@ pub(crate) async fn check_by_person(
     lock: Option<&tokio::sync::Mutex<()>>,
     gate: &UsageGate,
 ) -> Result<Usage, String> {
-    check_as(store, native, refresh, id, lock, gate, true).await
+    check_as(store, native, refresh, id, lock, gate, Caller::Person).await
 }
 #[allow(clippy::too_many_arguments)]
 async fn check_as(
@@ -796,23 +881,33 @@ async fn check_as(
     id: &str,
     lock: Option<&tokio::sync::Mutex<()>>,
     gate: &UsageGate,
-    person: bool,
+    caller: Caller,
 ) -> Result<Usage, String> {
+    let person = caller == Caller::Person;
     // SB-360: a turned-off account (one used on another machine included) is never checked:
     // refused before any credential read, renewal, identity lookup or health write. Before,
     // every check of one read its Keychain item twice behind the process-wide Keychain lock and
     // marked it failed; a caller that refreshed every account did so for each turned-off one.
-    if store
-        .snapshot()?
-        .accounts
-        .iter()
-        .any(|a| a.id == id && !a.enabled)
-    {
+    let snapshot = store.snapshot()?;
+    let account = snapshot.accounts.iter().find(|a| a.id == id);
+    if account.is_some_and(|a| !a.enabled) {
         crate::oplog::event(
             "usage_check",
             &[("outcome", crate::oplog::Field::Code("disabled"))],
         );
         return Err(switchboard_proxy::USAGE_DISABLED.into());
+    }
+    let provider = account.map(|a| a.provider);
+    // SB-518 (DEC-0029): while a 429 holds its provider, nobody asks: a person's check is
+    // answered as the provider's wait, before any renewal or credential read.
+    if let Some(provider) = provider {
+        if gate.budget.held_until(provider, now()).is_some() {
+            crate::oplog::event(
+                "usage_check",
+                &[("outcome", crate::oplog::Field::Code("provider_held"))],
+            );
+            return Err(switchboard_proxy::USAGE_RATE_LIMITED.into());
+        }
     }
     // SB-311: a sign-in moved here without the provider's identity learns it first, so the
     // renewal below can run before its access token expires. Never under the owner transaction:
@@ -835,6 +930,26 @@ async fn check_as(
         Err(SIGN_IN.to_string())
     };
     let sequence = || async {
+        // SB-518: a person's check takes its provider's token here (the pass took the
+        // background's and a candidate's with its own clock); every check waits for one of the
+        // provider's two places on the network, the background only when one is free.
+        let _flight = match provider {
+            Some(provider) => {
+                if caller == Caller::Person
+                    && store.usage_mode() != switchboard_core::UsageMode::Timer
+                {
+                    if let Err(paced) = gate.budget.take(provider, caller, now()) {
+                        crate::oplog::event(
+                            "usage_check",
+                            &[("outcome", crate::oplog::Field::Code("paced"))],
+                        );
+                        return Err(paced);
+                    }
+                }
+                Some(gate.budget.fly(provider, caller).await?)
+            }
+            None => None,
+        };
         if gate.has_hold(id) {
             if let Ok(credential) = store.stored_credential(id) {
                 if gate.active(id, &credential, now()).is_some() {
@@ -1237,6 +1352,119 @@ fn rotate_inputs(runtime: &Runtime, native_sources: bool) -> RotateInputs {
         sign_in: runtime.refresh.sign_in_required(&runtime.store),
     }
 }
+/// The accounts a switch never takes for a policy whose account in use is `current`: those a
+/// limit or a refusal holds, those that need a new sign-in, and those set aside after a failed
+/// switch; never `current` itself for the last two.
+fn rotation_excluded(
+    runtime: &Runtime,
+    sign_in: &[String],
+    current: Option<&str>,
+) -> std::collections::HashSet<String> {
+    let mut excluded = runtime.held(now());
+    excluded.extend(
+        sign_in
+            .iter()
+            .filter(|id| current != Some(id.as_str()))
+            .cloned(),
+    );
+    // SB-98: a candidate whose switch fails is set aside for ten minutes and the next one
+    // is tried in the same pass — up to three — instead of the same one every 30 s.
+    // SB-102: only ever as a candidate — the account in use is never "limited" for an earlier
+    // failed switch to it; expired entries go.
+    if let Ok(mut failed) = runtime.failed_switches.lock() {
+        failed.retain(|_, until| *until > now());
+        excluded.extend(
+            failed
+                .keys()
+                .filter(|id| current != Some(id.as_str()))
+                .cloned(),
+        );
+    }
+    excluded
+}
+/// SB-518: fresh checks of switch candidates a pass makes at most.
+const CONFIRMS_PER_PASS: usize = 2;
+/// SB-518 (DEC-0029): the candidate each enabled policy would switch to on a figure older than it
+/// allows is checked now, at most two a pass, each with a token of its provider's budget (it may
+/// run ahead of the bucket like a person's check). The switch itself is decided after, in the
+/// transaction, on the fresh figure only. A native policy uses the sign-in read for the pass.
+async fn confirm_candidates(
+    runtime: &Runtime,
+    native_sources: bool,
+    inputs: &RotateInputs,
+    time: i64,
+) {
+    let Ok(snapshot) = runtime.store.snapshot() else {
+        return;
+    };
+    let mut wanted: Vec<(Provider, String)> = Vec::new();
+    for policy in snapshot.policies.iter().filter(|p| p.enabled) {
+        if policy.target == "claude_cli" && runtime.refresh.swap_switching() {
+            continue;
+        }
+        let current = if policy.target == "managed" {
+            snapshot
+                .routes
+                .get(&format!("{}:{}", policy.provider.as_str(), policy.pool))
+                .cloned()
+        } else if native_sources {
+            inputs
+                .native
+                .as_ref()
+                .and_then(|read| read.as_ref().ok())
+                .and_then(|profile| {
+                    runtime
+                        .store
+                        .match_external(Provider::Claude, &policy.pool, &profile.identity)
+                        .ok()
+                        .flatten()
+                })
+                .map(|a| a.id)
+        } else {
+            None
+        };
+        let excluded = rotation_excluded(runtime, &inputs.sign_in, current.as_deref());
+        if let Ok(Some(id)) = runtime.store.rotation_candidate_to_confirm(
+            policy,
+            current.as_deref(),
+            now(),
+            &excluded,
+        ) {
+            if !wanted.iter().any(|(_, w)| *w == id) {
+                wanted.push((policy.provider, id));
+            }
+        }
+    }
+    for (provider, id) in wanted.into_iter().take(CONFIRMS_PER_PASS) {
+        if runtime
+            .usage_gate
+            .budget
+            .take(provider, Caller::Confirm, time)
+            .is_err()
+        {
+            continue;
+        }
+        let outcome = check_candidate(
+            &runtime.store,
+            runtime.native(),
+            &runtime.refresh,
+            &id,
+            Some(&runtime.mutations),
+            &runtime.usage_gate,
+        )
+        .await;
+        crate::oplog::event(
+            "usage_confirm",
+            &[
+                ("provider", crate::oplog::Field::Code(provider.as_str())),
+                (
+                    "outcome",
+                    crate::oplog::Field::Code(if outcome.is_ok() { "ok" } else { "failed" }),
+                ),
+            ],
+        );
+    }
+}
 #[cfg(test)]
 fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
     rotate_with(
@@ -1290,26 +1518,7 @@ fn rotate_with(
         // SB-102: refusals the proxy recorded since the last scan count at once, so the pass
         // never moves a pool back onto the account a request was just refused on (WF-5.2b: the
         // set rotation, recovery and dispatch share).
-        let mut excluded = runtime.held(now());
-        excluded.extend(
-            sign_in
-                .iter()
-                .filter(|id| current.as_deref() != Some(id.as_str()))
-                .cloned(),
-        );
-        // SB-98: a candidate whose switch fails is set aside for ten minutes and the next one
-        // is tried in the same pass — up to three — instead of the same one every 30 s.
-        // SB-102: only ever as a candidate — the account in use is never "limited" for an earlier
-        // failed switch to it; expired entries go.
-        if let Ok(mut failed) = runtime.failed_switches.lock() {
-            failed.retain(|_, until| *until > now());
-            excluded.extend(
-                failed
-                    .keys()
-                    .filter(|id| current.as_deref() != Some(id.as_str()))
-                    .cloned(),
-            );
-        }
+        let mut excluded = rotation_excluded(runtime, &sign_in, current.as_deref());
         let mut attempt = 0;
         // The last failed switch: when nothing else can be tried, that failure is the answer.
         let mut last_failure: Option<(String, String)> = None;
@@ -1842,7 +2051,8 @@ mod tests {
         };
         let time = now();
         assert!(!due(&account(time, time + 180), time));
-        assert!(due(&account(time - 200, time - 20), time));
+        // SB-518: a schedule falls due within ± 15 % of its interval.
+        assert!(due(&account(time - 240, time - 60), time));
         assert!(due(&account(time + 3600, time + 3780), time));
     }
     fn quota(store: &Store, id: &str, used: f64) {
@@ -2674,6 +2884,63 @@ mod tests {
         account.usage_health = None;
         assert!(due_now(&account, 10_000, &gate));
     }
+    /// SB-518 (DEC-0029): 32 accounts of one provider, all due every three minutes (the
+    /// demand that made about 640 checks an hour), on a fake clock: the smart mode's budget
+    /// lets about 120 through in an hour; the timer mode keeps 0.7.120's four a pass.
+    #[test]
+    fn the_budget_holds_an_hour_of_passes_with_32_accounts_to_about_120_checks() {
+        fn hour(mode: switchboard_core::UsageMode) -> usize {
+            let gate = UsageGate::budgeted();
+            let start = 1_000_000;
+            let mut accounts: Vec<Account> = (0..32)
+                .map(|n| switchboard_core::Account {
+                    id: format!("synthetic-{n:02}"),
+                    label: "Synthetic".into(),
+                    provider: Provider::Claude,
+                    kind: AuthKind::OAuth,
+                    pool: "default".into(),
+                    enabled: true,
+                    created_at: 1,
+                    identity: None,
+                    usage: None,
+                    external_identity: None,
+                    usage_health: Some(switchboard_core::UsageHealth {
+                        status: "ok".into(),
+                        checked_at: start - 180,
+                        next_check_at: start,
+                    }),
+                })
+                .collect();
+            let mut checks = 0;
+            for k in 0..3600 / PASS_SECONDS as i64 {
+                let time = start + k * PASS_SECONDS as i64;
+                let spread = mode != switchboard_core::UsageMode::Timer;
+                let mut due: Vec<Account> = accounts
+                    .iter()
+                    .filter(|a| due_now_at(a, time, &gate, spread))
+                    .cloned()
+                    .collect();
+                due.sort_by_key(|a| a.usage_health.as_ref().map(|h| h.next_check_at));
+                for chosen in choose_checks(due, &gate, mode, time) {
+                    checks += 1;
+                    let a = accounts.iter_mut().find(|a| a.id == chosen.id).unwrap();
+                    a.usage_health = Some(switchboard_core::UsageHealth {
+                        status: "ok".into(),
+                        checked_at: time,
+                        next_check_at: time + switchboard_core::CHECK_ACTIVE_SECONDS,
+                    });
+                }
+            }
+            checks
+        }
+        let smart = hour(switchboard_core::UsageMode::Smart);
+        assert!(
+            (100..=130).contains(&smart),
+            "smart: {smart} checks an hour"
+        );
+        let timer = hour(switchboard_core::UsageMode::Timer);
+        assert!(timer > 400, "timer: {timer} checks an hour");
+    }
     #[test]
     fn backoff_is_bounded_and_clock_independent() {
         assert_eq!(backoff(None), 180);
@@ -3213,6 +3480,97 @@ mod tests {
         ) -> Result<Usage, String> {
             let lock = tokio::sync::Mutex::new(());
             check(store, NATIVE, state, id, Some(&lock), gate).await
+        }
+
+        /// SB-518 (DEC-0029): a 429 on one account's usage check holds every account of the
+        /// provider: no other account's check, a person's included, reaches the endpoint, and the
+        /// background leaves them all out of its pass.
+        #[tokio::test]
+        async fn a_429_on_one_accounts_check_holds_every_account_of_the_provider() {
+            let server = server(&[429, 200], renewed()).await;
+            let (_root, store) = store();
+            let b = claude_seat(&store);
+            let d = save(&store, "synthetic-d", "default").id;
+            let state = RefreshState::at(format!("{}/token", server.base));
+            let gate = UsageGate::budgeted();
+            *gate.origins.lock().unwrap() = Some((server.base.clone(), server.base.clone()));
+            assert!(run(&store, &state, &b, &gate).await.is_err());
+            assert_eq!(server.probes.load(Ordering::SeqCst), 1);
+            let (other, events) = crate::oplog::capture_async(run(&store, &state, &d, &gate)).await;
+            assert_eq!(other.unwrap_err(), switchboard_proxy::USAGE_RATE_LIMITED);
+            let lock = tokio::sync::Mutex::new(());
+            assert_eq!(
+                check_by_person(&store, NATIVE, &state, &d, Some(&lock), &gate)
+                    .await
+                    .unwrap_err(),
+                switchboard_proxy::USAGE_RATE_LIMITED
+            );
+            assert_eq!(
+                server.probes.load(Ordering::SeqCst),
+                1,
+                "nobody asked again"
+            );
+            assert!(events.iter().any(|(e, f)| *e == "usage_check"
+                && f.contains(&("outcome", crate::oplog::Field::Code("provider_held")))));
+            for account in store.snapshot().unwrap().accounts {
+                assert!(!due_now(&account, now(), &gate), "{}", account.label);
+            }
+            // At least the 900 s floor a single account's hold has, never less.
+            assert!(gate
+                .budget
+                .held_until(Provider::Claude, now())
+                .is_some_and(|until| until >= now() + 900 - 5));
+        }
+
+        /// SB-518 (DEC-0029): a switch ranks a candidate on a ten-minute-old figure but takes it
+        /// only after one fresh check of it, made before the pass decides.
+        #[tokio::test]
+        async fn a_switch_checks_its_candidate_fresh_before_it_moves() {
+            use super::{policy, quota, reason};
+            let server = server(&[200], renewed()).await;
+            let root = tempfile::tempdir().unwrap();
+            let runtime = crate::fixtures::runtime(root.path(), signed_out, activates).await;
+            runtime
+                .refresh
+                .set_endpoint("http://127.0.0.1:9/token".into());
+            runtime
+                .refresh
+                .set_profile_endpoint("http://127.0.0.1:9/profile".into());
+            *runtime.usage_gate.origins.lock().unwrap() =
+                Some((server.base.clone(), server.base.clone()));
+            let a = save(&runtime.store, "synthetic-a", "default");
+            let b = save(&runtime.store, "synthetic-b", "default");
+            quota(&runtime.store, &a.id, 95.0);
+            runtime
+                .store
+                .observe(
+                    &b.id,
+                    Usage {
+                        used_percent: 10.,
+                        observed_at: now() - 600,
+                        resets_at: None,
+                        source: "provider".into(),
+                        windows: vec![],
+                    },
+                )
+                .unwrap();
+            runtime
+                .store
+                .select(Provider::Claude, "default", &a.id)
+                .unwrap();
+            runtime.store.set_policy(policy("managed")).unwrap();
+            rotate(&runtime, false).unwrap();
+            assert_eq!(
+                reason(&runtime),
+                "no_eligible_account",
+                "not on the old figure"
+            );
+            assert_eq!(server.probes.load(Ordering::SeqCst), 0);
+            let inputs = rotate_inputs(&runtime, false);
+            confirm_candidates(&runtime, false, &inputs, now()).await;
+            assert_eq!(server.probes.load(Ordering::SeqCst), 1, "one fresh check");
+            rotate(&runtime, false).unwrap();
+            assert_eq!(reason(&runtime), "switched");
         }
 
         #[tokio::test]

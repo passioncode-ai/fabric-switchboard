@@ -179,6 +179,14 @@ enum Command {
         #[command(subcommand)]
         command: Option<OwnSignInCmd>,
     },
+    /// How quota figures are kept current: smart (the default: response headers first, the
+    /// usage endpoint when a figure decides something, two checks a minute per provider), timer
+    /// (a fixed three-minute cadence for every account of a switching group) or on-demand (only
+    /// before a switch and when you ask). Without a subcommand: the setting.
+    UsageMode {
+        #[command(subcommand)]
+        command: Option<UsageModeCmd>,
+    },
     /// The restricted entry another machine reaches over ssh: put it in that machine's key line
     /// in ~/.ssh/authorized_keys as `command="'<this program>' ssh-serve --sender-key KEY --pool
     /// GROUP",restrict` (the program quoted, since sshd runs the line through a shell). It
@@ -1111,6 +1119,15 @@ enum CapacityCmd {
     Clear,
 }
 
+#[derive(Subcommand)]
+enum UsageModeCmd {
+    /// Response headers first, the usage endpoint when a figure decides something (the default).
+    Smart,
+    /// Every account of a switching group checked every three minutes, as before 0.7.121.
+    Timer,
+    /// No check on a schedule: only a switch's candidate and a check you ask for.
+    OnDemand,
+}
 #[derive(Subcommand)]
 enum OwnSignInCmd {
     /// Switchboard may read and change your own sign-in (the default).
@@ -2974,6 +2991,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 board: None,
                 board_default: false,
             },
+        },
+        Command::UsageMode { command } => Operation::UsageMode {
+            mode: command.as_ref().map(|c| {
+                match c {
+                    UsageModeCmd::Smart => "smart",
+                    UsageModeCmd::Timer => "timer",
+                    UsageModeCmd::OnDemand => "on_demand",
+                }
+                .to_owned()
+            }),
         },
         Command::OwnSignIn { command } => Operation::OwnSignIn {
             on: command.as_ref().map(|c| matches!(c, OwnSignInCmd::On)),
@@ -6609,6 +6636,9 @@ mod mcp_parity {
             "ssh-serve",
             Not("the forced command of another machine's ssh key; it answers that machine, never an agent here"),
         ),
+        ("usage-mode smart", Tool("switchboard_usage_mode")),
+        ("usage-mode timer", Tool("switchboard_usage_mode")),
+        ("usage-mode on-demand", Tool("switchboard_usage_mode")),
         ("own-sign-in on", Tool("switchboard_own_sign_in")),
         ("own-sign-in off", Tool("switchboard_own_sign_in")),
         (
