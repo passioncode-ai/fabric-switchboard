@@ -322,7 +322,8 @@ Account list order is display-only; it never selects/activates. Within provider/
 - **Cadence.** `next_quota_check(in_use || routed, …)`: an account that only could be switched to
   is on the idle cadence in `smart` and `on_demand` (`timer`: `in_use || routed || rotates`).
   `monitor::due_at` spreads every schedule of 120 s or more by ± 15 % (`usage_budget::jittered`,
-  SHA-256 of the account and schedule, the same on every platform; not in `timer`).
+  SHA-256 of the account and schedule, the same on every platform; not in `timer`), a schedule
+  the ceiling cut included, so the endpoint's check may fall up to 15 % of its span past it.
 - **Budget.** `UsageGate::budget` (`usage_budget::UsageBudget`, unbudgeted in a test's
   `UsageGate::default()`): per provider a bucket of `TOKEN_SECONDS` = 30 s of refill per check,
   `BURST` = 4; the pass takes a token per check (`monitor::choose_checks`, at most 4 a pass);

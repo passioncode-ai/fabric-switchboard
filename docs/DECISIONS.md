@@ -922,7 +922,7 @@ research notes); the ones still in force that the board cites are seeded below w
 - **Decision:** the `smart` mode, the default:
   - A response's headers with both the five-hour and the seven-day window count as a check: the
     next check from the usage endpoint is 180 s after the last such header, but never more than
-    `PASSIVE_CEILING_SECONDS` (30 minutes) after the endpoint's last answer in this process (a
+    `PASSIVE_CEILING_SECONDS` (30 minutes, before the spread below) after the endpoint's last answer in this process (a
     header can lag, and it never carries the per-model windows). A partial header postpones
     nothing; after a start nothing is postponed until the endpoint answered once. A header never
     makes a per-model window fresher than the endpoint's answer it came with; the account in use
