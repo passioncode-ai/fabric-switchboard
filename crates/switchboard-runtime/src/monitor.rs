@@ -2234,9 +2234,10 @@ mod tests {
                 .find(|x| x.id == b.id)
                 .unwrap();
             assert!(given.enabled);
+            // SB-518: on its idle cadence, spread by at most 15 %.
             assert!(due(
                 &given,
-                now() + switchboard_core::CHECK_IDLE_SECONDS + 1
+                now() + switchboard_core::CHECK_IDLE_SECONDS * 115 / 100 + 1
             ));
         }
     }
