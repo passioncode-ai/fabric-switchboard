@@ -6,7 +6,7 @@ status: accepted (the operator's order of 2026-11-19 is the decision; the archit
 
 # Spec: lifecycle, remote machines, delegation and access, release and update
 
-Each requirement names the findings it closes and the check that proves it. A requirement is met when its check passes in the gate (`./scripts/check.sh` on the Mac Studio) or, for a release requirement, on the release workflow.
+Each requirement names the findings it closes and the check that proves it. A finding no requirement names is closed by its wave's backlog row with the fix its module suggests. A requirement is met when its check passes in the gate (`./scripts/check.sh` on the Mac Studio) or, for a release requirement, on the release workflow.
 
 ## S1 Continuation (root R1)
 
@@ -20,14 +20,14 @@ Each requirement names the findings it closes and the check that proves it. A re
 
 ## S2 Identity and unknown state (roots R2, R3)
 
-- **S2.1** A machine is identified by its `ssh -G` identity; its key pin, its program path and its aliases hang off that identity. One resolver serves every remote call. Closes M2-05, M2-24, M3-05 (alias part).
+- **S2.1** A machine is identified by its `ssh -G` identity; its key pin, its program path and its aliases hang off that identity. One resolver serves every remote call. Closes M2-05, M2-24.
 - **S2.2** The machine proof is typed: `pinned`, `matched`, `unproven`, `key_changed`, `refused`. Acts that send a credential require `pinned` or `matched`; reads may run `unproven`; `key_changed` is propagated unchanged to the caller and to Needs attention (`machine_key_changed`). Closes M2-02, M2-10, M3-05.
 - **S2.3** An account on another machine is matched by its recorded remote id; `remote-status` sends ids. Closes M2-09.
 - **S2.4** A read that could not be made (process table, stops, a remote) is an unknown that skips the act and says so; it is never an empty set. Closes M1-15, M1-24.
 
 ## S3 Delegation and access (root R4)
 
-- **S3.1** Value-returning operations (surrender, agent key values, Anthropic key values) are served only through a restricted door: a recall signed by the recalling machine's pinned key, or a one-time ticket in the environment of a process Switchboard launched; each is journalled. The CLI's env-name-plus-pipe guard is removed. Closes M3-01, M3-10.
+- **S3.1** Value-returning operations (surrender, agent key values, Anthropic key values) are served only through a restricted door: a recall signed by the recalling machine's pinned key, or a one-time ticket in the environment of a process Switchboard launched; each is journalled. The CLI's caller-side guard is removed. Closes M3-01, M3-10.
 - **S3.2** A managed launch gets a capability bound to its pool and launch; the global session token never lands in a home or an environment; the agent token is per pool. Closes M3-02.
 - **S3.3** A recall reads the returned sign-in's provider profile and compares its account id with the stored identity before keeping it; a mismatch or a missing id rolls back. Closes M2-01.
 - **S3.4** A guest seat carries `surrendered_at`; `stays` refuses enabling it; pending removals are retried by the sender; undo restores the previous enabled state; the moved-away guard reads `delegated_out` too; `force` needs a decision. Closes M3-03, M3-04.
@@ -41,7 +41,7 @@ Each requirement names the findings it closes and the check that proves it. A re
 - **S4.3** Pacing, deadlines and freshness use a monotonic or sleep-aware clock; a future-dated stamp is stale beyond a bound. Closes M1-09, M1-10, M1-43.
 - **S4.4** Dispatch: remote runs count as live for their workflow; a remote stop checks the run's exit and start before signalling; gates run before the owner transaction; a run whose record or watch entry cannot be written is killed and reported. Closes M1-11..14, M2-15.
 - **S4.5** Session hosts: a slow start never leaves two copies; a host whose descriptor cannot be written does not start the session; a dropped viewer's socket is shut both ways; headless restarts go through a detached host. Closes M1-16..19.
-- **S4.6** The rest of M1's P3 rows (M1-25..44) are fixed or written as backlog rows with evidence.
+- **S4.6** The rest of M1's P3 rows (M1-25..35, M1-37..41, M1-44) are fixed or written as backlog rows with evidence; M1-36 and M1-42 are docs (S7.3), M1-43 is S4.3.
 
 ## S5 Release and update (root R5)
 
