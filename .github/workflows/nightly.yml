@@ -90,6 +90,12 @@ jobs:
       - name: Native storage and runtime fixtures
         env:
           TAURI_CONFIG: '{"bundle":{"resources":null}}'
+          # SB-558: libtest runs each test on a thread of RUST_MIN_STACK bytes (2 MiB by default);
+          # the owner's debug-build futures outgrew it on Windows on Arm (nightly 44533106888,
+          # `an_account_moves_between_projects_and_back_to_default` overflowed its stack). The
+          # CLI's and the app's runtime threads have 16 MiB; the tests get the same. SB-362 (smaller
+          # owner futures) stays open: macOS and Linux still test at 2 MiB.
+          RUST_MIN_STACK: "16777216"
         run: |
           npm run build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
