@@ -515,25 +515,13 @@ fn assignment_grants(
         let Some(subject) = subject_of(snapshot, id) else {
             continue;
         };
-        // Given before `assignments.jsonl` was kept: the journal's own line when it still holds
-        // one, otherwise the time the account was added, the earliest it can have been given.
+        // Given before `assignments.jsonl` was kept: when is not known, so the time the account
+        // was added, the earliest it can have been given; stable from one answer to the next.
         let at = snapshot
-            .events
+            .accounts
             .iter()
-            .rev()
-            .find(|e| {
-                e.action == "assignment"
-                    && e.detail == "assigned"
-                    && e.account_id.as_deref() == Some(id.as_str())
-            })
-            .map(|e| e.at)
-            .or_else(|| {
-                snapshot
-                    .accounts
-                    .iter()
-                    .find(|a| a.id == *id)
-                    .map(|a| a.created_at)
-            })
+            .find(|a| a.id == *id)
+            .map(|a| a.created_at)
             .unwrap_or(0);
         out.push(assigned(
             format!("assign:{id}:before-record"),

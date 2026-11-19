@@ -3796,8 +3796,8 @@ joins the answers by holder. Code: [access_grants.rs](../crates/switchboard-runt
   `assigned_to` changed; a line that cannot be written is the log event `assignment_record` and does not undo the
   act. Each `assigned` line is a grant `assign:<account>:<at>` with scope `account.assigned`, revoked by the next
   `taken_back` (`Taken back.`) or `assigned` (`Given to another holder.`) of that account. An account given before
-  the file was kept is the grant `assign:<account>:before-record`, issued at the journal's `assignment assigned`
-  event when it still holds one, else when the account was added (the earliest it can be), `degraded` saying so.
+  the file was kept is the grant `assign:<account>:before-record`, issued when the account was added (the
+  earliest it can be, and the same from one answer to the next), `degraded` saying so.
   Holder (AG-2): the name the person gave when it is a service key (`frame-agent.default`); otherwise
   `{kind: unresolved, label}`, the name as written only when it holds an agent's word (`agent`, `bot`, `service`,
   `foundry`, `hermes`, ...) and no `@`, else `agent named in words that may name a person (hidden)`.
