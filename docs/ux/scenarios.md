@@ -107,7 +107,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-099 | Restart every running session so it loads new skills, and watch each come back | draft |
 | SCN-100 | Run Claude Code on an API key only in the folders I choose, under a daily ceiling | draft |
 | SCN-101 | Add a provider key Project Observatory holds and launch an agent on it at once | draft |
-| SCN-102 | Delegate an organization's subscription to a teammate's machine and call it back | draft |
+| SCN-102 | Delegate an organization's subscription to another of my own machines and call it back | draft |
 | SCN-103 | Keep Switchboard away from my own sign-in on a teammate's computer | draft |
 | SCN-104 | Keep a group supplied from the default group, by priority | draft |
 | SCN-105 | Have my sessions go on after the computer restarts | draft |
@@ -2218,10 +2218,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-404, SB-401, SB-390, SB-392, SCN-097, SCN-100
 
-### SCN-102: Delegate an organization's subscription to a teammate's machine and call it back
+### SCN-102: Delegate an organization's subscription to another of my own machines and call it back
 **Persona:** P-01
-**Goal:** The operator lets a teammate use one of the organization's subscriptions in console sessions on the teammate's own computer, without the teammate ever signing in with it, and can take it back at any time; more seats can be added the same way (SB-403 S2 to S4, DEC-0025).
-**Preconditions:** the teammate's computer runs Switchboard, has a group (in the organization) for the folders the seat serves, is reachable over ssh without a prompt, and its `~/.ssh/authorized_keys` holds this computer's key line with the forced command `switchboard ssh-serve --sender-key <this computer's key>` ([ORGANIZATION.md](../ORGANIZATION.md#a-teammates-computer)); the account is a Claude or Codex subscription sign-in used here.
+**Goal:** The operator lets another of the operator's own machines use one of the organization's subscriptions in console sessions, without anyone signing in with it there, and can take it back at any time; more seats can be added the same way (SB-403 S2 to S4, DEC-0025). Since DEC-0037 (2026-11-19) this path never reaches a teammate's computer: a teammate's seat goes through PassionCode.ai (SB-575, a scenario of its own when it is built); the box keeps its label *Delegate to a teammate* until SB-575 renames it.
+**Preconditions:** the other machine is one of the operator's own, runs Switchboard, has a group (in the organization) for the folders the seat serves, is reachable over ssh without a prompt, and its `~/.ssh/authorized_keys` holds this computer's key line with the forced command `switchboard ssh-serve --sender-key <this computer's key>` ([CLI.md](../CLI.md#a-seat-delegated-to-another-of-your-own-machines-sb-403-dec-0025-dec-0037)); the account is a Claude or Codex subscription sign-in used here.
 **Entry point:** Accounts → the account's ⋯ → *Move to another machine…*, or Accounts → the machine's section → *Move an account here…*. An agent: CLI `switchboard accounts send ID --to MACHINE --pool GROUP --delegate [--lease-hours N]`, MCP `switchboard_account_send` with `delegate: true`.
 **Steps:**
 1. The dialog “Move {label} to another machine” (or “Move accounts to {machine}”) → *Machine*, *Group there* (its group on the teammate's computer, read from it), and the box *Delegate to a teammate*.

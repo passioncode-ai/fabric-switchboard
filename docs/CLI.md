@@ -184,15 +184,20 @@ switchboard settings sync --to user@studio.local [--group <pool>] [--apply]   # 
 
 The file (`switchboard-settings/1`) holds each group's name, organization, sources, the identities of its repositories (`host/owner/name`) and its plain folders; the organizations' names and domains; the default and disabled agents; the rotation policies. Import finds this machine's checkouts of each repository under `--under`, lists what it found and what has no checkout here, and on `--apply` adds the organizations it lacks, makes the missing groups with no accounts (give them this machine's own), adds found folders to existing groups without changing their accounts, keeps each group's sources (the GitHub owners whose new repositories join it, SB-267), and sets the agents' settings and the policies: a policy follows its group to the pool it landed in here, one whose group is not here is left out and named, and a policy for the ordinary Claude Code (`claude_cli`) arrives switched off. With `--clone` (only with `--apply`), the repositories on GitHub that have no checkout here are first cloned with your GitHub CLI (`gh`) into the first `--under` folder, so a new member's computer with nothing checked out yet gets the organization's groups (SB-268); a clone that fails is named and the rest goes on. The file also carries your Fabric Inbox key's address and Client Id (never its secret: the preview prints the `switchboard inbox set` command to type it again), the Claude and ChatGPT teams your organizations follow, the terminal hook's on or off when you chose one, and the spending ceilings of the computer and its groups (SB-270). Import sets the hook only where this computer has no choice yet, and a ceiling only where there is none or the file's is lower: it never raises one, and a group's ceiling waits until that group has its own key here. Rules and fallback chains name accounts and stay behind. An agent carries it with `settings sync` (MCP `switchboard_settings_sync`, SB-326): the same signed file goes over ssh to the other machine's `settings import`, as a preview, or imported with `--apply`; `settings export` itself stays the person's.
 
-### A seat delegated to a teammate's machine (SB-403, DEC-0025)
+### A seat delegated to another of your own machines (SB-403, DEC-0025, DEC-0037)
+
+Only between the operator's own machines: a teammate's computer is never reached over ssh, never
+joined to the operator's network and never given an `authorized_keys` line for the operator's key
+([DEC-0037](DECISIONS.md#dec-0037-a-teammates-computer-gets-a-seat-through-passioncodeai-never-through-the-operators-network));
+a seat for a teammate goes through PassionCode.ai (SB-575, [design](plans/2026-11-19-seat-relay/design.md)).
 
 ```sh
-# On the teammate's computer
+# On the other machine (one of yours)
 switchboard own-sign-in off                 # Switchboard never reads or changes your own sign-in here (own-sign-in on, or no argument to read it)
-# ~/.ssh/authorized_keys, the one line for the administrator's ssh key (replace an older one; keep the quotes):
-#   command="'/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard' ssh-serve --sender-key <its settings signer key> --pool <group id>",restrict ssh-ed25519 AAAA… administrator
-# On the administrator's computer
-switchboard accounts send ACCOUNT_UUID --to teammate@host --pool <group there> --delegate [--lease-hours 48]
+# ~/.ssh/authorized_keys, the one line for the sending machine's ssh key (replace an older one; keep the quotes):
+#   command="'/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard' ssh-serve --sender-key <its settings signer key> --pool <group id>",restrict ssh-ed25519 AAAA… sender
+# On the machine that holds the subscription
+switchboard accounts send ACCOUNT_UUID --to user@host --pool <group there> --delegate [--lease-hours 48]
 switchboard accounts recall ACCOUNT_UUID    # take it back, a seat whose lease ran out included (its sign-in is kept there 30 days)
 ```
 
@@ -204,8 +209,8 @@ seat (to those organizations or personal), and the delegation calls `accounts ad
 `usage`, `accounts surrender`, `accounts lease` and `accounts remove` with `--sender-key KEY`,
 read from `SSH_ORIGINAL_COMMAND` without a shell. Only `ssh-serve` sends these delegation calls:
 the local CLI, MCP and window never send them; a process holding the control token can, with the
-same trust as the person's own Keychain; against an uncooperative teammate the real revocation is
-signing the subscription out at the provider. A plain move there is refused with “That machine takes seats only as delegated ones.
+same trust as the person's own Keychain; against a holder who does not cooperate the real
+revocation is signing the subscription out at the provider. A plain move there is refused with “That machine takes seats only as delegated ones.
 Move it again as a delegated seat (accounts send --delegate).”. The seat is a guest there (never
 moved on, lent, given to an agent, made the ordinary sign-in, launched in an isolated home, or
 removed before its sign-in is); this machine's background read extends its lease every 15
