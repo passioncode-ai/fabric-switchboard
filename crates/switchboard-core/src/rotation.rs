@@ -262,7 +262,13 @@ impl Store {
                     let used = last_known_usage(a, now);
                     let blind = a.usage_health.as_ref().is_none_or(|h| h.status != "ok")
                         || paced.contains(&a.id);
-                    (used < 100.0).then(|| {
+                    // Usage only grows until a reset: an account last known at or past the
+                    // decision's headroom, none of whose windows has reset since, could not be
+                    // taken whatever a fresh check found, so it is not checked.
+                    let past_headroom = used
+                        >= policy.threshold_percent - policy.hysteresis_percent
+                        && no_window_reset(a, now);
+                    (used < 100.0 && !past_headroom).then(|| {
                         (
                             !state.context_admits(&policy.pool, a),
                             u8::from(blind),
@@ -734,6 +740,18 @@ pub fn free_at(account: &Account, now: i64) -> Option<i64> {
 /// The best guess at an account's usage when nothing fresh is known (SB-98): its last
 /// account-wide figure, 0 when every window it names has since reset, and 99 — last in line,
 /// still below a full account — when it was never measured.
+/// SB-518: the account has a figure and none of its account windows (nor the aggregate, without
+/// windows) has reset since it was taken.
+fn no_window_reset(account: &Account, now: i64) -> bool {
+    let Some(usage) = account.usage.as_ref() else {
+        return false;
+    };
+    let windows: Vec<_> = usage.windows.iter().filter(|w| !w.is_feature()).collect();
+    if windows.is_empty() {
+        return usage.resets_at.is_some_and(|t| t > now);
+    }
+    windows.iter().all(|w| w.resets_at.is_some_and(|t| t > now))
+}
 fn last_known_usage(account: &Account, now: i64) -> f64 {
     let Some(usage) = account.usage.as_ref() else {
         return 99.0;

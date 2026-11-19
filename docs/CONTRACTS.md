@@ -361,7 +361,8 @@ Account list order is display-only; it never selects/activates. Within provider/
   figure and waits for nothing), and the strict decision found `no_eligible_account`; otherwise
   the candidates without a figure inside the policy's age, ranked by organization, then healthy
   before failed or paced, then last known usage (`last_known_usage`: of any age, 99 when never
-  measured, 100 or more never taken), then age and id; the first whose credential is usable.
+  measured, 100 or more never taken, nor one at or past `threshold - hysteresis` none of whose
+  windows reset since), then age and id; the first whose credential is usable.
   `monitor::confirm_candidates` checks at most 2 such a pass before the rotation transaction
   (`check_candidate`, log event `usage_confirm`), each with a `Caller::Confirm` token, at most one
   a minute per provider (`CONFIRM_SPACING_SECONDS`); `rotation_decision_with` still switches only

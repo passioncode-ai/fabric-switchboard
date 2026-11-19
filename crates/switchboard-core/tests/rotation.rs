@@ -2702,6 +2702,30 @@ fn a_candidate_known_only_from_an_older_figure_is_checked_fresh_before_the_switc
             .unwrap(),
         Some(c.clone())
     );
+    // Nor one last known past the decision's headroom (90 - 10) before any reset: a fresh check
+    // could only find it fuller.
+    store
+        .observe(
+            &b,
+            Usage {
+                used_percent: 85.,
+                observed_at: now - 6900,
+                resets_at: Some(now + 3600),
+                source: "claude_oauth".into(),
+                windows: vec![UsageWindow {
+                    name: "five_hour".into(),
+                    used_percent: 85.,
+                    resets_at: Some(now + 3600),
+                }],
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .rotation_candidate_to_confirm(&p, Some(&a), now, &none)
+            .unwrap(),
+        Some(c.clone())
+    );
     store.update(&c, "C".into(), false).unwrap();
     // Ten minutes old: past the policy's five.
     observe(&store, &b, 10., now - 600);

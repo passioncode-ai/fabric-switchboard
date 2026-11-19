@@ -200,7 +200,8 @@ stored (`&backup=1` adds a backup to restore from).
 6. **Check usage**: quota is checked in the background (every 3 minutes for accounts in use,
    read from their requests' own rate-limit headers while those flow; every 10 minutes
    otherwise; at most 2 checks a minute per provider, `switchboard usage-mode` chooses the
-   older fixed cadence); **Check usage** asks at once. An API key does not report a reliable subscription quota; an unknown quota is never
+   older fixed cadence); **Check usage** asks at once, unless the provider's hold or the
+   budget answers first. An API key does not report a reliable subscription quota; an unknown quota is never
    shown as zero.
 7. **Automatic switching** (**Turn on for Claude Code** on Accounts): when the account in use
    nears its limit, Switchboard moves to the saved account in the same group with the most quota left.
