@@ -18,10 +18,6 @@ struct Disk {
     snapshot: Snapshot,
 }
 
-/// 2026-11-19 audit M5-03: a file of a later version is refused by its version before the typed
-/// parse, whose unknown fields (`deny_unknown_fields`) would otherwise read it as corrupt: the
-/// person reads that a newer Switchboard wrote it. Readers of 0.7.123 and older lack this and
-/// report such a file as corrupt.
 /// The newest `accounts.json` version this build reads and writes; every check names it once.
 const MAX_SCHEMA: u32 = 17;
 
@@ -29,6 +25,10 @@ const MAX_SCHEMA: u32 = 17;
 struct VersionOnly {
     schema_version: u32,
 }
+/// 2026-11-19 audit M5-03: a file of a later version is refused by its version before the typed
+/// parse, whose unknown fields (`deny_unknown_fields`) would otherwise read it as corrupt: the
+/// person reads that a newer Switchboard wrote it. Readers of 0.7.123 and older lack this and
+/// report such a file as corrupt.
 fn refuse_later_version(bytes: &[u8]) -> Result<(), String> {
     match serde_json::from_slice::<VersionOnly>(bytes) {
         Ok(v) if v.schema_version > MAX_SCHEMA => {
