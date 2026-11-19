@@ -18,6 +18,7 @@ and close everything in waves to the end, while taking up incoming tasks in para
    - [07 Saved launches](07-saved-launches.md) (the operator's order of 2026-11-18)
    - [08 Who starts, watches and continues coding sessions](08-session-map.md) (the operator's order of 2026-11-18)
    - [09 Moving accounts between machines](09-machine-moves.md) (the operator's order of 2026-11-18)
+   - [10 Launch, fleet and lifecycle](10-launch-fleet-lifecycle.md) (the operator's order of 2026-11-19): attribution, watchers and continuations, full access by default, MCP, the smart usage mode, the Launch flow with key minting, remote session management and the organization's subscriptions board
 2. Each capability carries **Target**, **Now**, **Gap** (P0 to P3, backlog ids) and **Refactor**.
 3. The gaps and refactors are ordered into waves below. Every wave item becomes a backlog row in
    [docs/evidence/backlog.md](../../evidence/backlog.md) (edited under the agent-sync lease) before
@@ -89,6 +90,14 @@ structure: refactors A1 to A7, B1 to B3 and the splits).
 | W4.6 | Moving accounts between machines: the machine chosen, its groups read from it, several at once, the program it runs ([09](09-machine-moves.md)) | SB-473 to SB-476 | in this change |
 | W1.7 | Key-leak audit: where every key flows (vault, argv, environment, logs, files, answers), read-only, report in `docs/reports/2026-11-17-secret-flows/` | new row | next |
 
+### W10. Launch, fleet and lifecycle ([10](10-launch-fleet-lifecycle.md), the operator's order of 2026-11-19)
+
+W10.0 the open PRs land; W10.1 lifecycle and the watchdog (SB-505 to SB-510); W10.2 full access for
+every agent and the MCP defects (SB-515, SB-517); W10.3 the smart usage mode (SB-518, SB-519); W10.4
+one folder-to-group resolver (SB-511 to SB-514); W10.5 the Launch flow with key minting (SB-520 to
+SB-522, SB-454); W10.6 remote session acts and pause (SB-523, SB-524); W10.7 the subscriptions board
+(SB-526, SB-527, SB-525, SB-528); W10.8 two MCP doors (SB-478). Ends with a release.
+
 ### W2. Devices of an organization (02, 04 §7)
 
 Signed invitation (the envelope settings files use), `switchboard org join` writing the restricted
@@ -156,3 +165,4 @@ prepared to the last step a person must take and named with its link. Also (oper
 | W5 | Fabric Sessions | planned |
 | W6 | docs and board | done: #823 `3ba78af8` (two review rounds, no P0/P1); left: "under Groups" in folder-rule messages to check, the MCP and onboarding wording to also name a group's sources |
 | W7 | acceptance by the person | planned |
+| W10 | launch, fleet and lifecycle | W10.0 in progress: #838, #830, #848 (SB-505) in review |
