@@ -2,6 +2,15 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-20: no Rust builds on the operator's MacBook, on branch `sb-no-local-rust`
+
+- **Asked.** Project Observatory's board request `8c30246e` (thread `9d9ddfb2`): on 2026-11-20 between 18:29 and 18:35 UTC a Switchboard session ran cold `cargo check`, `clippy` and `test` in a worktree on the operator's MacBook; `target/` grew to 3.6 GB, Fabric stopped its database at 0.8 GB free and `cargo test` failed with `No space left on device`. A `cargo build` from this repository sat beside the outage of 2026-11-19 21:04 too. Older entries below said builds run on the Mac Studio only, but the rule lived in no file an agent reads first, and several entries record `cargo xwin check` "on this MacBook".
+- **Done.** [AGENTS.md](../AGENTS.md) *Local rules* now says it: on the MacBook no `cargo` command that compiles (`xwin check` included), no `./scripts/check.sh`, no `npm run app:build`; push the branch, build and test in an own worktree on the Mac Studio (`ssh studio-sshlg`), quote its EXIT in the pull request. Editing, `git`, `cargo fmt` and scripts that compile nothing stay local.
+- **Decision.** The Studio route, not a shared warm `CARGO_TARGET_DIR` on the MacBook: a warm target still holds gigabytes on a disk that runs a few GB from full, and the Studio already runs every gate (every entry below). Observatory's disk guard refuses new `cargo` builds below 8 GB free there; the rule holds above it too.
+- **Checks.** `python3 scripts/check_docs.py` (links). No Rust built: the change is two documents.
+
+**Exact next task.** Unchanged: the entry below.
+
 ## 2026-11-20: the window and fleet plan's state, waves 4 and 5 carried by the target-state plan, on branch `wf-plan-state`
 
 - **Asked.** Fabric task 79351a43 (the operator's window review of 2026-11-14: spec, modules, waves, releases), left open when its last run lapsed on 2026-11-19.
