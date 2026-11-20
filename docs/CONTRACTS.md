@@ -1702,6 +1702,15 @@ model?}}`, CLI `switchboard agents hermes [status|set --provider --model]`, MCP
   64 KiB, no shell). Only `default` (alias `model`), `provider`, `base_url` (scheme, host, port
   and path — no query or credentials) and `api_mode` are kept; Hermes masks secret-shaped values
   and Switchboard drops them anyway. An empty home prints `""`: `configured: false`.
+- A read that gave no answer says why (SB-583, board request be4e4cf4; before, all four read
+  “Hermes did not answer”): `error` is one fixed sentence and `error_kind` one of `not_started`
+  (the program could not be spawned), `timed_out` (no exit within the deadline; `timeout_secs`
+  says it, 15), `exited` (an unsuccessful exit; `exit_code`, null when a signal ended it) or
+  `unreadable` (more than 64 KiB, not UTF-8, or not JSON). stderr is never read, so a helper's
+  line there changes nothing; a line printed to stdout before the JSON is passed over (the last
+  non-empty line is tried when the whole output is not JSON). `hermes::Failure`, test
+  `the_probe_names_why_hermes_gave_no_answer`. The window shows that sentence in the Hermes row
+  in place of “Model: not set”. A change (`set`) answers the same sentences as its refusal.
 - Change: the one write to another agent's config, only on the person's request, through
   Hermes's own `hermes config set model.provider <id>` (first — Hermes then clears a `base_url`
   that belonged to the previous provider, measured on a scratch `HERMES_HOME`) and

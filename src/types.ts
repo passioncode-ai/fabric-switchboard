@@ -338,7 +338,7 @@ export interface AnalyticsStatus { available: boolean; enabled: boolean; notice_
 export interface AgentInfo { id: string; name: string; maker?: string | null; kind: string; url: string; level: 'mcp' | 'proxy' | 'launch'; binary?: string | null; openrouter_rank?: number | null; proxy_ok?: boolean | null; mcp: { supported: boolean }; notes?: string | null; subscription_warning?: string | null; openrouter?: { model_flag: string[] | null; model_env: string | null; default: boolean; notes: string | null } | null }
 /** What OpenRouter says the saved key may spend (`GET /key`), in US dollars; null where it has no limit. */
 export interface OpenrouterCredit { label: string | null; limit: number | null; limit_remaining: number | null; limit_reset: string | null; usage: number | null; usage_daily: number | null; is_free_tier: boolean | null }
-export interface HermesModel { installed: boolean; configured: boolean; model?: string | null; provider?: string | null; base_url?: string | null; api_mode?: string | null; providers: string[]; error: string | null }
+export interface HermesModel { installed: boolean; configured: boolean; model?: string | null; provider?: string | null; base_url?: string | null; api_mode?: string | null; providers: string[]; error: string | null; error_kind?: 'not_started' | 'timed_out' | 'exited' | 'unreadable'; timeout_secs?: number; exit_code?: number | null }
 export type KimiRegion = 'mainland-cn' | 'global';
 export interface KimiAccount { id: string; label: string; region: KimiRegion; added_at: number; nickname?: string | null; tier?: string | null }
 /** A Kimi Code home's state at this read: the plan windows, or `error` naming why there are none. */
