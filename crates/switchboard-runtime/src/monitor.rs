@@ -1659,6 +1659,9 @@ fn rotate_with(
                     }
                     reason = if reason.starts_with("limit") {
                         "switched_on_limit"
+                    } else if reason == "expiring_headroom" {
+                        // SB-587: moved to an account whose room would expire unused first.
+                        "switched_expiring"
                     } else {
                         "switched"
                     }
@@ -1690,6 +1693,7 @@ fn rotate_with(
                     Some(id),
                     match (&result, reason.as_str()) {
                         (Ok(_), "switched_on_limit") => "switched_on_limit",
+                        (Ok(_), "switched_expiring") => "switched_expiring",
                         (Ok(_), _) => "switched",
                         (Err(_), _) => "failed",
                     },
@@ -1745,6 +1749,7 @@ fn log_rotation(runtime: &Runtime, policy: &switchboard_core::RotationPolicy, re
     let (outcome, result) = match reason {
         "switched" => ("switched", "ok"),
         "switched_on_limit" => ("switched_on_limit", "ok"),
+        "switched_expiring" => ("switched_expiring", "ok"),
         "switch_failed" => ("switch_failed", "failed"),
         "activation_failed" => ("activation_failed", "failed"),
         "no_eligible_account" | "limit_no_eligible_account" => ("no_candidate", "no_account"),

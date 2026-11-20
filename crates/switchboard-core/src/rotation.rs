@@ -92,6 +92,21 @@ pub(crate) fn missing_managed_policies(s: &crate::Snapshot) -> Vec<(Provider, St
     }
     out
 }
+/// SB-595: a policy's group exists: the default group, a group a person made, or a pool some
+/// account still names.
+fn policy_has_group(s: &crate::Snapshot, pool: &str) -> bool {
+    pool == crate::projects::DEFAULT_POOL
+        || s.projects.iter().any(|p| p.pool == pool)
+        || s.accounts.iter().any(|a| a.pool == pool)
+}
+/// SB-595: how many saved policies that are on name a group that is gone (a person's *off* for a
+/// group to come is kept).
+fn orphan_policies(s: &crate::Snapshot) -> usize {
+    s.policies
+        .iter()
+        .filter(|p| p.enabled && !policy_has_group(s, &p.pool))
+        .count()
+}
 impl Store {
     /// SB-310 (operator, 2026-11-08): automatic switching of managed sessions is on by default.
     /// Every provider and group with accounts and no saved managed policy gets an enabled one
@@ -99,11 +114,23 @@ impl Store {
     /// the person's *off* stands. Reads the published state first and writes only when a pair
     /// is missing. Returns how many were added.
     pub fn ensure_default_policies(&self) -> Result<usize, String> {
-        if missing_managed_policies(&self.snapshot()?).is_empty() {
+        let published = self.snapshot()?;
+        if missing_managed_policies(&published).is_empty() && orphan_policies(&published) == 0 {
             return Ok(0);
         }
         let mut state = self.lock()?;
         let mut candidate = state.clone();
+        // SB-595: a policy whose group is gone (deleted before 0.7.126 kept it) is dropped.
+        let orphans = orphan_policies(&candidate);
+        if orphans > 0 {
+            let keep: Vec<bool> = candidate
+                .policies
+                .iter()
+                .map(|p| !p.enabled || policy_has_group(&candidate, &p.pool))
+                .collect();
+            let mut keep = keep.into_iter();
+            candidate.policies.retain(|_| keep.next().unwrap_or(true));
+        }
         let mut added = 0;
         for (provider, pool) in missing_managed_policies(&candidate) {
             if candidate.policies.len() >= crate::MAX_ACCOUNTS {
@@ -114,7 +141,7 @@ impl Store {
                 .push(default_managed_policy(provider, &pool));
             added += 1;
         }
-        if added > 0 {
+        if added > 0 || orphans > 0 {
             self.publish(&mut state, candidate)?;
             self.changed();
         }
@@ -244,7 +271,7 @@ impl Store {
         // the fresh check decides. Never measured reads as 99 (last), a failed or paced account
         // after every healthy one, and an account last known full is not checked.
         let paced = self.paced.lock().map(|p| p.clone()).unwrap_or_default();
-        let ranked: Vec<(bool, u8, f64, i64, String)> = {
+        let ranked: Vec<(bool, u8, f64, f64, i64, String)> = {
             let state = self.lock()?;
             state
                 .accounts
@@ -272,6 +299,7 @@ impl Store {
                         (
                             !state.context_admits(&policy.pool, a),
                             u8::from(blind),
+                            burn_urgency(a, now),
                             used,
                             a.created_at,
                             a.id.clone(),
@@ -284,13 +312,15 @@ impl Store {
         ranked.sort_by(|x, y| {
             x.0.cmp(&y.0)
                 .then_with(|| x.1.cmp(&y.1))
-                .then_with(|| x.2.total_cmp(&y.2))
-                .then_with(|| x.3.cmp(&y.3))
+                // SB-587: the room that expires soonest is checked first, as it is spent first.
+                .then_with(|| y.2.total_cmp(&x.2))
+                .then_with(|| x.3.total_cmp(&y.3))
                 .then_with(|| x.4.cmp(&y.4))
+                .then_with(|| x.5.cmp(&y.5))
         });
         // The credential is read only for the one to check, and the next if it is unusable.
         let state_accounts = self.snapshot()?.accounts;
-        Ok(ranked.into_iter().map(|r| r.4).find(|id| {
+        Ok(ranked.into_iter().map(|r| r.5).find(|id| {
             state_accounts
                 .iter()
                 .find(|a| a.id == *id)
@@ -350,6 +380,46 @@ impl Store {
                 }));
             };
             if usage < policy.threshold_percent {
+                // SB-587: below the threshold, a managed group still moves to an account of its
+                // own whose room would expire soon and unused, while the one in use keeps its
+                // room longer. Fresh figures only; the cooldown above holds it as any switch.
+                if policy.target == "managed" {
+                    let mine = burn_urgency(current, now);
+                    let expiring = state
+                        .accounts
+                        .iter()
+                        .filter(|a| {
+                            a.id != current.id
+                                && a.provider == policy.provider
+                                && state.chooses(a, &policy.pool)
+                                && !limited.contains(&a.id)
+                                && !state.is_assigned(&a.id)
+                                && a.kind == current.kind
+                                && !outside(a)
+                                && long_window_reset(a).is_some_and(|t| {
+                                    t > now && t - now <= EXPIRING_WITHIN_HOURS * 3600
+                                })
+                        })
+                        .filter_map(|a| {
+                            fresh_usage(a, policy.max_age_seconds, now).map(|used| (a, used))
+                        })
+                        .filter(|(a, used)| {
+                            *used < policy.threshold_percent - policy.hysteresis_percent
+                                && *used <= 100.0 - EXPIRING_MIN_FREE_PERCENT
+                                && burn_urgency(a, now) >= mine * EXPIRING_URGENCY_RATIO
+                                && self.rotation_credential_eligible(a, policy, now)
+                        })
+                        .min_by(|(a, x), (b, y)| {
+                            spend_order(a, *x, b, *y, now).then_with(|| a.id.cmp(&b.id))
+                        });
+                    if let Some((a, _)) = expiring {
+                        return Ok(RotationDecision {
+                            outside: false,
+                            candidate_id: Some(a.id.clone()),
+                            reason: "expiring_headroom".into(),
+                        });
+                    }
+                }
                 return Ok(hold("below_threshold"));
             }
         }
@@ -383,7 +453,7 @@ impl Store {
             .min_by(|(a, x), (b, y)| {
                 outside(a)
                     .cmp(&outside(b))
-                    .then_with(|| x.total_cmp(y))
+                    .then_with(|| spend_order(a, *x, b, *y, now))
                     .then_with(|| a.created_at.cmp(&b.created_at))
                     .then_with(|| a.id.cmp(&b.id))
             });
@@ -412,6 +482,8 @@ impl Store {
                     (used < 100.0).then_some((a, used))
                 })
                 .min_by(|(a, x), (b, y)| {
+                    // SB-98's guess on stale figures keeps the most room first (SB-587 orders
+                    // only what is known fresh).
                     outside(a)
                         .cmp(&outside(b))
                         .then_with(|| x.total_cmp(y))
@@ -592,7 +664,15 @@ impl Store {
                 outside(a)
                     .cmp(&outside(b))
                     .then_with(|| tier_a.cmp(tier_b))
-                    .then_with(|| x.total_cmp(y))
+                    // SB-587 orders what is known fresh; a guess on stale figures keeps the most
+                    // room first, as SB-98's does.
+                    .then_with(|| {
+                        if *tier_a == 0 {
+                            spend_order(a, *x, b, *y, now)
+                        } else {
+                            x.total_cmp(y)
+                        }
+                    })
                     .then_with(|| a.created_at.cmp(&b.created_at))
                     .then_with(|| a.id.cmp(&b.id))
             })
@@ -706,12 +786,97 @@ impl Store {
                 outside(a)
                     .cmp(&outside(b))
                     .then_with(|| tier_a.cmp(tier_b))
-                    .then_with(|| x.total_cmp(y))
+                    // SB-587 orders what is known fresh; a guess on stale figures keeps the most
+                    // room first, as SB-98's does.
+                    .then_with(|| {
+                        if *tier_a == 0 {
+                            spend_order(a, *x, b, *y, now)
+                        } else {
+                            x.total_cmp(y)
+                        }
+                    })
                     .then_with(|| a.created_at.cmp(&b.created_at))
                     .then_with(|| a.id.cmp(&b.id))
             })
             .map(|(a, _, _)| a.id.clone()))
     }
+}
+
+/// SB-587 (operator, 2026-11-20: «чтобы мы не жгли условно сессию которая ещё не скоро
+/// перезагрузится, а есть сессия которая ещё не заспалена и перезагрузится скоро, и лучше сжечь её»):
+/// how fast an account's free share of its longest window would be lost: the share still free
+/// divided by the hours until that window resets (at least one). The window is the account's long
+/// one (`LONG_WINDOWS`), else its account window, feature limits aside, that resets last.
+/// A window whose reset has passed is empty and a full week away; one with no known reset counts
+/// as a week away too, and an account never measured is 0 (last).
+pub fn burn_urgency(account: &Account, now: i64) -> f64 {
+    const WEEK_HOURS: f64 = 168.0;
+    let Some(usage) = account.usage.as_ref() else {
+        return 0.0;
+    };
+    let windows: Vec<_> = usage.windows.iter().filter(|w| !w.is_feature()).collect();
+    let long = windows
+        .iter()
+        .find(|w| LONG_WINDOWS.contains(&w.name.as_str()));
+    let (used, resets_at) = match long.or_else(|| {
+        windows
+            .iter()
+            .max_by_key(|w| w.resets_at.unwrap_or(i64::MIN))
+    }) {
+        Some(w) => (w.used_percent, w.resets_at),
+        None => (usage.used_percent, usage.resets_at),
+    };
+    match resets_at {
+        Some(t) if t <= now => 100.0 / WEEK_HOURS,
+        Some(t) => (100.0 - used).max(0.0) / ((t - now) as f64 / 3600.0).max(1.0),
+        None => (100.0 - used).max(0.0) / WEEK_HOURS,
+    }
+}
+/// SB-587: the order a group spends its accounts in. `used` is the account's figure over every
+/// window (the five-hour one included), so an account near any limit is never preferred for its
+/// long window alone: accounts below `SPEND_ROOM_PERCENT` come first, the one whose free share
+/// expires fastest first (`burn_urgency`, higher first); then the rest, least used first, as
+/// before.
+pub fn spend_order(
+    a: &Account,
+    used_a: f64,
+    b: &Account,
+    used_b: f64,
+    now: i64,
+) -> std::cmp::Ordering {
+    let roomy = |used: f64| used < SPEND_ROOM_PERCENT;
+    match (roomy(used_a), roomy(used_b)) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        (true, true) => burn_urgency(b, now)
+            .total_cmp(&burn_urgency(a, now))
+            .then_with(|| used_a.total_cmp(&used_b)),
+        (false, false) => used_a.total_cmp(&used_b),
+    }
+}
+/// SB-587: below this figure (the default threshold less its hysteresis) an account has room
+/// enough that the expiry of its long window decides the order.
+pub const SPEND_ROOM_PERCENT: f64 = 80.0;
+/// SB-587: an account in a group whose longest window resets within this many hours and still has
+/// at least `EXPIRING_MIN_FREE_PERCENT` free is spent before an account that keeps its room longer,
+/// even while the account in use is below its threshold.
+pub const EXPIRING_WITHIN_HOURS: i64 = 24;
+pub const EXPIRING_MIN_FREE_PERCENT: f64 = 10.0;
+/// SB-587: a switch to an expiring account is made only when its urgency is at least this many
+/// times the account in use's, so two accounts of about the same urgency never trade places.
+pub const EXPIRING_URGENCY_RATIO: f64 = 2.0;
+/// SB-587: the account's long window, by name: Claude's `seven_day`, Codex's `secondary`.
+const LONG_WINDOWS: [&str; 2] = ["seven_day", "secondary"];
+/// SB-587: when the account's long window resets; none without one, so an account that reports
+/// only its five-hour window is never switched to as expiring.
+fn long_window_reset(account: &Account) -> Option<i64> {
+    account
+        .usage
+        .as_ref()?
+        .windows
+        .iter()
+        .find(|w| LONG_WINDOWS.contains(&w.name.as_str()))?
+        .resets_at
 }
 
 /// SB-377: when an account will have room again on what is known of it: now when it has room

@@ -2798,3 +2798,225 @@ fn the_timer_mode_keeps_the_fixed_cadence_of_0_7_121() {
         .unwrap();
     assert_eq!(next_check(&store, &id), now + CHECK_ACTIVE_SECONDS);
 }
+
+/// SB-587: a five-hour and a seven-day window, each with its own reset.
+fn observe_week(store: &Store, id: &str, week_used: f64, week_resets_in: i64, now: i64) {
+    store
+        .observe(
+            id,
+            Usage {
+                used_percent: week_used,
+                observed_at: now,
+                resets_at: Some(now + week_resets_in),
+                source: "claude_oauth".into(),
+                windows: vec![
+                    UsageWindow {
+                        name: "five_hour".into(),
+                        used_percent: 0.,
+                        resets_at: None,
+                    },
+                    UsageWindow {
+                        name: "seven_day".into(),
+                        used_percent: week_used,
+                        resets_at: Some(now + week_resets_in),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+}
+
+/// SB-587 (operator, 2026-11-20): of two accounts with room, the one whose free weekly share
+/// would be lost soonest is taken first, even when it is the more used one.
+#[test]
+fn a_switch_spends_the_room_that_expires_first() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let fresh = account(&store, "org-b", now);
+    let expiring = account(&store, "org-c", now);
+    observe_week(&store, &a, 95., 100 * 3600, now);
+    // 5 % used, resets in six days: 95 % free over 144 hours.
+    observe_week(&store, &fresh, 5., 144 * 3600, now);
+    // 50 % used, resets in three hours: 50 % free that is lost in three hours.
+    observe_week(&store, &expiring, 50., 3 * 3600, now);
+    let decision = store.rotation_decision(&policy(), Some(&a), now).unwrap();
+    assert_eq!(decision.reason, "threshold_reached");
+    assert_eq!(decision.candidate_id.as_deref(), Some(expiring.as_str()));
+    // With no reset in sight, the least used still goes first.
+    observe_week(&store, &expiring, 50., 160 * 3600, now);
+    let decision = store.rotation_decision(&policy(), Some(&a), now).unwrap();
+    assert_eq!(decision.candidate_id.as_deref(), Some(fresh.as_str()));
+}
+
+/// SB-587: below the threshold, a managed group moves to an account of its own whose weekly room
+/// resets within a day, but never to one about as urgent as the account in use, never to one
+/// with less than 10 % free, never inside the cooldown and never for the ordinary Claude Code.
+#[test]
+fn expiring_room_moves_a_managed_group_below_its_threshold() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    observe_week(&store, &a, 10., 150 * 3600, now);
+    observe_week(&store, &b, 40., 5 * 3600, now);
+    let mut p = policy();
+    let decision = store.rotation_decision(&p, Some(&a), now).unwrap();
+    assert_eq!(decision.reason, "expiring_headroom");
+    assert_eq!(decision.candidate_id.as_deref(), Some(b.as_str()));
+    // Once on the expiring account, nothing pulls it back while it has room.
+    let back = store.rotation_decision(&p, Some(&b), now).unwrap();
+    assert_eq!(back.reason, "below_threshold");
+    // Inside the cooldown it holds.
+    p.last_switched_at = Some(now - 60);
+    assert_eq!(
+        store.rotation_decision(&p, Some(&a), now).unwrap().reason,
+        "cooldown"
+    );
+    p.last_switched_at = None;
+    // A reset more than a day away is not expiring.
+    observe_week(&store, &b, 40., 30 * 3600, now);
+    assert_eq!(
+        store.rotation_decision(&p, Some(&a), now).unwrap().reason,
+        "below_threshold"
+    );
+    // Less than 10 % free is not worth a move.
+    observe_week(&store, &b, 95., 5 * 3600, now);
+    assert_eq!(
+        store.rotation_decision(&p, Some(&a), now).unwrap().reason,
+        "below_threshold"
+    );
+    // The account in use expiring about as soon: no trade.
+    observe_week(&store, &a, 10., 8 * 3600, now);
+    observe_week(&store, &b, 40., 5 * 3600, now);
+    assert_eq!(
+        store.rotation_decision(&p, Some(&a), now).unwrap().reason,
+        "below_threshold"
+    );
+    // The ordinary Claude Code is never moved before its threshold.
+    observe_week(&store, &a, 10., 150 * 3600, now);
+    p.target = "claude_cli".into();
+    assert_eq!(
+        store.rotation_decision(&p, Some(&a), now).unwrap().reason,
+        "below_threshold"
+    );
+}
+
+/// SB-587: the urgency itself: free share over hours to the long window's reset.
+#[test]
+fn burn_urgency_reads_the_long_window() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    observe_week(&store, &a, 50., 10 * 3600, now);
+    let snapshot = store.snapshot().unwrap();
+    let acc = snapshot.accounts.iter().find(|x| x.id == a).unwrap();
+    assert!((switchboard_core::burn_urgency(acc, now) - 5.0).abs() < 1e-9);
+    // A reset that has passed is a full week ahead.
+    assert!((switchboard_core::burn_urgency(acc, now + 11 * 3600) - 100.0 / 168.0).abs() < 1e-9);
+    // Never measured: last.
+    let b = account(&store, "org-b", now);
+    let snapshot = store.snapshot().unwrap();
+    let acc = snapshot.accounts.iter().find(|x| x.id == b).unwrap();
+    assert_eq!(switchboard_core::burn_urgency(acc, now), 0.0);
+}
+
+/// SB-595: a deleted group's automatic switching goes with it, and a policy that is on for a
+/// group that is gone (kept by builds before 0.7.126) is dropped by the next pass; a person's
+/// *off* for a group to come stays.
+#[test]
+fn a_gone_groups_switching_is_dropped() {
+    let (root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let folder = root.path().join("repo");
+    std::fs::create_dir_all(&folder).unwrap();
+    let project = store
+        .save_project(None, "Gone", &[folder], std::slice::from_ref(&a))
+        .unwrap();
+    assert_eq!(store.ensure_default_policies().unwrap(), 1);
+    assert!(store
+        .snapshot()
+        .unwrap()
+        .policies
+        .iter()
+        .any(|p| p.pool == project.pool));
+    store.remove_project(&project.pool).unwrap();
+    assert!(!store
+        .snapshot()
+        .unwrap()
+        .policies
+        .iter()
+        .any(|p| p.pool == project.pool));
+    // Left by an older build: on, for a pool nothing names any more; and an off for a future one.
+    let mut orphan = policy();
+    orphan.pool = "apps-soft".into();
+    store.set_policy(orphan.clone()).unwrap();
+    let mut future = policy();
+    future.pool = "later".into();
+    future.enabled = false;
+    store.set_policy(future).unwrap();
+    store.ensure_default_policies().unwrap();
+    let pools: Vec<String> = store
+        .snapshot()
+        .unwrap()
+        .policies
+        .iter()
+        .map(|p| p.pool.clone())
+        .collect();
+    assert!(!pools.contains(&"apps-soft".to_string()), "{pools:?}");
+    assert!(pools.contains(&"later".to_string()), "{pools:?}");
+    assert_eq!(store.ensure_default_policies().unwrap(), 0);
+}
+
+/// SB-587 (review round 1): a refused request moves to an account with room in every window: one
+/// whose week expires soon but whose five-hour window is nearly full is never preferred to an
+/// empty one for its week alone.
+#[test]
+fn failover_never_prefers_an_expiring_account_near_another_limit() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let near = account(&store, "org-b", now);
+    let empty = account(&store, "org-c", now);
+    let expiring = account(&store, "org-d", now);
+    observe_week(&store, &a, 50., 100 * 3600, now);
+    // Week 30 % used, resets in two hours, but its five-hour window is at 99 %.
+    store
+        .observe(
+            &near,
+            Usage {
+                used_percent: 99.,
+                observed_at: now,
+                resets_at: Some(now + 2 * 3600),
+                source: "claude_oauth".into(),
+                windows: vec![
+                    UsageWindow {
+                        name: "five_hour".into(),
+                        used_percent: 99.,
+                        resets_at: Some(now + 3600),
+                    },
+                    UsageWindow {
+                        name: "seven_day".into(),
+                        used_percent: 30.,
+                        resets_at: Some(now + 2 * 3600),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+    observe_week(&store, &empty, 0., 160 * 3600, now);
+    store.select(Provider::Claude, "default", &a).unwrap();
+    let (moved, _) = store
+        .failover(Provider::Claude, "default", &a, OAUTH, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.id, empty);
+    // With room in both windows, the account whose week expires first is taken.
+    observe_week(&store, &expiring, 40., 3 * 3600, now);
+    let (moved, _) = store
+        .failover(Provider::Claude, "default", &empty, OAUTH, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.id, expiring);
+}
