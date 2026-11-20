@@ -87,6 +87,21 @@ released app. A wave does not start until the previous one is released.
 | 4 | WF-9, WF-10.2 and 10.3, WF-12.1 | organizations and agent templates, on wave 3's machine reads |
 | 5 | WF-12.2, WF-12.3 | wait for the estate's hub and access levels (SB-177, SB-291) |
 
+## State (2026-11-20)
+
+Waves 1 to 3 are released; waves 4 and 5 are now carried by the
+[target-state plan](../2026-11-17-target-state/README.md), which took the whole estate's gaps
+into one order on 2026-11-17. This plan stays the record of the operator's words and the modules'
+design; the target-state plan says when each open part is built.
+
+| Wave | State | Evidence |
+|---|---|---|
+| 1 | released 0.7.80 | PR #685; backlog SB-363, SB-364, SB-365 |
+| 2 | released 0.7.82 | PR #688; backlog SB-369, SB-370, SB-373, SB-372 (10.1 only) |
+| 3 | released 0.7.83, 0.7.84, 0.7.103 | PR #691, #692, #695, #759; backlog SB-366, SB-367, SB-368 |
+| 4 | open, carried elsewhere | WF-9 (SB-371) and WF-12.1, the Machines page (SB-374): target-state wave W2, *Devices of an organization*, and [04 §7](../2026-11-17-target-state/04-surfaces.md); WF-10.2 and 10.3 (SB-372): target-state 04 §8, a gap not yet placed in a wave |
+| 5 | open, waits | WF-12.2 and WF-12.3 (SB-374) wait for SB-177 (the hub) and SB-291 (access levels); DEC-0020 written 2026-11-17 |
+
 ## Proposed decisions (each lands in [DECISIONS.md](../../DECISIONS.md) with its module)
 
 - **DEC-0014, Settings owns standing configuration** (WF-1): automatic switching, balancing and the
