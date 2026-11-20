@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0038` (`DEC-0034` is held by open PR #871 (SB-561, one continuation module), `DEC-0035` by open PR #872 (SB-560, launch tickets and journalled doors), `DEC-0036` by open PR #874 (SB-573, access grants), `DEC-0037` by open PR #876 (SB-575, seats to a teammate through PassionCode.ai, no inbound connection); `DEC-0033` is SB-550, each machine read every minute through its own Switchboard; `DEC-0032` is SB-518, smart usage checks; `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0030` is SB-450, sessions continued after a restart; `DEC-0028` is SB-419, groups fed from the default group (#824); `DEC-0027` is held by open PR #821 (SB-418, a person's off switch for an account) and `DEC-0029` by open PR #832 (SB-421, named users of one Linux host at the proxy); `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0039` (`DEC-0038` is SB-587, the quota that would expire first is spent first; `DEC-0034` is held by open PR #871 (SB-561, one continuation module), `DEC-0035` by open PR #872 (SB-560, launch tickets and journalled doors), `DEC-0036` by open PR #874 (SB-573, access grants), `DEC-0037` by open PR #876 (SB-575, seats to a teammate through PassionCode.ai, no inbound connection); `DEC-0033` is SB-550, each machine read every minute through its own Switchboard; `DEC-0032` is SB-518, smart usage checks; `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0030` is SB-450, sessions continued after a restart; `DEC-0028` is SB-419, groups fed from the default group (#824); `DEC-0027` is held by open PR #821 (SB-418, a person's off switch for an account) and `DEC-0029` by open PR #832 (SB-421, named users of one Linux host at the proxy); `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -1090,3 +1090,27 @@ research notes); the ones still in force that the board cites are seeded below w
   минуту через свитчборд а не через запросы напрямую к сессиям и на удаленный свитчборд в рамках
   организации то же самое».
 
+### DEC-0038: A group spends first the quota that would expire unused first
+
+- **Date:** 2026-11-20
+- **Status:** Accepted (built on branch `sb-587-burn-expiring`: SB-587). The number is the next one
+  free after the open PRs' DEC-0034 to DEC-0037; a pull request that lands first with the same
+  number moves this one to the next free.
+- **Context:** the operator, 2026-11-20, in a session on this repository: «когда они ротируются
+  нужно грамотно учитывая время перезагрузки активное время чтобы мы не жгли условно сессию
+  которая ещё не скоро перезагрузится а есть сессия которая ещё не заспалена и перезагрузится
+  скоро и лучше сжечь её чем ту которая не скоро». Every choice of a next account ranked the
+  least used first, whatever its reset: on 2026-11-20 a group's switch would take an account 8 %
+  used whose week resets in 146 hours over one 51 % used whose week resets in 3 hours, and the
+  second one's 49 % was lost at its reset.
+- **Decision:** a switch, a 429 failover, the check brought forward for the next account and the
+  feed's lending order rank fresh candidates with room by `burn_urgency`, the free share of the
+  account's long window over the hours to its reset, highest first, the least used breaking a
+  tie. Below its threshold a managed group moves, outside its cooldown, to an account of its own
+  organizations whose long window resets within 24 hours with at least 10 % free and twice the
+  urgency of the account in use (`expiring_headroom`). The ordinary Claude Code is never moved
+  before its threshold, and SB-98's guess on stale figures keeps the most room first.
+- **Consequences / affects:** [ACCOUNTS-AND-ROTATION.md](ACCOUNTS-AND-ROTATION.md#automatic-switching),
+  [CONTRACTS.md](CONTRACTS.md#the-quota-that-expires-first-is-spent-first-sb-587-dec-0038-2026-11-20),
+  the window's decision text (`expiring_headroom`, `switched_expiring`).
+- **Source:** this session's order of 2026-11-20; branch `sb-587-burn-expiring`.

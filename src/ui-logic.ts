@@ -160,6 +160,8 @@ export function eventDetail(detail: string): string {
     case 'switched': return t('switched');
     // SB-47: the cause of a move, journaled for provenance.
     case 'switched_on_limit': return t('switched on a limit');
+    // SB-587: moved to an account whose room would expire unused first.
+    case 'switched_expiring': return t('switched to an account whose quota resets sooner');
     case 'failover': return t('moved after a refusal');
     case 'failover_outside': return t('moved after a refusal, to an account outside the group\'s organizations');
     case 'unusable': return t('moved off an unusable account');

@@ -323,14 +323,12 @@ impl View<'_> {
     }
 }
 
-/// Ranks candidates: room now before a reset, then the most room (and the latest reset, whose
-/// room lasts longer), then the soonest reset, then the id.
-fn better(a: (&Account, Ready), b: (&Account, Ready)) -> bool {
+/// Ranks candidates: room now before a reset, then the room that would expire soonest unused
+/// (SB-587, `burn_urgency`), then the most room, then the soonest reset, then the id.
+fn better(a: (&Account, Ready), b: (&Account, Ready), now: i64) -> bool {
     use std::cmp::Ordering;
     let order = match (a.1, b.1) {
-        (Ready::Room(x), Ready::Room(y)) => x
-            .total_cmp(&y)
-            .then_with(|| balancing::latest_reset(b.0).cmp(&balancing::latest_reset(a.0))),
+        (Ready::Room(x), Ready::Room(y)) => switchboard_core::spend_order(a.0, x, b.0, y, now),
         (Ready::Room(_), Ready::Soon(_)) => Ordering::Less,
         (Ready::Soon(_), Ready::Room(_)) => Ordering::Greater,
         (Ready::Soon(x), Ready::Soon(y)) => x.cmp(&y),
@@ -610,7 +608,7 @@ pub fn plan(
                     let Some(ready) = view.readiness(a, &fed.pool) else {
                         continue;
                     };
-                    if best.is_none_or(|(_, b, r)| better((a, ready), (b, r))) {
+                    if best.is_none_or(|(_, b, r)| better((a, ready), (b, r), now)) {
                         best = Some((i, a, ready));
                     }
                 }
@@ -678,7 +676,7 @@ pub fn plan(
                 if view.readiness(a, &low.pool).is_none() {
                     continue;
                 }
-                if best.is_none_or(|(b, r, _)| better((a, ready), (b, r))) {
+                if best.is_none_or(|(b, r, _)| better((a, ready), (b, r), now)) {
                     best = Some((a, ready, placed));
                 }
             }

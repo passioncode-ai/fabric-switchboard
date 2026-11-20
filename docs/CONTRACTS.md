@@ -4638,3 +4638,52 @@ Code: `crates/switchboard-runtime/src/deb.rs`, `self_update::run`, `serve_update
   (SB-408 block). The command was run on 2026-11-17 against v0.7.113's `SHA256SUMS`: the pinned
   check passed, and a changed `SHA256SUMS` was refused; the `sed`/`base64` keyring was identical
   to `gpg --dearmor`'s and passed the same check.
+
+## The quota that expires first is spent first (SB-587, DEC-0038, 2026-11-20)
+
+- `switchboard_core::burn_urgency(account, now) -> f64`: the free percent of the account's long
+  window (`seven_day` for Claude, `secondary` for Codex; else the account window, feature limits
+  aside, that resets last; else the aggregate) divided by the hours to its reset, at least one.
+  A reset that passed reads `100 / 168`, no known reset `free / 168`, an account never measured
+  `0`. `switchboard_core::spend_order(a, used_a, b, used_b, now)`: `used` is the figure over every
+  window (the five-hour one included); accounts below `SPEND_ROOM_PERCENT` (80) come first, by
+  urgency, highest first, then the least used; the rest after them, least used first, so an
+  account near its five-hour limit is never preferred for its week alone.
+- Used by `Store::rotation_decision_with` (fresh candidates with room), `failover_candidate`,
+  `next_to_check`, `rotation_candidate_to_confirm`'s ranking and `feed::better` (room now still
+  before a reset to come). Stale figures (SB-98's last-known guess, the blind tiers of
+  `failover_candidate` and `next_to_check`) keep the least used first.
+- Below the threshold, for `target: managed` only, after the cooldown: a candidate of the group's
+  own organizations whose long window resets within `EXPIRING_WITHIN_HOURS` (24), used at most
+  `100 - EXPIRING_MIN_FREE_PERCENT` (90) and below `threshold - hysteresis`, fresh, credential
+  eligible, with `burn_urgency >= EXPIRING_URGENCY_RATIO (2) * burn_urgency(current)`: decision
+  `{reason: "expiring_headroom", candidate_id}`. The monitor applies it as any switch; its outcome
+  is `switched_expiring` (journal detail `rotation switched_expiring`, accepted by
+  `Snapshot` validation and the activity filter; provenance cause `rotation`; log event
+  `rotation` with `outcome: switched_expiring`, `result: ok`).
+- Tests (`crates/switchboard-core/tests/rotation.rs`): `a_switch_spends_the_room_that_expires_first`,
+  `expiring_room_moves_a_managed_group_below_its_threshold`, `burn_urgency_reads_the_long_window`,
+  `failover_never_prefers_an_expiring_account_near_another_limit`.
+
+## Moving an account into a group keeps the group's shares (SB-594, 2026-11-20)
+
+`Operation::ProjectEdit { move_accounts: true }` (CLI `project edit --move-accounts`, and
+`Operation::MoveAccount`, which the window's and `accounts move` use) moved every account the
+group served, its shares included, so a share left its own group, and taking it out afterwards
+sent it to the default group (found 2026-11-20: `billing@` left Appvillis for eSIM Plus, then for
+the default group). Now, when the group shares any account, the named accounts move first on
+their own (`Store::move_into`: one publish that changes only their home, takes them out of the
+group's shares and the default group's loans, drops a route their old group had on them and
+confirms an organization their address suggests; an unknown account, one on another machine or a
+second copy of a sign-in the group holds refuses the whole move) and the save then runs as a
+sharing one, so the group's shares, the default group's loans and the routes on them stay. Test
+`owner_tests::an_account_added_to_a_second_group_serves_both`.
+
+## A deleted group's switching goes with it (SB-595, 2026-11-20)
+
+`Store::remove_project` drops the group's rotation policies. `Store::ensure_default_policies`
+(each background pass) also drops a saved policy that is on and names a pool that is neither the
+default group, a group, nor any account's pool (left by builds before 0.7.126: `agents` and
+`apps-soft` read `current_unavailable` in every pass on 2026-11-20); a policy that is off for a
+group to come stays. Test `a_gone_groups_switching_is_dropped`.
+

@@ -8632,6 +8632,18 @@ async fn execute(
                 &add_folders,
                 &remove_folders,
             )?;
+            // SB-594: `--move-accounts` moves the accounts it names, never the ones the group
+            // only shares (at home in another group, or lent by the default group). A moving save
+            // rebuilds the group's whole set, so when the group shares any account the named ones
+            // move first on their own (`Store::move_into`, which leaves shares, loans and their
+            // routes alone) and the save then runs as a sharing one. `accounts move` and the
+            // window's move come through here.
+            let shares_any = snapshot
+                .projects
+                .iter()
+                .find(|p| p.pool == pool)
+                .is_some_and(|p| !p.shared_accounts.is_empty());
+            let move_first = move_accounts && shares_any;
             if let Operation::SaveProject {
                 organization: chosen,
                 organizations: chosen_all,
@@ -8641,7 +8653,10 @@ async fn execute(
             {
                 *chosen = organization;
                 *chosen_all = organizations;
-                *moving = move_accounts;
+                *moving = move_accounts && !move_first;
+            }
+            if move_first {
+                store.move_into(&pool, &add_accounts)?;
             }
             // The same admission, refusals and memory of removals as a whole save (SaveProject).
             Box::pin(execute(store, root, runtime, save)).await
@@ -12286,6 +12301,82 @@ mod owner_tests {
             .projects
             .iter()
             .all(|p| p.shared_accounts.is_empty()));
+
+        // SB-594 (2026-11-20): moving another account into a group never takes the accounts the
+        // group only shares: App's own account, shared with Web, stays App's when a second one
+        // moves into Web, and taking the share out of Web afterwards leaves it in App.
+        let two = fixtures::save(&runtime.store, "synthetic-two", "default").id;
+        runtime
+            .execute(Operation::MoveAccount {
+                id: one.clone(),
+                pool: "app".into(),
+            })
+            .await
+            .unwrap();
+        runtime
+            .execute(edit("web", vec![one.clone()], vec![]))
+            .await
+            .unwrap();
+        runtime
+            .execute(Operation::MoveAccount {
+                id: two.clone(),
+                pool: "web".into(),
+            })
+            .await
+            .unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        let pool_of = |id: &str| {
+            snapshot
+                .accounts
+                .iter()
+                .find(|x| x.id == id)
+                .unwrap()
+                .pool
+                .clone()
+        };
+        assert_eq!(pool_of(&one), "app", "the share stayed at home");
+        assert_eq!(pool_of(&two), "web");
+        let web = snapshot.projects.iter().find(|p| p.pool == "web").unwrap();
+        assert_eq!(
+            web.shared_accounts,
+            vec![one.clone()],
+            "still shared with Web"
+        );
+        runtime
+            .execute(edit("web", vec![], vec![one.clone()]))
+            .await
+            .unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        let account = snapshot.accounts.iter().find(|x| x.id == one).unwrap();
+        assert_eq!(
+            account.pool, "app",
+            "taking a share out never sends it to default"
+        );
+        // The route on a share stays when another account moves in.
+        runtime
+            .execute(edit("web", vec![one.clone()], vec![]))
+            .await
+            .unwrap();
+        runtime
+            .store
+            .select(switchboard_core::Provider::Claude, "web", &one)
+            .unwrap();
+        let three = fixtures::save(&runtime.store, "synthetic-three", "default").id;
+        runtime
+            .execute(Operation::MoveAccount {
+                id: three.clone(),
+                pool: "web".into(),
+            })
+            .await
+            .unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert_eq!(
+            snapshot.routes.get("claude:web"),
+            Some(&one),
+            "the group's route on its share stayed"
+        );
+        let web = snapshot.projects.iter().find(|p| p.pool == "web").unwrap();
+        assert!(web.shared_accounts.contains(&one));
     }
 
     /// SB-403 (DEC-0025): the operations of a delegated seat and of the own sign-in switch.

@@ -48,8 +48,9 @@ pub use projects::{
     TOKENS_SPEND_UNKNOWN, TOKENS_SPEND_UNSAVED,
 };
 pub use rotation::{
-    default_managed_policy, free_at, FailoverTally, Fits, RotationDecision, RotationPolicy,
-    CURRENT_MAX_AGE_FLOOR_SECONDS,
+    burn_urgency, default_managed_policy, free_at, spend_order, FailoverTally, Fits,
+    RotationDecision, RotationPolicy, CURRENT_MAX_AGE_FLOOR_SECONDS, EXPIRING_MIN_FREE_PERCENT,
+    EXPIRING_URGENCY_RATIO, EXPIRING_WITHIN_HOURS, SPEND_ROOM_PERCENT,
 };
 pub use vault::{
     open_vault, set_vault_kind, vault_kind, FileVault, MemoryVault, NativeVault, Vault, VaultKind,
@@ -580,6 +581,7 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
             "switched"
                 | "failed"
                 | "switched_on_limit"
+                | "switched_expiring"
                 | "failover"
                 | "failover_outside"
                 | "unusable"
