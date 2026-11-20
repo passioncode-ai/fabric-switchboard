@@ -119,6 +119,70 @@ pub(crate) fn refused(agent: Option<&str>, reason: &'static str) -> Value {
     })
 }
 
+/// SB-587: a refusal's code as a fixed code for the log; `other` for one this version does not
+/// name.
+pub(crate) fn reason_code(reason: &str) -> &'static str {
+    [
+        NO_AGENT,
+        NOT_IN_GROUP,
+        CEILING_REACHED,
+        SPEND_UNKNOWN,
+        AGENT_NOT_INSTALLED,
+        PERMISSION_MODE,
+        HANDOFF_REFUSED,
+        AT_CAPACITY,
+        crate::remote_dispatch::NOT_ON_TARGET,
+        crate::remote_dispatch::TARGET_BUSY,
+        crate::remote_dispatch::TARGET_UNREACHABLE,
+    ]
+    .into_iter()
+    .find(|code| *code == reason)
+    .unwrap_or("other")
+}
+
+/// SB-587: who asks again after a refusal. Switchboard never retries a dispatch itself; Fabric
+/// takes `at_capacity` as a wait and keeps its queue (CO-588) and maps `no_agent`,
+/// `ceiling_reached` and `spend_unknown` to deferred states (`docs/CONTRACTS.md`, dispatch
+/// refusals): `fabric`. It ends `not_in_group` and `agent_not_installed` (`skipped-no-folder`,
+/// `failed-to-start`) and `permission_mode` needs a person's choice: `none`. The rest is up to
+/// whoever asked: `unknown`.
+pub(crate) fn asks_again(reason: &str) -> &'static str {
+    match reason {
+        AT_CAPACITY | NO_AGENT | CEILING_REACHED | SPEND_UNKNOWN => "fabric",
+        NOT_IN_GROUP | AGENT_NOT_INSTALLED | PERMISSION_MODE => "none",
+        _ => "unknown",
+    }
+}
+
+/// SB-587: a run's correlation ids for its log lines, each only when it has an opaque id's shape
+/// (`Field::Id`): anything else (`inbox`, a label, a path) is left out, never written.
+pub(crate) fn id_fields(
+    ids: &[(&'static str, Option<&str>)],
+) -> Vec<(&'static str, crate::oplog::Field)> {
+    ids.iter()
+        .filter_map(|(name, value)| Some((*name, fabric_sessions_core::events::id((*value)?)?)))
+        .collect()
+}
+
+/// SB-587: the ids a launch record carries for the log: the launch, the Fabric project, workflow
+/// and request its dispatch named, and the account's opaque handle (never the account id itself).
+pub(crate) fn record_ids(id: &str, record: &Value) -> Vec<(&'static str, crate::oplog::Field)> {
+    let by = &record["launched_by"]["dispatch"];
+    let account = record["account_id"]
+        .as_str()
+        .map(crate::continuation::account_ref);
+    id_fields(&[
+        ("launch", Some(id)),
+        ("project", by["project"].as_str()),
+        (
+            "workflow",
+            by["workflow"].as_str().or(record["continues"].as_str()),
+        ),
+        ("request", by["request"].as_str()),
+        ("account", account.as_deref()),
+    ])
+}
+
 /// The agent's kind for analytics: a code, never an id.
 pub(crate) fn agent_kind(agent: Option<&str>) -> &'static str {
     match agent {
@@ -415,13 +479,26 @@ fn ended(
     exit_code: Option<i32>,
     analytics: Option<&Analytics>,
 ) -> bool {
-    let started = crate::launches::get(root, id).and_then(|r| r["launched_at"].as_i64());
+    let record = crate::launches::get(root, id);
+    let started = record.as_ref().and_then(|r| r["launched_at"].as_i64());
     let set = crate::launches::end_once(root, id, how, now, exit_code);
     if set {
-        crate::oplog::event(
-            "dispatch_ended",
-            &[("outcome", crate::oplog::Field::Code(how))],
-        );
+        // SB-587: joined to its `dispatch` line by the launch id, with how long it ran and its
+        // exit code when the run's own exit was read (a stop or a run found gone has none).
+        let mut fields = vec![("outcome", crate::oplog::Field::Code(how))];
+        if let Some(record) = &record {
+            fields.extend(record_ids(id, record));
+        }
+        if let Some(started) = started {
+            fields.push((
+                "seconds",
+                crate::oplog::Field::Number((now - started).max(0)),
+            ));
+        }
+        if let Some(code) = exit_code {
+            fields.push(("exit_code", crate::oplog::Field::Number(i64::from(code))));
+        }
+        crate::oplog::event("dispatch_ended", &fields);
         if let Some(analytics) = analytics {
             analytics.dispatch_ended(how, duration_bucket(now - started.unwrap_or(now)));
         }
@@ -870,6 +947,91 @@ mod tests {
         );
         // No deadline recorded: nothing to extend.
         assert_eq!(extension(&json!({"dispatch": {}}), Some(10), 10), None);
+    }
+
+    /// SB-587 (org-index's board request `60178621`): a run's end is joined to its start by the
+    /// launch id and names the Fabric ids, how long it ran and its exit code; the folder, the
+    /// account's own id and a label never reach the log.
+    #[test]
+    fn a_runs_end_is_logged_with_its_ids_time_and_exit_code_and_nothing_else() {
+        const WF: &str = "wf_0123456789abcdef";
+        const PROJECT: &str = "476eb6af-e271-40e4-9e60-4d8681c1c4af";
+        const REQUEST: &str = "60178621-7f8f-405a-b583-cb713bf013d9";
+        const ACCOUNT: &str = "11111111-2222-4333-8444-555555555555";
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("homes").join("run");
+        std::fs::create_dir_all(&home).unwrap();
+        let id = crate::launches::new_id();
+        crate::launches::record_by(
+            root.path(),
+            &home,
+            json!({"provider": "claude", "account_id": ACCOUNT, "launched_at": 1000,
+                "working_directory": "/Users/person/DATA/secret-repo", "continues": WF,
+                "label": "Person Work"}),
+            &id,
+            Some(json!({"id": "nightly", "request": REQUEST, "thread": null,
+                "project": PROJECT, "workflow": WF})),
+        )
+        .unwrap();
+        let (set, events) =
+            crate::oplog::capture_fields(|| ended(root.path(), &id, EXITED, 1090, Some(3), None));
+        assert!(set);
+        let line = events
+            .iter()
+            .find(|(e, _)| *e == "dispatch_ended")
+            .map(|(_, f)| f.clone())
+            .expect("a dispatch_ended line");
+        let get = |name: &str| line.iter().find(|(n, _)| *n == name).map(|(_, f)| *f);
+        let id_of = |name: &str| match get(name) {
+            Some(crate::oplog::Field::Id(v)) => v.as_str().to_owned(),
+            other => panic!("{name}: {other:?}"),
+        };
+        assert_eq!(get("outcome"), Some(crate::oplog::Field::Code(EXITED)));
+        assert_eq!(id_of("launch"), id);
+        assert_eq!(id_of("workflow"), WF);
+        assert_eq!(id_of("project"), PROJECT);
+        assert_eq!(id_of("request"), REQUEST);
+        assert_eq!(id_of("account"), crate::continuation::account_ref(ACCOUNT));
+        assert_eq!(get("seconds"), Some(crate::oplog::Field::Number(90)));
+        assert_eq!(get("exit_code"), Some(crate::oplog::Field::Number(3)));
+        let text = format!("{line:?}");
+        for planted in [
+            ACCOUNT,
+            "/Users/person",
+            "secret-repo",
+            "Person Work",
+            "nightly",
+        ] {
+            assert!(!text.contains(planted), "{planted} leaked: {text}");
+        }
+        // A second end of the same run writes nothing.
+        let (again, events) =
+            crate::oplog::capture_fields(|| ended(root.path(), &id, EXITED, 1100, Some(0), None));
+        assert!(!again);
+        assert!(events.iter().all(|(e, _)| *e != "dispatch_ended"));
+    }
+
+    #[test]
+    fn a_refusal_names_its_code_and_who_asks_again() {
+        assert_eq!(reason_code(AT_CAPACITY), AT_CAPACITY);
+        assert_eq!(
+            reason_code(crate::remote_dispatch::TARGET_BUSY),
+            "target_busy"
+        );
+        assert_eq!(reason_code("something new"), "other");
+        assert_eq!(asks_again(AT_CAPACITY), "fabric");
+        assert_eq!(asks_again(NO_AGENT), "fabric");
+        assert_eq!(asks_again(NOT_IN_GROUP), "none");
+        assert_eq!(asks_again(HANDOFF_REFUSED), "unknown");
+        // `inbox` and a label are not ids: left out, never written.
+        let fields = id_fields(&[
+            ("request", Some("inbox")),
+            ("workflow", Some("wf_0123456789abcdef")),
+            ("account", Some("Person Work")),
+            ("handoff", None),
+        ]);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].0, "workflow");
     }
 
     #[test]
