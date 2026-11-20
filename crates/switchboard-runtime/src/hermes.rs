@@ -18,6 +18,17 @@ const MAX_OUTPUT: usize = 64 * 1024;
 pub const HERMES_NOT_INSTALLED: &str =
     "Hermes is not installed. Install it from hermes-agent.nousresearch.com, then try again.";
 pub const HERMES_FAILED: &str = "Hermes did not answer. Run hermes config check, then try again.";
+/// Why a run of Hermes gave no answer (SB-583, board request be4e4cf4): each says which, so a
+/// Hermes that works in a terminal but not from the app can be told apart. Before, all five read
+/// as `HERMES_FAILED`.
+pub const HERMES_NOT_STARTED: &str =
+    "Hermes could not be started. Check that the hermes command runs in a terminal, then try again.";
+pub const HERMES_TIMED_OUT: &str =
+    "Hermes did not answer within 15 seconds. Run hermes config check, then try again.";
+pub const HERMES_EXITED: &str =
+    "Hermes ended with an error. Run hermes config check, then try again.";
+pub const HERMES_UNREADABLE: &str =
+    "Hermes answered with something Switchboard cannot read. Run hermes config get model --json to see it.";
 pub const PROVIDER_INVALID: &str =
     "A Hermes provider is an id such as openrouter, anthropic or nous (lowercase letters, digits and - . _ :).";
 pub const MODEL_INVALID: &str =
@@ -60,14 +71,55 @@ pub fn model_valid(model: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'_' | b':' | b'-'))
 }
 
+/// Why a run of Hermes gave no answer (SB-583).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Failure {
+    /// The program could not be started (gone since it was found, not executable).
+    NotStarted,
+    /// No exit within the deadline: Hermes and everything it started were killed.
+    TimedOut(Duration),
+    /// It exited unsuccessfully; the code, unless a signal ended it.
+    Exited(Option<i32>),
+    /// It answered, but more than 64 KiB, not UTF-8, or not JSON.
+    Unreadable,
+}
+impl Failure {
+    pub fn message(self) -> &'static str {
+        match self {
+            Failure::NotStarted => HERMES_NOT_STARTED,
+            Failure::TimedOut(_) => HERMES_TIMED_OUT,
+            Failure::Exited(_) => HERMES_EXITED,
+            Failure::Unreadable => HERMES_UNREADABLE,
+        }
+    }
+    pub fn kind(self) -> &'static str {
+        match self {
+            Failure::NotStarted => "not_started",
+            Failure::TimedOut(_) => "timed_out",
+            Failure::Exited(_) => "exited",
+            Failure::Unreadable => "unreadable",
+        }
+    }
+    /// `error`, `error_kind` and the figure that goes with it (`timeout_secs`, `exit_code`).
+    fn describe(self, status: &mut Value) {
+        status["error"] = json!(self.message());
+        status["error_kind"] = json!(self.kind());
+        match self {
+            Failure::TimedOut(limit) => status["timeout_secs"] = json!(limit.as_secs()),
+            Failure::Exited(code) => status["exit_code"] = json!(code),
+            _ => {}
+        }
+    }
+}
+
 /// Runs Hermes with fixed arguments and a deadline; stdout only, bounded. Never through a shell.
-fn run(program: &Path, args: &[&str]) -> Result<String, &'static str> {
+fn run(program: &Path, args: &[&str]) -> Result<String, Failure> {
     run_within(program, args, TIMEOUT)
 }
 /// `run` with its own deadline. Hermes runs in its own process group: at the deadline the group is
 /// killed (a plugin or helper it started dies with it, LC-02) and reaped; stdout is read on its own
 /// thread, so a full pipe cannot hold the deadline up.
-fn run_within(program: &Path, args: &[&str], timeout: Duration) -> Result<String, &'static str> {
+fn run_within(program: &Path, args: &[&str], timeout: Duration) -> Result<String, Failure> {
     let mut command = Command::new(program);
     command
         .args(args)
@@ -76,7 +128,7 @@ fn run_within(program: &Path, args: &[&str], timeout: Duration) -> Result<String
         .stderr(Stdio::null());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    let mut child = command.spawn().map_err(|_| HERMES_FAILED)?;
+    let mut child = command.spawn().map_err(|_| Failure::NotStarted)?;
     let stdout = child.stdout.take();
     let reader = std::thread::spawn(move || {
         let mut out = Vec::new();
@@ -108,10 +160,10 @@ fn run_within(program: &Path, args: &[&str], timeout: Duration) -> Result<String
     };
     let out = reader.join().unwrap_or_default();
     match status {
-        Some(status) if status.success() && out.len() <= MAX_OUTPUT => {
-            String::from_utf8(out).map_err(|_| HERMES_FAILED)
-        }
-        _ => Err(HERMES_FAILED),
+        None => Err(Failure::TimedOut(timeout)),
+        Some(status) if !status.success() => Err(Failure::Exited(status.code())),
+        Some(_) if out.len() > MAX_OUTPUT => Err(Failure::Unreadable),
+        Some(_) => String::from_utf8(out).map_err(|_| Failure::Unreadable),
     }
 }
 
@@ -130,10 +182,27 @@ fn endpoint(url: &str) -> Option<String> {
     ))
 }
 
+/// The JSON Hermes printed: the whole of stdout, or else its last non-empty line (a line a plugin
+/// or helper printed to stdout before it). `None` when neither is JSON; empty output is `Null`
+/// (a home without a model section).
+fn model_json(text: &str) -> Option<Value> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Some(Value::Null);
+    }
+    serde_json::from_str(text).ok().or_else(|| {
+        text.lines()
+            .rev()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .and_then(|line| serde_json::from_str(line).ok())
+    })
+}
+
 /// `{model, provider, base_url, api_mode}` from Hermes's resolved `model` section; anything else
 /// in it (keys, tokens) is dropped.
 pub fn parse_model(text: &str) -> Value {
-    let value: Value = serde_json::from_str(text.trim()).unwrap_or(Value::Null);
+    let value = model_json(text).unwrap_or(Value::Null);
     let Some(section) = value.as_object() else {
         // A home without a model section prints an empty string.
         return json!({"configured": false, "model": null, "provider": null, "base_url": null, "api_mode": null});
@@ -156,13 +225,20 @@ pub fn parse_model(text: &str) -> Value {
     })
 }
 
+fn failed(failure: Failure) -> Value {
+    let mut status = json!({"configured": false});
+    failure.describe(&mut status);
+    status
+}
+
 fn status_with(program: Option<&Path>) -> Value {
     let Some(program) = program else {
         return json!({"installed": false, "configured": false, "error": null, "providers": COMMON_PROVIDERS});
     };
     let mut status = match run(program, &["config", "get", "model", "--json"]) {
-        Ok(text) => parse_model(&text),
-        Err(error) => json!({"configured": false, "error": error}),
+        Ok(text) if model_json(&text).is_some() => parse_model(&text),
+        Ok(_) => failed(Failure::Unreadable),
+        Err(failure) => failed(failure),
     };
     status["installed"] = json!(true);
     status["providers"] = json!(COMMON_PROVIDERS);
@@ -220,10 +296,10 @@ fn set_with(program: &Path, provider: Option<&str>, model: Option<&str>) -> Resu
     }
     // The provider first: Hermes clears an endpoint that belonged to the previous one.
     if let Some(provider) = provider {
-        run(program, &["config", "set", "model.provider", provider])?;
+        run(program, &["config", "set", "model.provider", provider]).map_err(Failure::message)?;
     }
     if let Some(model) = model {
-        run(program, &["config", "set", "model.default", model])?;
+        run(program, &["config", "set", "model.default", model]).map_err(Failure::message)?;
     }
     Ok(status_with(Some(program)))
 }
@@ -242,7 +318,7 @@ mod tests {
             &["-c", "sleep 30 & echo partial; sleep 30"],
             Duration::from_millis(300),
         );
-        assert_eq!(answer, Err(HERMES_FAILED));
+        assert_eq!(answer, Err(Failure::TimedOut(Duration::from_millis(300))));
         assert!(
             started.elapsed() < Duration::from_secs(5),
             "{:?}",
@@ -366,8 +442,57 @@ mod tests {
         std::fs::write(&program, "#!/bin/sh\nexit 2\n").unwrap();
         assert_eq!(
             set_with(&program, None, Some("a/b")).unwrap_err(),
-            HERMES_FAILED
+            HERMES_EXITED
         );
-        assert_eq!(status_with(Some(&program))["error"], HERMES_FAILED);
+        let status = status_with(Some(&program));
+        assert_eq!(status["error"], HERMES_EXITED);
+        assert_eq!(status["error_kind"], "exited");
+        assert_eq!(status["exit_code"], 2);
+    }
+
+    /// SB-583 (board request be4e4cf4): each way the probe fails says which, with its figure; a
+    /// line printed before the JSON does not hide the answer; stderr is never read.
+    #[cfg(unix)]
+    #[test]
+    fn the_probe_names_why_hermes_gave_no_answer() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("hermes");
+        let answer = |body: &str| {
+            std::fs::write(&program, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+            status_with(Some(&program))
+        };
+        let status = answer("echo 'Command helper: applied 3 secrets' >&2\necho 'banner'\necho '{\"provider\": \"openrouter\", \"default\": \"a/b\"}'");
+        assert_eq!(status["error"], Value::Null, "{status}");
+        assert_eq!(status["provider"], "openrouter");
+        assert_eq!(status["model"], "a/b");
+        assert!(status.get("error_kind").is_none());
+
+        let status = answer("echo 'not json'");
+        assert_eq!(status["error"], HERMES_UNREADABLE);
+        assert_eq!(status["error_kind"], "unreadable");
+        assert_eq!(status["installed"], true);
+
+        // Empty output is a home without a model section, not a failure.
+        let status = answer("exit 0");
+        assert_eq!(status["error"], Value::Null);
+        assert_eq!(status["configured"], false);
+
+        let status = answer("kill -9 $$");
+        assert_eq!(status["error_kind"], "exited");
+        assert_eq!(status["exit_code"], Value::Null);
+
+        let gone = dir.path().join("gone");
+        let status = status_with(Some(&gone));
+        assert_eq!(status["error"], HERMES_NOT_STARTED);
+        assert_eq!(status["error_kind"], "not_started");
+
+        let mut timed_out = json!({});
+        Failure::TimedOut(TIMEOUT).describe(&mut timed_out);
+        assert_eq!(timed_out["error"], HERMES_TIMED_OUT);
+        assert_eq!(timed_out["error_kind"], "timed_out");
+        assert_eq!(timed_out["timeout_secs"], 15);
+        assert!(HERMES_TIMED_OUT.contains(&format!("{} seconds", TIMEOUT.as_secs())));
     }
 }

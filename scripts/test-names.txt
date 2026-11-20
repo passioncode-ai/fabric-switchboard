@@ -983,6 +983,7 @@ switchboard-runtime lib:switchboard_runtime hermes::tests::a_continuation_keeps_
 switchboard-runtime lib:switchboard_runtime hermes::tests::a_hermes_that_hangs_is_cut_off_with_everything_it_started
 switchboard-runtime lib:switchboard_runtime hermes::tests::only_four_non_secret_keys_survive_the_read
 switchboard-runtime lib:switchboard_runtime hermes::tests::provider_and_model_shapes_are_checked_before_hermes_runs
+switchboard-runtime lib:switchboard_runtime hermes::tests::the_probe_names_why_hermes_gave_no_answer
 switchboard-runtime lib:switchboard_runtime inbox::tests::a_check_says_whether_the_server_answers_the_saved_key
 switchboard-runtime lib:switchboard_runtime inbox::tests::a_refused_key_a_redirect_and_a_tool_error_are_named
 switchboard-runtime lib:switchboard_runtime inbox::tests::a_saved_key_keeps_its_secret_in_the_vault_and_shows_only_the_server

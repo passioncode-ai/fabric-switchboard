@@ -368,6 +368,11 @@ const safeErrors = new Set([
   'Name the account or agent to continue on (--account), or choose a default agent on the Agents page.',
   'The default agent has no account that can take this workflow now. Name one with --account, or choose another default agent.',
   'Hermes did not answer. Run hermes config check, then try again.',
+  // SB-583: why the probe gave no answer.
+  'Hermes could not be started. Check that the hermes command runs in a terminal, then try again.',
+  'Hermes did not answer within 15 seconds. Run hermes config check, then try again.',
+  'Hermes ended with an error. Run hermes config check, then try again.',
+  'Hermes answered with something Switchboard cannot read. Run hermes config get model --json to see it.',
   'A Hermes provider is an id such as openrouter, anthropic or nous (lowercase letters, digits and - . _ :).',
   'A model is an id such as moonshotai/kimi-k2 or claude-sonnet-4.5 (letters, digits and / . _ : -).',
   'Name a provider, a model or both.',

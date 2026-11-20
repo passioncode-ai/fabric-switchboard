@@ -1584,7 +1584,9 @@ function agentRow(agent: AgentRow) {
   title.append(el('strong', '', agent.name));
   if (agent.switchable && agent.disabled) title.append(el('span', 'badge muted', t('Disabled')));
   info.append(title, breakableCode('agent-command', agent.command));
-  if (agent.id === 'hermes' && hermes?.installed) info.append(el('span', 'form-note', `${t('Model: {model}', { model: hermes.model ?? t('not set') })} · ${t('Provider: {provider}', { provider: hermes.provider ?? t('not set') })}`));
+  // SB-583: a probe that failed says why (not started, no answer in 15 s, an error exit, unreadable), never "not set".
+  if (agent.id === 'hermes' && hermes?.installed && hermes.error) info.append(el('span', 'usage-error', t(safeError(hermes.error, 'read'))));
+  else if (agent.id === 'hermes' && hermes?.installed) info.append(el('span', 'form-note', `${t('Model: {model}', { model: hermes.model ?? t('not set') })} · ${t('Provider: {provider}', { provider: hermes.provider ?? t('not set') })}`));
   if (agent.id === 'hermes' && hermesError) info.append(el('span', 'usage-error', t(hermesError)));
   const controls = el('div', 'agent-controls');
   if (agent.switchable) {

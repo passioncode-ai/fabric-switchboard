@@ -1047,7 +1047,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Open Agents → the Hermes Agent row reads “Model: deepseek/deepseek-v4-pro-0813 · Provider: openrouter”.
 2. *Details* → *Change Hermes's model*, pick a provider from the list and/or type a model, *Save* → Hermes's own `hermes config set` runs; the panel shows the new values: “Hermes settings saved.”
-**Alt paths:** Hermes not installed → it has no row under Installed, only its install command under Available; Hermes does not answer → “Hermes did not answer. Run hermes config check, then try again.”; a malformed provider or model → refused before Hermes runs; a home with no model section → “not set”.
+**Alt paths:** Hermes not installed → it has no row under Installed, only its install command under Available; Hermes does not answer → the row says why (SB-583): “Hermes could not be started…”, “Hermes did not answer within 15 seconds…”, “Hermes ended with an error…” or “Hermes answered with something Switchboard cannot read…”, each naming the command to run, in place of “Model: not set”; a malformed provider or model → refused before Hermes runs; a home with no model section → “not set”.
 **Expected result:** only the provider and default model change, in Hermes's own config and format; no key is read, shown or set; sessions already running keep theirs.
 **UI elements:** the Hermes row (model, provider, *Details* → *Change Hermes's model*), the change dialog (provider list, model field). The endpoint is in `switchboard agents hermes` and the MCP status.
 **States covered:** reading, read failed (shown in the row), not installed, not configured, configured, Hermes error, saved.
