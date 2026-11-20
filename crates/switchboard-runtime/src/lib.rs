@@ -8634,10 +8634,10 @@ async fn execute(
             )?;
             // SB-594: `--move-accounts` moves the accounts it names, never the ones the group
             // only shares (at home in another group, or lent by the default group). A moving save
-            // rebuilds the group's whole set, so when the group shares any account the named ones
-            // move first on their own (`Store::move_into`, which leaves shares, loans and their
-            // routes alone) and the save then runs as a sharing one. `accounts move` and the
-            // window's move come through here.
+            // rebuilds the group's whole set, so when the group shares any account the save runs
+            // as a sharing one and the named accounts then come home on their own
+            // (`Store::move_into`, which leaves shares, loans and their routes alone).
+            // `accounts move` and the window's move come through here.
             let shares_any = snapshot
                 .projects
                 .iter()
@@ -8655,11 +8655,28 @@ async fn execute(
                 *chosen_all = organizations;
                 *moving = move_accounts && !move_first;
             }
-            if move_first {
-                store.move_into(&pool, &add_accounts)?;
+            // The same admission, refusals and memory of removals as a whole save (SaveProject):
+            // a refused save changes nothing, the move included.
+            let answer = Box::pin(execute(store.clone(), root, runtime, save)).await?;
+            if !move_first {
+                return Ok(answer);
             }
-            // The same admission, refusals and memory of removals as a whole save (SaveProject).
-            Box::pin(execute(store, root, runtime, save)).await
+            // The save shared the named accounts that live in another group (an account at home
+            // in the default group moved with it); now they come home here.
+            if store.move_into(&pool, &add_accounts)? == 0 {
+                return Ok(answer);
+            }
+            let snapshot = store.snapshot()?;
+            let mut view = snapshot
+                .projects
+                .iter()
+                .find(|p| p.pool == pool)
+                .map(|p| projects::project_view(&snapshot, p))
+                .unwrap_or(answer.clone());
+            if let Some(gone) = answer.get("dropped_missing") {
+                view["dropped_missing"] = gone.clone();
+            }
+            Ok(view)
         }
         Operation::Organizations => {
             let mut view = organizations_view(&store.snapshot()?);

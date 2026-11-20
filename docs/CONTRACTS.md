@@ -4671,12 +4671,13 @@ Code: `crates/switchboard-runtime/src/deb.rs`, `self_update::run`, `serve_update
 `Operation::MoveAccount`, which the window's and `accounts move` use) moved every account the
 group served, its shares included, so a share left its own group, and taking it out afterwards
 sent it to the default group (found 2026-11-20: `billing@` left Appvillis for eSIM Plus, then for
-the default group). Now, when the group shares any account, the named accounts move first on
-their own (`Store::move_into`: one publish that changes only their home, takes them out of the
+the default group). Now, when the group shares any account, the save runs as a sharing one with
+all its refusals (the ordinary CLI's account included; a refused save changes nothing), and the
+named accounts then come home on their own (`Store::move_into`: one publish that changes only their home, takes them out of the
 group's shares and the default group's loans, drops a route their old group had on them and
 confirms an organization their address suggests; an unknown account, one on another machine or a
-second copy of a sign-in the group holds refuses the whole move) and the save then runs as a
-sharing one, so the group's shares, the default group's loans and the routes on them stay. Test
+second copy of a sign-in the group holds refuses the whole move), so the group's shares, the
+default group's loans and the routes on them stay. Test
 `owner_tests::an_account_added_to_a_second_group_serves_both`.
 
 ## A deleted group's switching goes with it (SB-595, 2026-11-20)
