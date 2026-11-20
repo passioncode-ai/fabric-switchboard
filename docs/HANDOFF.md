@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-20: the window and fleet plan's state, waves 4 and 5 carried by the target-state plan, on branch `wf-plan-state`
+
+- **Asked.** Fabric task 79351a43 (the operator's window review of 2026-11-14: spec, modules, waves, releases), left open when its last run lapsed on 2026-11-19.
+- **Found.** Waves 1 to 3 released (0.7.80, 0.7.82, 0.7.83, 0.7.84, 0.7.103). The open parts, WF-9 (SB-371), WF-10.2 and 10.3 (SB-372), WF-12 (SB-374), are already placed in the [target-state plan](plans/2026-11-17-target-state/README.md): W2 *Devices of an organization* names the Machines page and the end-to-end organization walk; 04 §8 names 10.2 and 10.3 as a gap. No branch or worktree held work on them.
+- **Done.** A *State* section in the [window and fleet plan](plans/2026-11-14-window-and-fleet/README.md#state-2026-11-20) with each wave's evidence and where waves 4 and 5 are carried; the state column of SB-371, SB-372 and SB-374 in the [backlog](evidence/backlog.md) says the same.
+- **Decision.** The task's own deliverable (spec, modules, waves 1 to 3 released) is finished; building waves 4 and 5 under this task would run a second plan beside the target-state order and collide with the open machine PRs (#867, #870, #872, #876, #877). The Fabric task goes to review with this note; the operator decides whether to close it.
+- **Checks run.** `python3 scripts/check_docs.py`, `python3 docs/ux/lint.py`, `git diff --check` (docs only; no code changed, so the Rust and UI steps were not rerun).
+
+**Exact next task.** Unchanged: the entry below.
+
 ## 2026-11-19: SB-580 sessions handed to Fabric (`fabric-session-links/1`), `sessions --rows` shared under load, on branch `feat/sb-session-links`
 
 - **Asked.** Owner's order 57445717 (thread 3ca40854, 2026-11-19 ~21:20 Warsaw, via Fabric's CEO), Switchboard's part e674295f; Fabric's contract `fabric-session-links/1` in b37c7dce.
