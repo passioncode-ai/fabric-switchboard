@@ -4286,6 +4286,97 @@ fn project_edit(
         move_accounts: false,
     })
 }
+/// The fields of `Operation::ProjectEdit`, for `project_edit_run`.
+struct ProjectEditArgs {
+    pool: String,
+    name: Option<String>,
+    add_accounts: Vec<String>,
+    remove_accounts: Vec<String>,
+    add_folders: Vec<PathBuf>,
+    remove_folders: Vec<PathBuf>,
+    organization: Option<String>,
+    organizations: Option<Vec<String>>,
+    move_accounts: bool,
+}
+/// `Operation::ProjectEdit` (SB-134): a group changed by delta, run as a whole save.
+async fn project_edit_run(
+    store: Arc<Store>,
+    root: &Path,
+    runtime: Option<&Runtime>,
+    args: ProjectEditArgs,
+) -> Result<Value, String> {
+    let ProjectEditArgs {
+        pool,
+        name,
+        add_accounts,
+        remove_accounts,
+        add_folders,
+        remove_folders,
+        organization,
+        organizations,
+        move_accounts,
+    } = args;
+    let snapshot = store.snapshot()?;
+    // SB-135: a root taken out takes its worktrees and clones with it.
+    let mut remove_folders = remove_folders;
+    if let Some(project) = snapshot.projects.iter().find(|p| p.pool == pool) {
+        let roots = blocking::run(|| roots::tree(&project.folders));
+        let mut extra: Vec<PathBuf> = Vec::new();
+        for f in &remove_folders {
+            let named = canonical_near(f);
+            for root in &roots {
+                if canonical_near(Path::new(&root.folder)) == named {
+                    extra.extend(root.derived.iter().map(|d| PathBuf::from(&d.folder)));
+                }
+            }
+        }
+        for f in extra {
+            if !remove_folders.contains(&f) {
+                remove_folders.push(f);
+            }
+        }
+    }
+    let mut save = project_edit(
+        &snapshot,
+        &pool,
+        name,
+        &add_accounts,
+        &remove_accounts,
+        &add_folders,
+        &remove_folders,
+    )?;
+    // SB-594: `--move-accounts` moves the accounts it names, never the ones the group
+    // only shares (at home in another group, or lent by the default group). A moving save
+    // rebuilds the group's whole set, so when the group shares any account the save runs
+    // as a sharing one and the named accounts then come home on their own
+    // (`Store::move_into`, which leaves shares, loans and their routes alone).
+    // `accounts move` and the window's move come through here.
+    let shares_any = snapshot
+        .projects
+        .iter()
+        .find(|p| p.pool == pool)
+        .is_some_and(|p| !p.shared_accounts.is_empty());
+    let move_first = move_accounts && shares_any;
+    if let Operation::SaveProject {
+        organization: chosen,
+        organizations: chosen_all,
+        move_accounts: moving,
+        ..
+    } = &mut save
+    {
+        *chosen = organization;
+        *chosen_all = organizations;
+        *moving = move_accounts && !move_first;
+    }
+    // The same admission, refusals and memory of removals as a whole save (SaveProject):
+    // a refused save changes nothing, the move included.
+    let answer = Box::pin(execute(store.clone(), root, runtime, save)).await?;
+    if move_first {
+        // Out of `execute`'s own frame, which every nested call repeats (SB-558).
+        return move_into_after_save(&store, &pool, &add_accounts, answer);
+    }
+    Ok(answer)
+}
 /// SB-594: after a sharing save, the accounts the edit named come home to the group of `pool`
 /// (`Store::move_into`); the answer is the group as it then stands.
 fn move_into_after_save(
@@ -8624,66 +8715,25 @@ async fn execute(
             organizations,
             move_accounts,
         } => {
-            let snapshot = store.snapshot()?;
-            // SB-135: a root taken out takes its worktrees and clones with it.
-            let mut remove_folders = remove_folders;
-            if let Some(project) = snapshot.projects.iter().find(|p| p.pool == pool) {
-                let roots = blocking::run(|| roots::tree(&project.folders));
-                let mut extra: Vec<PathBuf> = Vec::new();
-                for f in &remove_folders {
-                    let named = canonical_near(f);
-                    for root in &roots {
-                        if canonical_near(Path::new(&root.folder)) == named {
-                            extra.extend(root.derived.iter().map(|d| PathBuf::from(&d.folder)));
-                        }
-                    }
-                }
-                for f in extra {
-                    if !remove_folders.contains(&f) {
-                        remove_folders.push(f);
-                    }
-                }
-            }
-            let mut save = project_edit(
-                &snapshot,
-                &pool,
-                name,
-                &add_accounts,
-                &remove_accounts,
-                &add_folders,
-                &remove_folders,
-            )?;
-            // SB-594: `--move-accounts` moves the accounts it names, never the ones the group
-            // only shares (at home in another group, or lent by the default group). A moving save
-            // rebuilds the group's whole set, so when the group shares any account the save runs
-            // as a sharing one and the named accounts then come home on their own
-            // (`Store::move_into`, which leaves shares, loans and their routes alone).
-            // `accounts move` and the window's move come through here.
-            let shares_any = snapshot
-                .projects
-                .iter()
-                .find(|p| p.pool == pool)
-                .is_some_and(|p| !p.shared_accounts.is_empty());
-            let move_first = move_accounts && shares_any;
-            if let Operation::SaveProject {
-                organization: chosen,
-                organizations: chosen_all,
-                move_accounts: moving,
-                ..
-            } = &mut save
-            {
-                *chosen = organization;
-                *chosen_all = organizations;
-                *moving = move_accounts && !move_first;
-            }
-            // The same admission, refusals and memory of removals as a whole save (SaveProject):
-            // a refused save changes nothing, the move included.
-            let answer = Box::pin(execute(store.clone(), root, runtime, save)).await?;
-            if move_first {
-                // Out of `execute`'s own frame, which every nested call repeats (SB-558).
-                return move_into_after_save(&store, &pool, &add_accounts, answer);
-            }
-            Ok(answer)
+            // Its own future, so its locals stay out of `execute`'s frame, which every nested
+            // call repeats (SB-558, SB-594).
+            Box::pin(project_edit_run(
+                store,
+                root,
+                runtime,
+                ProjectEditArgs {
+                    pool,
+                    name,
+                    add_accounts,
+                    remove_accounts,
+                    add_folders,
+                    remove_folders,
+                    organization,
+                    organizations,
+                    move_accounts,
+                },
+            ))
+            .await
         }
         Operation::Organizations => {
             let mut view = organizations_view(&store.snapshot()?);
