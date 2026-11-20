@@ -2932,7 +2932,7 @@ fn a_gone_groups_switching_is_dropped() {
     let folder = root.path().join("repo");
     std::fs::create_dir_all(&folder).unwrap();
     let project = store
-        .save_project(None, "Gone", &[folder], &[a.clone()])
+        .save_project(None, "Gone", &[folder], std::slice::from_ref(&a))
         .unwrap();
     assert_eq!(store.ensure_default_policies().unwrap(), 1);
     assert!(store
