@@ -4,7 +4,9 @@
 //! from evidence instead of from memory.
 //!
 //! Values never enter it, by construction: an event and every field are `&'static str` codes,
-//! integers or booleans, so a credential, a path, an email or a provider's message cannot be passed in.
+//! integers, booleans or opaque ids (`Field::Id`, SB-587: a Fabric project, workflow, handoff,
+//! request or launch id, or an account's opaque handle, admitted only in an id's shape), so a
+//! credential, a path, an email, a label or a provider's message cannot be passed in.
 //! The file is `switchboard.log` in `~/Library/Logs/Fabric Switchboard/` (macOS), mode 0600,
 //! rotated by size: five files of at most 5 MB each.
 use serde_json::{Map, Value};
@@ -124,6 +126,7 @@ fn line(event: &'static str, fields: &[(&'static str, Field)], at: i64) -> Strin
                 Field::Code(code) => Value::String((*code).into()),
                 Field::Number(number) => Value::from(*number),
                 Field::Flag(flag) => Value::from(*flag),
+                Field::Id(id) => Value::String(id.as_str().into()),
             },
         );
     }

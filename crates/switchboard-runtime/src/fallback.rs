@@ -467,6 +467,14 @@ fn log(outcome: &'static str) {
     oplog::event("fallback", &[("outcome", oplog::Field::Code(outcome))]);
 }
 
+/// SB-587: a pass's line about one workflow carries its id, so a hand-over offered for it can be
+/// found in the log (only in an id's shape; nothing else of the workflow).
+fn log_for(outcome: &'static str, workflow: &str) {
+    let mut fields = vec![("outcome", oplog::Field::Code(outcome))];
+    fields.extend(crate::dispatch::id_fields(&[("workflow", Some(workflow))]));
+    oplog::event("fallback", &fields);
+}
+
 /// One monitor pass: find a stalled workflow whose executor hit its limit and hand it to the next
 /// usable agent of its chain. Quiet and cheap when no chain is set or nothing is limited.
 pub(crate) async fn pass(runtime: &Runtime, now: i64) {
@@ -934,13 +942,13 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
         // A failed read is an attempt like a hand-over: not repeated every pass.
         let Ok(Ok(shown)) = shown else {
             runtime.fallback.mark(id, now);
-            log("engine_unreadable");
+            log_for("engine_unreadable", id);
             continue;
         };
         // SB-253: a board request's workflow is handed on by Fabric only.
         if serves_board_request(&shown) {
             runtime.fallback.mark(id, now);
-            log("fabric_request");
+            log_for("fabric_request", id);
             continue;
         }
         let Some(dir) = continuation::checkouts(&shown)
@@ -949,19 +957,19 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
             .or_else(|| crate::launches::last_folder(&runtime.root, id))
         else {
             runtime.fallback.mark(id, now);
-            log("no_checkout");
+            log_for("no_checkout", id);
             continue;
         };
         let (pool, ambiguous) = chain_pool(&snapshot, executor_account.as_deref(), &dir);
         if ambiguous {
-            log("group_ambiguous");
+            log_for("group_ambiguous", id);
         }
         // No chain for the checkout's group (another group has one): no retry mark, so a chain
         // set meanwhile is used at the next scan.
         let chain = match runtime.store.chain_for(Some(id), pool.as_deref()) {
             Ok(Some(chain)) => chain,
             _ => {
-                log("no_chain");
+                log_for("no_chain", id);
                 continue;
             }
         };
@@ -1008,7 +1016,7 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
             GATED.scope(pin, act(workflow, account, dir))
         };
         let done = hand_over(&pinned_act, &gate, id, &dir, &steps).await;
-        log(done.outcome);
+        log_for(done.outcome, id);
         record_last(&runtime.root, &snapshot, id, &done, now);
         // SB-82 (D-3): the walk's record with the contract's probe results.
         let walk = crate::walks::of(now, id, &done.passed, done.selected.clone());

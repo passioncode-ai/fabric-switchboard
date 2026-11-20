@@ -111,13 +111,8 @@ pub fn record(root: &Path, request: Option<&str>, now: i64) {
     state.waiting = state.waiting.saturating_add(1);
     state.waiting_since.get_or_insert(now);
     write(root, &state);
-    crate::oplog::event(
-        "dispatch_refused",
-        &[(
-            "reason",
-            crate::oplog::Field::Code(crate::dispatch::AT_CAPACITY),
-        )],
-    );
+    // SB-587: the log line (`dispatch_refused`, with its ids and the pool's figures) is written
+    // by the dispatch that was refused, for every refusal, not here.
 }
 
 /// The one-minute watch: after a refusal that still waits, or one of the last hour, the first

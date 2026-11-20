@@ -5485,13 +5485,21 @@ async fn dispatch_start(
     // Review round 1, P1-C: a board run recorded as running ends the wait of those refused before.
     blocking::run(|| dispatch_refusals::admitted(root, monitor::now()));
     dispatch::watch(root, launch_id.clone(), started.child, runtime.analytics());
-    oplog::event(
-        "dispatch",
-        &[(
-            "agent",
-            oplog::Field::Code(dispatch::agent_kind(Some(&agent))),
-        )],
-    );
+    // SB-587: the ids that join this start to its `dispatch_ended` and to Fabric's offer.
+    let account = continuation::account_ref(&account_id);
+    let mut fields = vec![(
+        "agent",
+        oplog::Field::Code(dispatch::agent_kind(Some(&agent))),
+    )];
+    fields.extend(dispatch::id_fields(&[
+        ("launch", Some(&launch_id)),
+        ("project", packet.project.as_deref()),
+        ("workflow", Some(workflow_id)),
+        ("handoff", Some(handoff_id)),
+        ("request", Some(&request)),
+        ("account", Some(&account)),
+    ]));
+    oplog::event("dispatch", &fields);
     Ok(json!({
         "launch_id": launch_id,
         "agent": agent,
@@ -5595,16 +5603,22 @@ fn dispatch_remote(
             "workflow": workflow_id,
         })),
     )?;
-    oplog::event(
-        "dispatch",
-        &[
-            (
-                "agent",
-                oplog::Field::Code(dispatch::agent_kind(Some(agent))),
-            ),
-            ("where", oplog::Field::Code("remote")),
-        ],
-    );
+    let mut fields = vec![
+        (
+            "agent",
+            oplog::Field::Code(dispatch::agent_kind(Some(agent))),
+        ),
+        ("where", oplog::Field::Code("remote")),
+    ];
+    // SB-587: the same ids as a start here; no account, it is chosen on the other machine.
+    fields.extend(dispatch::id_fields(&[
+        ("launch", Some(&launch_id)),
+        ("project", packet.project.as_deref()),
+        ("workflow", Some(workflow_id)),
+        ("handoff", Some(handoff_id)),
+        ("request", Some(request)),
+    ]));
+    oplog::event("dispatch", &fields);
     Ok(json!({
         "launch_id": launch_id,
         "agent": agent,
@@ -6674,6 +6688,33 @@ async fn execute(
                 }),
             )
             .await?;
+            // SB-587: every refusal is logged with its ids, the pool's figures when it was full,
+            // and who asks again; nothing started, so no launch id.
+            if answer["state"] == "refused" {
+                let reason = answer["reason"].as_str().unwrap_or_default();
+                let mut fields = vec![
+                    ("reason", oplog::Field::Code(dispatch::reason_code(reason))),
+                    (
+                        "asks_again",
+                        oplog::Field::Code(dispatch::asks_again(reason)),
+                    ),
+                    (
+                        "agent",
+                        oplog::Field::Code(dispatch::agent_kind(answer["agent"].as_str())),
+                    ),
+                ];
+                for key in ["used", "cap", "board_used", "board_share"] {
+                    if let Some(n) = answer[key].as_i64() {
+                        fields.push((key, oplog::Field::Number(n)));
+                    }
+                }
+                fields.extend(dispatch::id_fields(&[
+                    ("workflow", Some(&workflow_id)),
+                    ("handoff", Some(&handoff_id)),
+                    ("request", request_id.as_deref()),
+                ]));
+                oplog::event("dispatch_refused", &fields);
+            }
             if let Some(client) = runtime.analytics() {
                 client.dispatch(
                     answer["state"].as_str().unwrap_or_default(),

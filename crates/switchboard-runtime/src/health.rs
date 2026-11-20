@@ -18,6 +18,8 @@ const CRASH_FAIL_SECONDS: i64 = 86_400;
 const WEEK: i64 = 7 * 86_400;
 /// Errors counted today (UTC) at or above this warn: one bad call is not an incident, a storm is.
 const ERRORS_WARN: u64 = 50;
+/// SB-587: board runs refused for longer than this with no start admitted since fail the report.
+const BOARD_WAIT_FAIL_SECONDS: i64 = 6 * 3600;
 
 pub struct Inputs<'a> {
     pub attention: &'a Value,
@@ -130,6 +132,34 @@ pub fn report(inputs: &Inputs) -> Value {
         if machines > 0 { "warn" } else { "ok" },
         machines,
         (machines > 0).then_some("switchboard_machines"),
+    ));
+    // SB-587 (org-index's board request `60178621`): Fabric's board runs refused `at_capacity`
+    // that still wait, with no board start admitted since. A wait is Fabric's queue (CO-588) and
+    // ok; one older than `BOARD_WAIT_FAIL_SECONDS` means its projects get no session at all and
+    // fails, unless the pool had room again since (`freed`), which warns until Fabric's next pass
+    // starts one. What never reached this Switchboard is Fabric's to see, not this check's.
+    let (board_state, board_count) = match items.iter().find(|i| i["reason"] == "dispatch_refused")
+    {
+        None => ("ok", 0),
+        Some(item) => {
+            let count = item["count"].as_u64().unwrap_or(1);
+            let old = item["since"]
+                .as_i64()
+                .is_some_and(|since| inputs.now - since > BOARD_WAIT_FAIL_SECONDS);
+            let state = match (old, item["freed"] == true) {
+                (false, _) => "ok",
+                (true, true) => "warn",
+                (true, false) => "fail",
+            };
+            (state, count)
+        }
+    };
+    checks.push(check(
+        "board_runs_waiting",
+        "sessions",
+        board_state,
+        board_count,
+        (board_state != "ok").then_some("switchboard_capacity"),
     ));
     let crashes: Vec<i64> = inputs.bugs["crashes"]
         .as_array()
@@ -349,6 +379,36 @@ mod tests {
         );
         assert_eq!(state_of(&off, "errors_today"), "unknown");
         assert_eq!(off["state"], "unknown");
+    }
+
+    #[test]
+    fn board_runs_refused_for_six_hours_with_no_start_fail() {
+        let now = 10 * 86_400 + 100;
+        let waiting = |since: i64, freed: bool| {
+            json!({"items": [{"reason": "dispatch_refused", "count": 31, "since": since,
+                "freed": freed, "newest_request": "60178621-7f8f-405a-b583-cb713bf013d9"}]})
+        };
+        let quiet = run(json!({"items": []}), json!({}), true);
+        assert_eq!(state_of(&quiet, "board_runs_waiting"), "ok");
+        let short = run(waiting(now - 3600, false), json!({}), true);
+        assert_eq!(state_of(&short, "board_runs_waiting"), "ok");
+        let long = run(waiting(now - 7 * 3600, false), json!({}), true);
+        assert_eq!(state_of(&long, "board_runs_waiting"), "fail");
+        assert_eq!(long["state"], "fail");
+        let check = long["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == "board_runs_waiting")
+            .unwrap();
+        assert_eq!(check["count"], 31);
+        assert_eq!(check["fix"]["tool"], "switchboard_capacity");
+        assert!(
+            !long.to_string().contains("60178621"),
+            "an id leaked: {long}"
+        );
+        let freed = run(waiting(now - 7 * 3600, true), json!({}), true);
+        assert_eq!(state_of(&freed, "board_runs_waiting"), "warn");
     }
 
     #[test]
