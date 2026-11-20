@@ -4286,6 +4286,27 @@ fn project_edit(
         move_accounts: false,
     })
 }
+/// SB-594: after a sharing save, the accounts the edit named come home to the group of `pool`
+/// (`Store::move_into`); the answer is the group as it then stands.
+fn move_into_after_save(
+    store: &Store,
+    pool: &str,
+    named: &[String],
+    answer: Value,
+) -> Result<Value, String> {
+    if store.move_into(pool, named)? == 0 {
+        return Ok(answer);
+    }
+    let snapshot = store.snapshot()?;
+    let Some(project) = snapshot.projects.iter().find(|p| p.pool == pool) else {
+        return Ok(answer);
+    };
+    let mut view = projects::project_view(&snapshot, project);
+    if let Some(gone) = answer.get("dropped_missing") {
+        view["dropped_missing"] = gone.clone();
+    }
+    Ok(view)
+}
 /// SB-109: a group's organization as the person names it (its id, its name in any case, or
 /// `personal`) → the store's choice: `Some(None)` personal, `Some(Some(id))` an organization.
 fn group_organization(
@@ -8658,25 +8679,11 @@ async fn execute(
             // The same admission, refusals and memory of removals as a whole save (SaveProject):
             // a refused save changes nothing, the move included.
             let answer = Box::pin(execute(store.clone(), root, runtime, save)).await?;
-            if !move_first {
-                return Ok(answer);
+            if move_first {
+                // Out of `execute`'s own frame, which every nested call repeats (SB-558).
+                return move_into_after_save(&store, &pool, &add_accounts, answer);
             }
-            // The save shared the named accounts that live in another group (an account at home
-            // in the default group moved with it); now they come home here.
-            if store.move_into(&pool, &add_accounts)? == 0 {
-                return Ok(answer);
-            }
-            let snapshot = store.snapshot()?;
-            let mut view = snapshot
-                .projects
-                .iter()
-                .find(|p| p.pool == pool)
-                .map(|p| projects::project_view(&snapshot, p))
-                .unwrap_or(answer.clone());
-            if let Some(gone) = answer.get("dropped_missing") {
-                view["dropped_missing"] = gone.clone();
-            }
-            Ok(view)
+            Ok(answer)
         }
         Operation::Organizations => {
             let mut view = organizations_view(&store.snapshot()?);
