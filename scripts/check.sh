@@ -95,6 +95,7 @@ step plugin python3 scripts/check_plugin.py
 step plugin-tests python3 -m unittest scripts/test_check_plugin.py
 step nightly-clock-tests python3 -m unittest scripts/test_nightly_clock.py
 step prune-tests python3 -m unittest scripts/test_prune_artifacts.py
+step quota-sentry-tests python3 -m unittest scripts/test_quota_sentry.py
 step test-inventory-tests python3 -m unittest scripts/test_test_names.py
 step packaging-tests python3 -m unittest scripts/test_updater_artifacts.py scripts/test_package_linux.py
 step release-tests python3 -m unittest scripts/test_build_macos.py scripts/test_package_windows.py scripts/test_windows_bundle.py scripts/test_release_preflight.py scripts/test_release_bump.py scripts/test_smoke_native.py
