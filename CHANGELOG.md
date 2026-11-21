@@ -8,6 +8,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- **The Sessions list no longer times out on a busy computer (SB-581).** `switchboard sessions --rows`, the window's Sessions page and MCP `switchboard_sessions {rows: true}` now wait up to 120 s for the answer, as the session tree they are built on already did. With 30 s the read gave up at very high load while Switchboard went on preparing the answer.
+
+## 0.7.126
+
+- A group now spends first the quota that would otherwise expire unused (SB-587, DEC-0038). When Switchboard picks a group's next account (a switch near the limit, a refused request moved on, the default group lending an account), it takes the one whose free weekly share would be lost soonest: its free percent divided by the hours left until its week resets. Before, it took the least used account, so an account half used whose week reset in three hours waited while a fresh one was spent. Below its threshold, a group's managed sessions also move to one of the group's own accounts whose week resets within a day with at least 10 % free, when that account's quota expires at least twice as fast as the current one's; the decision reads *Another account has unused quota that resets within a day* and the switch is journalled as `switched_expiring`. The ordinary Claude Code login never moves before its threshold.
+- Moving an account into a group no longer takes along the accounts that group only shares with other groups (SB-594). Before, `project edit --move-accounts`, `accounts move` and the window's move made every shared account the group's own, and taking one out afterwards sent it to the default group.
+- Deleting a group removes its automatic switching, and a switching rule left behind by an earlier deleted group is removed by the next background pass (SB-595), so the monitor no longer reports *Current account unavailable* for a group that is gone.
+
 ## 0.7.125
 
 - The Sessions page hands sessions to Fabric (SB-580, Fabric's `fabric-session-links/1`): *New session…* opens Fabric's launch in a group's repository, *Open in Fabric* asks Fabric to continue a Claude Code session there, *Open* shows a session in Fabric, and *Open terminal* opens a shell in a session's folder, here or on another machine over ssh. Fabric asks you before it starts or moves anything; Switchboard never starts a session in Fabric itself.

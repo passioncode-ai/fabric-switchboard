@@ -2,6 +2,44 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-21: SB-581 `sessions --rows` waits 120 s at the control client, on branch `sb-581-rows-timeout`
+
+- **Asked.** Fabric task d37752e6 (owner's order 57445717, board e674295f: open and start a session from the Sessions page through Fabric, and stop `sessions --rows` breaking off), left open when its last run lapsed on 2026-11-20. Its first part, SB-580, shipped in 0.7.125 (#879, #880; entry of 2026-11-19 below). What was left of "breaking off": Fabric's board request 7c726479 (MacBook, 2026-11-20 04:45 UTC, load 152): MCP `switchboard_sessions {rows: true}` answered `Control request timed out`, filed as SB-581 in PR #881 and not fixed.
+- **Done.** `control::limit_secs` puts `SessionRows` and `SessionRowsEverywhere` in the 120 s arm with `SessionTree`, which they are built on (they fell to the default 30 s); test `control::tests::session_rows_wait_as_long_as_the_tree_they_are_built_on`; the [CONTRACTS](CONTRACTS.md) paragraph on `Operation::SessionRows`; CHANGELOG *Unreleased*; backlog rows SB-581 (done in branch) and SB-582 (open) land with it (PR #881, main merged in).
+- **Not changed.** Fabric's own `execFile` deadline for `sessions --rows` (10 s, Fabric's file) is Fabric's; SB-580's shared read keeps side-by-side calls inside it. SB-582 (`counts.live`) and the `recovery` follow-up of SB-580 stay open rows.
+- **Checks run.** `./scripts/check.sh` on the Mac Studio on the branch head (EXIT line in PR #881); `python3 scripts/check_docs.py`. No Rust was built on the MacBook.
+
+**Exact next task.** After PR #881 merges: the change ships with the next release (0.7.127); then on the MacBook measure `control_slow session_rows` in the owner log over a day and tell Fabric on thread 3ca40854 the version. Then the entry below's next task (SB-596), and SB-582.
+
+## 2026-11-20: groups by organization on the operator's MacBook; SB-587 quota that expires first, SB-594, SB-595, on branch `sb-587-burn-expiring`
+
+- **Asked.** The operator in a session on this repository (2026-11-20): reorganize the MacBook's groups by organization (folders under `~/DATA` with their worktrees), spread the subscriptions so each group has about the same number of active ones and the rest sit in the default group, groups fall back to the default group, rotation burns first the quota that resets first, logged; bug-fix waves; release; check every Studio has a working subscription.
+- **Done on the machine (no repository change).** Organization Nicegram and group `nicegram` made; group `passioncode` bound to PassionCode.ai (it had no organization, which is why its folder did not link); 171 repositories placed with `project move-root` (sshlg 79 folders, passioncode 139, nicegram 50, appvillis 15, esim-plus 8, privateclawd-clawdbot 5; third-party ones stay in default); 4 active subscriptions per group (Appvillis 5 of appvillis.com), exhausted ones and `claude39` (the ordinary Claude Code's) in default; every group fed from default (priority passioncode, sshlg, appvillis, nicegram, esim-plus, privateclawd). Backup `switchboard-backup-1795204344-…` before. esim-studio was `unreachable` since the Studio's restart at 04:01: its Lima VM now runs under macOS user `esim` with a new host key; the key was replaced (backup `~/.ssh/known_hosts.bak-2026-11-20-esim`) and Needs attention is empty. Every remote machine has at least one subscription with room (read live).
+- **Code.** SB-587 (DEC-0038): `burn_urgency` and `spend_order` rank candidates by how fast their weekly room expires; below its threshold a managed group moves to an account expiring within 24 h (`expiring_headroom`, `switched_expiring`). SB-594: a move into a group no longer takes the group's shares (found live: `billing@` went to eSIM Plus, then default). SB-595: a deleted group's switching goes with it. SB-596 (open): `move-root` leaves clones elsewhere and earlier-declined clones behind.
+- **Review.** Three rounds by an independent reader: round 1 found three defects (failover near a five-hour limit, a lost default-group loan, a lost route on a share), round 2 one (the CLI's account could be moved into a sharing group), round 3 none. A nested-`execute` stack overflow in the shares test was fixed by running `ProjectEdit` in its own future.
+- **Checks run.** `./scripts/check.sh` on the Mac Studio on the branch head (see the PR); `python3 scripts/check_docs.py`.
+
+**Exact next task.** After the PR merges: release 0.7.126 (`scripts/release_bump.py 0.7.126`, release PR, tag), then `switchboard update` on esim-studio (a .deb at 0.7.117, needs `sudo apt`), then SB-596.
+
+## 2026-11-20: no Rust builds on the operator's MacBook, on branch `sb-no-local-rust`
+
+- **Asked.** Project Observatory's board request `8c30246e` (thread `9d9ddfb2`): on 2026-11-20 between 18:29 and 18:35 UTC a Switchboard session ran cold `cargo check`, `clippy` and `test` in a worktree on the operator's MacBook; `target/` grew to 3.6 GB, Fabric stopped its database at 0.8 GB free and `cargo test` failed with `No space left on device`. A `cargo build` from this repository sat beside the outage of 2026-11-19 21:04 too. Older entries below said builds run on the Mac Studio only, but the rule lived in no file an agent reads first, and several entries record `cargo xwin check` "on this MacBook".
+- **Done.** [AGENTS.md](../AGENTS.md) *Local rules* now says it: on the MacBook no `cargo` command that compiles (`xwin check` included), no `./scripts/check.sh`, no `npm run app:build`; push the branch, build and test in an own worktree on the Mac Studio (`ssh studio-sshlg`), quote its EXIT in the pull request. Editing, `git`, `cargo fmt` and scripts that compile nothing stay local.
+- **Decision.** The Studio route, not a shared warm `CARGO_TARGET_DIR` on the MacBook: a warm target still holds gigabytes on a disk that runs a few GB from full, and the Studio already runs every gate (every entry below). Observatory's disk guard refuses new `cargo` builds below 8 GB free there; the rule holds above it too.
+- **Checks.** `python3 scripts/check_docs.py` (links). No Rust built: the change is two documents.
+
+**Exact next task.** Unchanged: the entry below.
+
+## 2026-11-20: the window and fleet plan's state, waves 4 and 5 carried by the target-state plan, on branch `wf-plan-state`
+
+- **Asked.** Fabric task 79351a43 (the operator's window review of 2026-11-14: spec, modules, waves, releases), left open when its last run lapsed on 2026-11-19.
+- **Found.** Waves 1 to 3 released (0.7.80, 0.7.82, 0.7.83, 0.7.84, 0.7.103). The open parts, WF-9 (SB-371), WF-10.2 and 10.3 (SB-372), WF-12 (SB-374), are already placed in the [target-state plan](plans/2026-11-17-target-state/README.md): W2 *Devices of an organization* names the Machines page and the end-to-end organization walk; 04 §8 names 10.2 and 10.3 as a gap. No branch or worktree held work on them.
+- **Done.** A *State* section in the [window and fleet plan](plans/2026-11-14-window-and-fleet/README.md#state-2026-11-20) with each wave's evidence and where waves 4 and 5 are carried; the state column of SB-371, SB-372 and SB-374 in the [backlog](evidence/backlog.md) says the same.
+- **Decision.** The task's own deliverable (spec, modules, waves 1 to 3 released) is finished; building waves 4 and 5 under this task would run a second plan beside the target-state order and collide with the open machine PRs (#867, #870, #872, #876, #877). The Fabric task goes to review with this note; the operator decides whether to close it.
+- **Checks run.** `python3 scripts/check_docs.py`, `python3 docs/ux/lint.py`, `git diff --check` (docs only; no code changed, so the Rust and UI steps were not rerun).
+
+**Exact next task.** Unchanged: the entry below.
+
 ## 2026-11-19: SB-580 sessions handed to Fabric (`fabric-session-links/1`), `sessions --rows` shared under load, on branch `feat/sb-session-links`
 
 - **Asked.** Owner's order 57445717 (thread 3ca40854, 2026-11-19 ~21:20 Warsaw, via Fabric's CEO), Switchboard's part e674295f; Fabric's contract `fabric-session-links/1` in b37c7dce.

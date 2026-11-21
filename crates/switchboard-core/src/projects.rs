@@ -1359,6 +1359,80 @@ impl Store {
         self.changed();
         Ok(true)
     }
+    /// SB-594: moves these accounts' home into the group of `pool`, one publish, and nothing
+    /// else: the group's shares, the default group's loans and the routes on them stay as they
+    /// are, which a moving save (`save_project_with` with `share: false`) cannot promise, since it
+    /// rebuilds the group's whole set. An account already at home there is skipped; an unknown
+    /// one, one on another machine, or one whose sign-in the group holds in another copy refuses
+    /// the whole move. Placing an account confirms an organization its address suggests, as a
+    /// save does (SB-285). Answers how many moved.
+    pub fn move_into(&self, pool: &str, ids: &[String]) -> Result<usize, String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let organizations = candidate
+            .projects
+            .iter()
+            .find(|p| p.pool == pool)
+            .ok_or("Project not found.")?
+            .organizations
+            .clone();
+        let mut moved: Vec<String> = Vec::new();
+        for id in ids {
+            let account = candidate
+                .accounts
+                .iter()
+                .find(|a| &a.id == id)
+                .cloned()
+                .ok_or("Account not found")?;
+            if crate::machines::is_machine_pool(&account.pool) {
+                return Err(crate::machines::ON_ANOTHER_MACHINE.into());
+            }
+            if account.pool == pool {
+                continue;
+            }
+            let clash = candidate.accounts.iter().any(|b| {
+                b.id != account.id
+                    && b.provider == account.provider
+                    && b.pool == pool
+                    && b.external_identity
+                        .as_ref()
+                        .zip(account.external_identity.as_ref())
+                        .is_some_and(|(x, y)| x.matches(y))
+            });
+            if clash {
+                return Err(
+                    "This account is already saved in that pool. Remove the other copy first."
+                        .into(),
+                );
+            }
+            let old = format!("{}:{}", account.provider.as_str(), account.pool);
+            if let Some(a) = candidate.accounts.iter_mut().find(|a| &a.id == id) {
+                a.pool = pool.to_owned();
+            }
+            // A group that shared it and is now its home holds it as its own.
+            for p in candidate.projects.iter_mut().filter(|p| p.pool == pool) {
+                p.shared_accounts.retain(|s| s != id);
+            }
+            candidate.default_lent.retain(|s| s != id);
+            // The route it held in its old pool no longer applies there.
+            if candidate.routes.get(&old) == Some(id) {
+                candidate.routes.remove(&old);
+            }
+            moved.push(id.clone());
+        }
+        if moved.is_empty() {
+            return Ok(0);
+        }
+        for id in &moved {
+            candidate.confirm_placement(id, pool, &organizations);
+        }
+        stale_shares_prune(&mut candidate);
+        shared_routes_prune(&mut candidate);
+        append_event(&mut candidate, "project", None, "updated");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(moved.len())
+    }
     /// SB-282: shares these accounts with the group of `pool` from a backup, where the group
     /// holds no share yet; an account at home there, or unknown, is left out.
     pub fn restore_shared_accounts(&self, pool: &str, ids: &[String]) -> Result<(), String> {
@@ -1618,6 +1692,9 @@ impl Store {
         }
         let project = candidate.projects.remove(index);
         crate::chains::prune(&mut candidate);
+        // SB-595: its automatic switching goes with it; left, it read `current_unavailable` in
+        // every pass and a later group of the same id inherited its cooldown.
+        candidate.policies.retain(|p| p.pool != pool);
         let leaving: Vec<String> = candidate
             .accounts
             .iter()
