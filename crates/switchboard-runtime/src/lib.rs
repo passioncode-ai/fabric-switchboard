@@ -11361,8 +11361,11 @@ mod owner_tests {
         held.phase("first");
         std::thread::sleep(std::time::Duration::from_millis(40));
         let fields = held.fields();
+        // Counted from the hold's start, the rest would be at least the first phase and its own
+        // 40 ms. Compared with the first phase as measured, not with 200 ms: on a machine at
+        // load 90 the 40 ms sleep read 238 ms beside a first phase of 375 ms (2026-11-21).
         assert!(
-            fields[1].1 < 200,
+            fields[1].1 < fields[0].1,
             "rest counts from the last mark: {fields:?}"
         );
         assert_eq!(
