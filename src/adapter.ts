@@ -219,6 +219,11 @@ const safeErrors = new Set([
   'That machine answered the challenge with a signature that does not hold, so nothing was sent. Check what that ssh name reaches.',
   // SB-560: one machine's key holds at most 16 seats here (answered to that machine by ssh-serve).
   'The calling machine already delegated 16 seats to this computer. Ask it to call one back before delegating another.',
+  // SB-560 part 2: a called-back seat, a recall that brought another account, force on the operator's words.
+  "This seat was called back by the machine that delegated it, so it stays off here until that machine removes it or gives it back.",
+  "The other machine gave back a sign-in of another account, so it was not kept. The account stays on that machine; sign in to it again here if that machine cannot be trusted.",
+  "The provider did not say whose sign-in came back, so it was not kept. The account stays on that machine; call it back again later.",
+  "Using here an account another machine holds is the operator's call. Pass the operator's own words (--operator-said with --said-at and --said-in, or decision in MCP), or do it in the window.",
   // SB-355: machine groups.
   'This account works on another machine. Call it back to use it in a group here.',
   'A machine group takes accounts only by a move to that machine.',

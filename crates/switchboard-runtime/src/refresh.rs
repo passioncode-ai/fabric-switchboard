@@ -272,6 +272,16 @@ impl RefreshState {
             std::thread::sleep(Duration::from_millis(50));
         }
     }
+    /// SB-560 (M2-01): whose sign-in `access_token` is, as `/api/oauth/profile` answers; None
+    /// when the provider did not answer or named no account.
+    pub(crate) async fn identity_of_access(&self, access_token: &str) -> Option<ExternalIdentity> {
+        let endpoint = self
+            .profile_endpoint
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        profile(&endpoint, access_token).await
+    }
     #[cfg(test)]
     pub(crate) fn set_profile_endpoint(&self, endpoint: String) {
         *self.profile_endpoint.lock().unwrap() = endpoint;

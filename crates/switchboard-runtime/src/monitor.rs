@@ -397,6 +397,9 @@ impl Pass {
         // nothing at all without a machine group.
         if let Ok(snapshot) = runtime.store.snapshot() {
             crate::remote_usage::tick(&runtime.root, &snapshot, time);
+            // SB-560 (M3-03): a copy there a call back could not remove is tried again every 15
+            // minutes, on a thread of its own; nothing is read while none waits.
+            crate::remote_removals::tick(&runtime.root, time);
             // SB-403 (DEC-0025): a seat another machine delegated here whose lease ran out, once
             // this owner ran a full read interval past it, is switched off and its home cleaned;
             // its credential is kept 30 days for the sender's call back, then removed (a vault

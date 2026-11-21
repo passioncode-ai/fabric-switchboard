@@ -30,6 +30,7 @@ switchboard accounts add --provider claude --kind api-key --label Work --pool wo
 switchboard accounts select ACCOUNT_UUID --provider claude --pool work
 switchboard accounts update ACCOUNT_UUID --label Work                  # or --enabled false, or both
 switchboard accounts update ACCOUNT_UUID --elsewhere true              # used on another machine: never renewed, rotated to or switched to here (SB-175); false: used here again
+switchboard --operator-said "…" --said-at 2026-11-19T12:00:00Z --said-in <session> accounts update ACCOUNT_UUID --enabled true --force   # SB-560: past the moved-away guard only on the operator's words
 switchboard accounts update ACCOUNT_UUID --location "Mac Studio, user alex"   # SB-284: says where it works (and marks it used elsewhere); "" clears it
 switchboard accounts assign ACCOUNT_UUID --to "Frame Agent on Studio"   # SB-322: an agent signs in with it now: usage still checked, never selected or switched to by itself; clears --elsewhere
 switchboard accounts unassign ACCOUNT_UUID                          # SB-322: take it back

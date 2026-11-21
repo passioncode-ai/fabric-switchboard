@@ -213,7 +213,8 @@ impl Decision {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Loosened {
     pub at: i64,
-    /// `ceiling_set`, `ceiling_answered`, `group_removed`, `key_set`, `key_removed`.
+    /// `ceiling_set`, `ceiling_answered`, `group_removed`, `key_set`, `key_removed`, and (SB-560)
+    /// `account_forced`, `account_given_forced`.
     pub action: String,
     pub decision: Decision,
 }
@@ -252,6 +253,8 @@ fn action_code(action: &str) -> &'static str {
         "group_removed" => "group_removed",
         "key_set" => "key_set",
         "key_removed" => "key_removed",
+        "account_forced" => "account_forced",
+        "account_given_forced" => "account_given_forced",
         _ => "other",
     }
 }

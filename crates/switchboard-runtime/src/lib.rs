@@ -66,6 +66,7 @@ pub mod recovery;
 mod refresh;
 pub mod remote_check;
 pub mod remote_dispatch;
+pub mod remote_removals;
 pub mod remote_usage;
 pub mod restarts;
 pub mod resumable;
@@ -4782,8 +4783,14 @@ pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str>
     if let Operation::OnOperatorsWord { inner, .. } = operation {
         return match (operator_action(inner), seat_operation(inner)) {
             (None, false) => Some(spend::NOT_A_LOOSENING),
+            _ if forced(inner) => None,
             _ => window_only_refusal(inner),
         };
+    }
+    // SB-560 (M3-04): using here an account another machine holds, past the moved-away guard, is
+    // the window's or the operator's word, never a bare flag.
+    if forced(operation) {
+        return Some(account_send::FORCE_NEEDS_WORD);
     }
     matches!(
         operation,
@@ -4806,9 +4813,18 @@ pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str>
     )
     .then_some(spend::WINDOW_ONLY)
 }
+/// SB-560 (M3-04): an update or a gift that passes the moved-away guard with `force`.
+fn forced(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Update { force: true, .. } | Operation::Assign { force: true, .. }
+    )
+}
 /// SB-299: what `spend.json` calls a loosening `OnOperatorsWord` may wrap; none for anything else.
 fn operator_action(operation: &Operation) -> Option<&'static str> {
     Some(match operation {
+        Operation::Update { force: true, .. } => "account_forced",
+        Operation::Assign { force: true, .. } => "account_given_forced",
         Operation::SetCeiling { .. } => "ceiling_set",
         Operation::AnswerCeiling { .. } => "ceiling_answered",
         Operation::RemoveProject { .. } => "group_removed",
@@ -5209,6 +5225,45 @@ fn continue_default(
     }
 }
 /// SB-377: the provider of a saved account, if it is still saved.
+/// SB-560: the sentence a call back that kept nothing answers: why the sign-in brought was not
+/// this account's, else that the provider did not answer it here.
+fn recall_refused(identity: Result<(), &'static str>) -> Result<Value, String> {
+    match identity {
+        Err(reason) => Err(reason.into()),
+        Ok(()) => Err(account_send::NOT_RETURNED.into()),
+    }
+}
+/// SB-560 (M2-01): whether the sign-in stored for `id` now (brought back by a call back) is this
+/// account's, as the provider names it.
+async fn recall_identity(
+    store: &Store,
+    id: &str,
+    refresh_state: &refresh::RefreshState,
+) -> Result<(), &'static str> {
+    let snapshot = store
+        .snapshot()
+        .map_err(|_| account_send::RECALL_IDENTITY_UNKNOWN)?;
+    let account = snapshot
+        .accounts
+        .iter()
+        .find(|a| a.id == id)
+        .ok_or(account_send::RECALL_IDENTITY_UNKNOWN)?;
+    let credential = store
+        .stored_credential(id)
+        .map_err(|_| account_send::RECALL_IDENTITY_UNKNOWN)?;
+    let returned = match account.provider {
+        Provider::Claude => refresh_state
+            .identity_of_access(&credential.access_token)
+            .await
+            .and_then(|i| i.account_id),
+        Provider::Codex => credential.account_id.clone(),
+    };
+    let expected = account
+        .external_identity
+        .as_ref()
+        .and_then(|i| i.account_id.as_deref());
+    account_send::recalled_identity(expected, returned.as_deref())
+}
 fn local_provider(store: &Store, id: &str) -> Option<Provider> {
     store
         .snapshot()
@@ -5884,9 +5939,14 @@ async fn execute(
         } => {
             // SB-315: a sign-in moved to another machine and not called back has its holder there;
             // using it here too would renew it from two places.
+            let snapshot = store.snapshot()?;
             let clearing = elsewhere == Some(false)
-                || (enabled == Some(true) && store.snapshot()?.elsewhere.contains_key(&id));
-            if clearing && !force && seats::outstanding(root, &id).is_some() {
+                || (enabled == Some(true) && snapshot.elsewhere.contains_key(&id));
+            // SB-560 (M3-04): the store's record of a seat delegated there counts too, so the
+            // guard holds after `seats.jsonl` rotated or a backup was restored.
+            let moved =
+                seats::outstanding(root, &id).is_some() || snapshot.delegated_out.contains_key(&id);
+            if clearing && !force && moved {
                 return Err(account_send::MOVED_AWAY.into());
             }
             if label.is_some() || enabled.is_some() || (elsewhere.is_none() && location.is_none()) {
@@ -5936,10 +5996,12 @@ async fn execute(
             // SB-315: giving away an account a move sent to another machine would renew it from
             // two places, as using it here would.
             let giving = to.as_deref().is_some_and(|t| !t.trim().is_empty());
+            let snapshot = store.snapshot()?;
             if giving
                 && !force
-                && store.snapshot()?.elsewhere.contains_key(&id)
-                && seats::outstanding(root, &id).is_some()
+                && snapshot.elsewhere.contains_key(&id)
+                && (seats::outstanding(root, &id).is_some()
+                    || snapshot.delegated_out.contains_key(&id))
             {
                 return Err(account_send::MOVED_AWAY.into());
             }
@@ -7805,6 +7867,9 @@ async fn execute(
                 .or_else(|| out.map(|o| o.remote_id))
                 .or_else(|| grant.and_then(|g| g.remote_account))
                 .ok_or(account_send::NO_REMOTE_ID)?;
+            // SB-560 (M2-01): the sign-in held here before the call back, put back when the one
+            // brought is another account's.
+            let held_before = store.stored_credential(&id).ok();
             let taken = {
                 let (store, id, from, program, data_dir) = (
                     store.clone(),
@@ -7890,9 +7955,57 @@ async fn execute(
                     }
                     None => false,
                 };
+            // SB-560 (M2-01): the sign-in brought back is kept only when the provider names its
+            // account and that account is this one: a Claude sign-in by `/api/oauth/profile`, a
+            // Codex one by the account its tokens name, whose usage answer above the provider gave
+            // for that account.
+            let identity = if answered && !kept_here && !taken.lease_ended {
+                // Boxed: `execute`'s own future stays the size it was (a test thread has 2 MiB).
+                Box::pin(recall_identity(&store, &id, refresh_state)).await
+            } else {
+                Ok(())
+            };
+            // The check here renewed the sign-in it brought, so the copy there is spent: when the
+            // provider then named no account (it did not answer), giving it back would leave no
+            // working copy anywhere. It is kept and said; another account's sign-in never is.
+            let renewed = store
+                .stored_credential(&id)
+                .ok()
+                .and_then(|c| c.refresh_token)
+                != taken.token;
+            let identity = match identity {
+                Err(account_send::RECALL_IDENTITY_UNKNOWN) if renewed => {
+                    oplog::event(
+                        "recall_identity",
+                        &[("result", oplog::Field::Code("unverified"))],
+                    );
+                    Ok(())
+                }
+                other => other,
+            };
+            if identity.is_err() {
+                if let (Some(before), Some(provider)) =
+                    (held_before.as_ref(), local_provider(&store, &id))
+                {
+                    let brought = store
+                        .stored_credential(&id)
+                        .ok()
+                        .and_then(|c| c.refresh_token);
+                    if let Some(brought) = brought {
+                        let _ = store.adopt_refreshed(provider, &brought, before);
+                    }
+                }
+                oplog::event(
+                    "recall_identity",
+                    &[("result", oplog::Field::Code("refused"))],
+                );
+            }
+            let refused = identity.is_err() || !answered;
             // SB-403: a delegated seat whose lease ran out there: nothing is there to give back
             // to. Its row there is removed, and the account stays here to be signed in again.
             if !answered && taken.lease_ended {
+                // The program there, for a removal tried again (the tuple below shadows it).
+                let program_there = program.clone();
                 let (machine, program, data_dir, remote, key) = (
                     from.clone(),
                     program.clone(),
@@ -7900,7 +8013,7 @@ async fn execute(
                     taken.remote_id.clone(),
                     taken.sender_key.clone(),
                 );
-                let _ = blocking::run(move || {
+                let finished = blocking::run(move || {
                     account_send::recall_finish(
                         &machine,
                         &account_send::Taken {
@@ -7917,6 +8030,23 @@ async fn execute(
                         &account_send::ssh_runner,
                     )
                 });
+                // SB-560 (M3-03): a row there that could not be removed is tried again.
+                if finished["proved"] != true {
+                    remote_removals::add(
+                        root,
+                        remote_removals::Pending {
+                            account: id.clone(),
+                            machine: from.clone(),
+                            remote_id: taken.remote_id.clone(),
+                            sender_key: taken.sender_key.clone(),
+                            program: program_there,
+                            data_dir: remote_data_dir.clone(),
+                            since: monitor::now(),
+                            tries: 0,
+                            last_try: None,
+                        },
+                    );
+                }
                 let pool = local_pool(&store, &id);
                 record_seat(
                     root,
@@ -7931,7 +8061,7 @@ async fn execute(
                 );
                 return Err(account_send::LEASE_ENDED_SIGN_IN.into());
             }
-            if !answered {
+            if refused {
                 account_send::recall_undo(
                     &store,
                     &id,
@@ -7947,7 +8077,7 @@ async fn execute(
                 if let Some(out) = out_before {
                     let _ = store.record_delegated_out(&id, out.clone());
                     if !on_machine {
-                        return Err(account_send::NOT_RETURNED.into());
+                        return recall_refused(identity);
                     }
                 }
                 // SB-355: it went back to that machine, so back to its group too.
@@ -7962,7 +8092,7 @@ async fn execute(
                     );
                     store.join_machine(&id, &at, monitor::now())
                 });
-                return Err(account_send::NOT_RETURNED.into());
+                return recall_refused(identity);
             }
             let pool = store
                 .snapshot()?
@@ -8009,6 +8139,25 @@ async fn execute(
                 None,
             );
             let mut finished = finished;
+            // SB-560 (M3-03): a copy there that could not be removed is tried again in the
+            // background until it is gone (it stays off there meanwhile).
+            if finished["proved"] != true {
+                remote_removals::add(
+                    root,
+                    remote_removals::Pending {
+                        account: id.clone(),
+                        machine: from.clone(),
+                        remote_id: taken.remote_id.clone(),
+                        sender_key: taken.sender_key.clone(),
+                        program: program.clone(),
+                        data_dir: remote_data_dir.clone(),
+                        since: monitor::now(),
+                        tries: 0,
+                        last_try: None,
+                    },
+                );
+                finished["removal_pending"] = json!(true);
+            }
             // SB-355: an account that was in a group here before machine groups goes where it was
             // asked to; one that was on a machine came home there already.
             let mut pool = pool;
@@ -15599,6 +15748,83 @@ mod operators_word_tests {
             usd,
             by: spend::Surface::Cli,
         }
+    }
+
+    /// SB-560 (M3-04): `force` past the moved-away guard runs from the CLI or MCP only on the
+    /// operator's words, and the guard also reads the store's record of a seat delegated there.
+    #[tokio::test]
+    async fn force_over_the_moved_away_guard_needs_the_operators_words() {
+        let update = |force| Operation::Update {
+            id: "a".into(),
+            label: None,
+            enabled: Some(true),
+            elsewhere: None,
+            location: None,
+            force,
+        };
+        assert_eq!(
+            window_only_refusal(&update(true)),
+            Some(account_send::FORCE_NEEDS_WORD)
+        );
+        let give = Operation::Assign {
+            id: "a".into(),
+            to: Some("agent".into()),
+            force: true,
+        };
+        assert_eq!(
+            window_only_refusal(&give),
+            Some(account_send::FORCE_NEEDS_WORD)
+        );
+        assert_eq!(window_only_refusal(&update(false)), None);
+        let worded = Operation::OnOperatorsWord {
+            decision: words(),
+            inner: Box::new(update(true)),
+        };
+        assert_eq!(window_only_refusal(&worded), None);
+        assert_eq!(operator_action(&update(true)), Some("account_forced"));
+
+        let root = tempfile::tempdir().unwrap();
+        let runtime =
+            fixtures::runtime(root.path(), fixtures::signed_out, fixtures::activates).await;
+        let id = fixtures::save(&runtime.store, "synthetic-delegated", "default").id;
+        runtime
+            .store
+            .mark_elsewhere_at(&id, true, 5, Some("teammate"))
+            .unwrap();
+        runtime
+            .store
+            .record_delegated_out(
+                &id,
+                switchboard_core::DelegatedOut {
+                    remote_id: "0a1b2c3d".into(),
+                    lease_hours: 48,
+                    sender_key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".into(),
+                    sent: None,
+                },
+            )
+            .unwrap();
+        // No `seats.jsonl` line (rotated, or a restore): the store's record still guards it.
+        let enable = Operation::Update {
+            id: id.clone(),
+            label: None,
+            enabled: Some(true),
+            elsewhere: None,
+            location: None,
+            force: false,
+        };
+        assert_eq!(
+            runtime.execute(enable).await.unwrap_err(),
+            account_send::MOVED_AWAY
+        );
+        let give = Operation::Assign {
+            id: id.clone(),
+            to: Some("agent".into()),
+            force: false,
+        };
+        assert_eq!(
+            runtime.execute(give).await.unwrap_err(),
+            account_send::MOVED_AWAY
+        );
     }
 
     /// SB-299: an agent raises or clears a ceiling only with the operator's words, which stay in
