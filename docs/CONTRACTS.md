@@ -3779,6 +3779,9 @@ the answer `{rows, counts, degraded, observed_at}`.
 
 - `Operation::SessionRows` (CLI `sessions --rows`, MCP `switchboard_sessions` with `rows`). With
   `--target` the other machine's Switchboard answers it (the CLI's `there`).
+  The control client waits 120 s for it and for `SessionRowsEverywhere`, as for `SessionTree`,
+  which the rows are built on (SB-581: with 30 s the read answered `Control request timed out`
+  at load 152 on 2026-11-20; test `control::tests::session_rows_wait_as_long_as_the_tree_they_are_built_on`).
 - `Operation::SessionRowsEverywhere` (the window's `session_rows`): this computer's rows and every
   machine `targets` knows, read at once over ssh (`--json sessions --rows`, 20 s each,
   `machines::LIVE_SECONDS`), each `{machine, status, rows?, counts?, read_at}` where

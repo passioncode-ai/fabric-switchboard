@@ -520,9 +520,13 @@ pub(crate) fn limit_secs(operation: &Operation) -> u64 {
         Operation::Machines { live: true }
         | Operation::MachinesAdopt { .. }
         | Operation::MachinePlace { .. } => 120,
-        // SB-378: the process table and every live session's transcripts.
+        // SB-378: the process table and every live session's transcripts. SB-581: the rows are
+        // built on the same tree (and, everywhere, on a 20 s ssh read per machine), so they wait
+        // as long: at load 152 a 30 s client gave up on rows the owner went on to answer.
         Operation::Capacity { .. }
         | Operation::SessionTree
+        | Operation::SessionRows
+        | Operation::SessionRowsEverywhere
         | Operation::Duty { .. }
         | Operation::SessionCloseCopy { .. } => 120,
         // SB-336: a group change reads its repositories' Git files and rewrites their folder
@@ -771,6 +775,15 @@ mod tests {
             crate::launch::UNCLAIMED_TTL
                 > std::time::Duration::from_secs(limit_secs(&wrapped) + 60)
         );
+    }
+    /// SB-581: `sessions --rows` is built on the session tree, so its caller waits as long as
+    /// the tree's does; with the default 30 s it timed out on a loaded machine (2026-11-20).
+    #[test]
+    fn session_rows_wait_as_long_as_the_tree_they_are_built_on() {
+        let tree = limit_secs(&Operation::SessionTree);
+        assert_eq!(tree, 120);
+        assert_eq!(limit_secs(&Operation::SessionRows), tree);
+        assert_eq!(limit_secs(&Operation::SessionRowsEverywhere), tree);
     }
     #[test]
     fn an_operation_kind_is_its_tag_and_never_its_arguments() {

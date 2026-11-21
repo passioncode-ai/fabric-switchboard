@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-21: SB-581 `sessions --rows` waits 120 s at the control client, on branch `sb-581-rows-timeout`
+
+- **Asked.** Fabric task d37752e6 (owner's order 57445717, board e674295f: open and start a session from the Sessions page through Fabric, and stop `sessions --rows` breaking off), left open when its last run lapsed on 2026-11-20. Its first part, SB-580, shipped in 0.7.125 (#879, #880; entry of 2026-11-19 below). What was left of "breaking off": Fabric's board request 7c726479 (MacBook, 2026-11-20 04:45 UTC, load 152): MCP `switchboard_sessions {rows: true}` answered `Control request timed out`, filed as SB-581 in PR #881 and not fixed.
+- **Done.** `control::limit_secs` puts `SessionRows` and `SessionRowsEverywhere` in the 120 s arm with `SessionTree`, which they are built on (they fell to the default 30 s); test `control::tests::session_rows_wait_as_long_as_the_tree_they_are_built_on`; the [CONTRACTS](CONTRACTS.md) paragraph on `Operation::SessionRows`; CHANGELOG *Unreleased*; backlog rows SB-581 (done in branch) and SB-582 (open) land with it (PR #881, main merged in).
+- **Adjacent.** The gate's first run on the Studio (load 90) failed on `owner_tests::a_long_hold_names_the_time_after_its_last_mark`, a test this change does not touch: it required a 40 ms sleep to read under 200 ms and it read 238 ms. It now compares the rest with the first phase as measured (375 ms in that run), which still fails when the rest is counted from the hold's start.
+- **Not changed.** Fabric's own `execFile` deadline for `sessions --rows` (10 s, Fabric's file) is Fabric's; SB-580's shared read keeps side-by-side calls inside it. SB-582 (`counts.live`) and the `recovery` follow-up of SB-580 stay open rows.
+- **Checks run.** `./scripts/check.sh` on the Mac Studio on the branch head (EXIT line in PR #881); `python3 scripts/check_docs.py`. No Rust was built on the MacBook.
+
+**Exact next task.** After PR #881 merges: the change ships with the next release (0.7.127); then on the MacBook measure `control_slow session_rows` in the owner log over a day and tell Fabric on thread 3ca40854 the version. Then the entry below's next task (SB-596), and SB-582.
+
 ## 2026-11-20: groups by organization on the operator's MacBook; SB-587 quota that expires first, SB-594, SB-595, on branch `sb-587-burn-expiring`
 
 - **Asked.** The operator in a session on this repository (2026-11-20): reorganize the MacBook's groups by organization (folders under `~/DATA` with their worktrees), spread the subscriptions so each group has about the same number of active ones and the rest sit in the default group, groups fall back to the default group, rotation burns first the quota that resets first, logged; bug-fix waves; release; check every Studio has a working subscription.
