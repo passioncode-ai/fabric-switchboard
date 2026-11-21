@@ -1,9 +1,19 @@
 {
   "groups": {
-    "support": ["support agent of product A"],
-    "product": ["PM agent"]
+    "support": [
+      "support agent of product A"
+    ],
+    "product": [
+      "PM agent"
+    ]
   },
   "machines": {
-    "studio-space": ["agent that runs in that space"]
+    "studio-space": [
+      "agent that runs in that space"
+    ]
+  },
+  "tiers": {
+    "product": 1,
+    "support": 2
   }
 }
