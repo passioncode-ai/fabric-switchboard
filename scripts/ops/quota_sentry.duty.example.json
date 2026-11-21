@@ -1,0 +1,9 @@
+{
+  "groups": {
+    "support": ["support agent of product A"],
+    "product": ["PM agent"]
+  },
+  "machines": {
+    "studio-space": ["agent that runs in that space"]
+  }
+}
