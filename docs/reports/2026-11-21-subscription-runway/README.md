@@ -177,3 +177,18 @@ form of this is backlog row SB-623 (a `quota_runway` check in the health report)
   not this one: under the owner's order the shortage at the peak pace falls on the third tier
   first, then on support. One support agent's folder lies in the third-tier group; giving it a
   group of its own is the owner's decision (SB-624 covers the floor).
+
+- **2026-11-21, 15:00 UTC.** The owner asked (14:43 UTC, relayed by the Fabric CEO) for every
+  account's usage no older than a minute, a detector of stuck accounts and a plan of resets
+  with automatic distribution. Measured at 14:54 UTC on the MacBook: of 43 subscription
+  accounts 4 were under a minute old (those carrying traffic, read from response headers), the
+  median was 21 minutes and the oldest 71. The 39 others are read by usage checks, and the
+  provider's budget of two checks a minute holds them to one round in 19.5 minutes at best; the
+  log shows the scheduled checks paced. On the seven remote machines (1 to 3 accounts each) the
+  oldest figure was 9 minutes. **A minute for every account is not reachable inside that
+  budget, and the budget was not gone around.** What was done instead: `scripts/ops/quota_monitor.py`
+  runs every minute, joins this machine's figures with each remote machine's own into one
+  view, counts a window whose reset has passed as empty, asks for one extra refresh a pass
+  (duty tiers first, never an account whose spent week cannot change), signals a sign-in that
+  needs a person, lists the resets ahead and moves an account into a tier 1 or 2 group, or to
+  a machine, that has none with room. The product's part is backlog row SB-626.

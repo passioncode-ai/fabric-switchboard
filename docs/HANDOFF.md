@@ -10,6 +10,8 @@
 - **Not changed.** The machine's ordinary Claude Code sign-in, rotation thresholds, ceilings, the usage mode, the sign-in held on two machines (SB-625).
 - **Checks run.** `python3 -m unittest scripts/test_quota_sentry.py` (13 tests, OK); `python3 scripts/check_docs.py`; `reports.py check` (0 errors); a live `quota_sentry.py check` (13 duty units, none under 12 hours, nothing unread). No Rust changed, so the full gate on the Studio was not run; `scripts/check.sh` gains the step `quota-sentry-tests`, run here on its own.
 
+- **Added the same day (the owner's orders of 14:15Z and 14:43Z).** Tiers: the Fabric release group first, support second, the rest third; feed priorities set to match (the order written in the report's table was replaced, see its Corrections). `scripts/ops/quota_monitor.py` with `scripts/test_quota_monitor.py` (14 tests), the LaunchAgent `me.sshlg.switchboard-quota-monitor` every minute on the operator's MacBook: one view of every account here and on the seven machines (`status.txt` and `status.json` in the sentry's private folder), stuck accounts (a reset that passed, no check for 30 minutes here or 20 there, a refused check) refreshed one a pass and signalled, the plan of resets, and a move into a tier 1 or 2 group, or to a machine, that has no account with room. Measured limit: an idle account cannot be read every minute inside the provider's budget (SB-626).
+
 **Exact next task.** Read the owner's answer to the question about more subscriptions (asked through Fabric on 2026-11-21); then SB-624 (the feed's floor), which lets the hand-made priority order go; then the top entry below.
 
 ## 2026-11-21: SB-581 `sessions --rows` waits 120 s at the control client (merged: #881, `7c696335`)
