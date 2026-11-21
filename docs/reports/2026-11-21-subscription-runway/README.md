@@ -165,3 +165,15 @@ form of this is backlog row SB-623 (a `quota_runway` check in the health report)
   outside Git, in the sentry's private folder, because they name accounts and hosts.
 
 ## Corrections
+
+- **2026-11-21, 14:16 UTC.** The owner set the order after this cut was written (relayed by the
+  Fabric CEO at about 14:15): the group that carries the Fabric release first, the groups with
+  support agents second, everything else third. The feed priorities of row 1 in "What was
+  changed" were set again accordingly: the release group (heavy development group 1 here) is 1,
+  the three support groups and the organization group 2 to 5, heavy development group 2 is 6.
+  Two accounts with room went from the default group into the release group at once (two of its
+  four were at their five-hour limit), and the folder of the session that leads the release,
+  which was in no group, joined it. The simulation table above describes the order of 13:36,
+  not this one: under the owner's order the shortage at the peak pace falls on the third tier
+  first, then on support. One support agent's folder lies in the third-tier group; giving it a
+  group of its own is the owner's decision (SB-624 covers the floor).
